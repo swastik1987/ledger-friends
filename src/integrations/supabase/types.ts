@@ -14,13 +14,282 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      categories: {
+        Row: {
+          color: string
+          created_at: string | null
+          created_by: string | null
+          icon: string
+          id: string
+          is_system: boolean | null
+          name: string
+          tracker_id: string | null
+        }
+        Insert: {
+          color: string
+          created_at?: string | null
+          created_by?: string | null
+          icon: string
+          id?: string
+          is_system?: boolean | null
+          name: string
+          tracker_id?: string | null
+        }
+        Update: {
+          color?: string
+          created_at?: string | null
+          created_by?: string | null
+          icon?: string
+          id?: string
+          is_system?: boolean | null
+          name?: string
+          tracker_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "categories_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "categories_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      category_learning: {
+        Row: {
+          applied_count: number
+          category_id: string
+          id: string
+          merchant_name: string | null
+          normalized_description: string
+          updated_at: string | null
+        }
+        Insert: {
+          applied_count?: number
+          category_id: string
+          id?: string
+          merchant_name?: string | null
+          normalized_description: string
+          updated_at?: string | null
+        }
+        Update: {
+          applied_count?: number
+          category_id?: string
+          id?: string
+          merchant_name?: string | null
+          normalized_description?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_learning_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          category_id: string
+          created_at: string | null
+          created_by_id: string
+          created_by_name: string
+          currency: string
+          date: string
+          description: string
+          id: string
+          is_debit: boolean
+          merchant_name: string | null
+          notes: string | null
+          payment_method: string | null
+          reference_number: string | null
+          source: string
+          tags: string[] | null
+          tracker_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          amount: number
+          category_id: string
+          created_at?: string | null
+          created_by_id: string
+          created_by_name: string
+          currency?: string
+          date: string
+          description: string
+          id?: string
+          is_debit?: boolean
+          merchant_name?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          reference_number?: string | null
+          source: string
+          tags?: string[] | null
+          tracker_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          amount?: number
+          category_id?: string
+          created_at?: string | null
+          created_by_id?: string
+          created_by_name?: string
+          currency?: string
+          date?: string
+          description?: string
+          id?: string
+          is_debit?: boolean
+          merchant_name?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          reference_number?: string | null
+          source?: string
+          tags?: string[] | null
+          tracker_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_created_by_id_fkey"
+            columns: ["created_by_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          full_name: string
+          id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name: string
+          id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name?: string
+          id?: string
+        }
+        Relationships: []
+      }
+      tracker_members: {
+        Row: {
+          id: string
+          joined_at: string | null
+          role: string
+          tracker_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string | null
+          role: string
+          tracker_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string | null
+          role?: string
+          tracker_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tracker_members_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "trackers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tracker_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trackers: {
+        Row: {
+          admin_id: string
+          created_at: string | null
+          currency: string
+          id: string
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          admin_id: string
+          created_at?: string | null
+          currency?: string
+          id?: string
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          admin_id?: string
+          created_at?: string | null
+          currency?: string
+          id?: string
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trackers_admin_id_fkey"
+            columns: ["admin_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_tracker_admin: {
+        Args: { _tracker_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_tracker_member: {
+        Args: { _tracker_id: string; _user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
