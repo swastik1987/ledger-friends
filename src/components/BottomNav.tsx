@@ -47,7 +47,7 @@ export default function BottomNav() {
     if (item.path === '/') return location.pathname === '/';
     if (item.requiresTracker && activeTrackerId) {
       const trackerPath = `/tracker/${activeTrackerId}`;
-      if (item.label === 'Expenses') return location.pathname === trackerPath && (location.search.includes('tab=expenses') || !location.search.includes('tab='));
+      if (item.label === 'Transactions') return location.pathname === trackerPath && (location.search.includes('tab=expenses') || !location.search.includes('tab='));
       if (item.label === 'Dashboard') return location.pathname === trackerPath && location.search.includes('tab=dashboard');
     }
     return false;
