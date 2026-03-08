@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
-  { icon: ClipboardList, label: 'Expenses', path: '/tracker/:id?tab=expenses', requiresTracker: true },
+  { icon: ClipboardList, label: 'Transactions', path: '/tracker/:id?tab=expenses', requiresTracker: true },
   { icon: PlusCircle, label: 'Add', isAdd: true, requiresTracker: true },
   { icon: BarChart2, label: 'Dashboard', path: '/tracker/:id?tab=dashboard', requiresTracker: true },
   { icon: User, label: 'Profile', isProfile: true },
