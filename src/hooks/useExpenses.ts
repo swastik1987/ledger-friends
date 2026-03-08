@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
 import { Expense, Category } from '@/types';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
@@ -42,7 +41,7 @@ export function useCreateExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      toast.success('Expense saved');
+      toast.success('Transaction saved');
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -58,7 +57,7 @@ export function useUpdateExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      toast.success('Expense updated');
+      toast.success('Transaction updated');
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -73,7 +72,7 @@ export function useDeleteExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      toast('🗑️ Expense deleted');
+      toast('🗑️ Transaction deleted');
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -89,7 +88,7 @@ export function useBulkCreateExpenses() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      toast.success(`✅ ${count} expenses imported successfully!`);
+      toast.success(`✅ ${count} transactions imported successfully!`);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -138,7 +137,6 @@ export function useDuplicateCheck(trackerId: string) {
     const normalizedDesc = description.toLowerCase().replace(/[^a-z0-9]/g, '');
     for (const expense of data) {
       const expDesc = expense.description.toLowerCase().replace(/[^a-z0-9]/g, '');
-      // Simple similarity check
       if (normalizedDesc.includes(expDesc) || expDesc.includes(normalizedDesc) || 
           similarity(normalizedDesc, expDesc) > 0.8) {
         return { ...expense, amount: Number(expense.amount), category: expense.category as unknown as Category } as Expense;

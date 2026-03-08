@@ -4,6 +4,7 @@ import { useTracker, useTrackerMembers, useCategories } from '@/hooks/useTracker
 import { useExpenses, useExpenseRealtime } from '@/hooks/useExpenses';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import { useTransactionTypeFilter } from '@/hooks/useTransactionTypeFilter';
 import { ArrowLeft, Upload } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
@@ -27,6 +28,7 @@ export default function TrackerDetail() {
   const { data: members } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
   const { data: expenses, isLoading: expensesLoading } = useExpenses(trackerId!, month);
+  const [typeFilter, setTypeFilter] = useTransactionTypeFilter(trackerId!);
 
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
@@ -37,7 +39,6 @@ export default function TrackerDetail() {
     if (trackerId) setActiveTrackerId(trackerId);
   }, [trackerId, setActiveTrackerId]);
 
-  // Listen for add expense event from bottom nav
   useEffect(() => {
     const handler = () => setShowAddExpense(true);
     window.addEventListener('open-add-expense', handler);
@@ -83,7 +84,7 @@ export default function TrackerDetail() {
       <div className="max-w-lg mx-auto w-full flex-1">
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 bg-background rounded-none border-b border-border">
-            <TabsTrigger value="expenses">Expenses</TabsTrigger>
+            <TabsTrigger value="expenses">Transactions</TabsTrigger>
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
@@ -100,6 +101,8 @@ export default function TrackerDetail() {
               onEditExpense={(id) => { setEditingExpenseId(id); setShowAddExpense(true); }}
               isAdmin={isAdmin}
               userId={user?.id || ''}
+              typeFilter={typeFilter}
+              onTypeFilterChange={setTypeFilter}
             />
           </TabsContent>
 
@@ -110,6 +113,8 @@ export default function TrackerDetail() {
               month={month}
               onMonthChange={setMonth}
               isLoading={expensesLoading}
+              typeFilter={typeFilter}
+              onTypeFilterChange={setTypeFilter}
             />
           </TabsContent>
 
