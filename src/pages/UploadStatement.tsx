@@ -15,7 +15,7 @@ import * as XLSX from 'xlsx';
 const PROCESSING_MESSAGES = [
   '🔓 Unlocking your file securely...',
   '📄 Extracting transactions...',
-  '🧠 AI is categorising your expenses...',
+  '🧠 AI is categorising your transactions...',
   '🔍 Checking for duplicates...',
   '🗑️ Destroying document from memory...',
   '✅ Almost done...',
@@ -83,7 +83,6 @@ export default function UploadStatement() {
         extractedText = pages.join('\n');
       }
 
-      // Call edge function
       const { data, error } = await supabase.functions.invoke('parse-statement', {
         body: { extractedText },
       });
@@ -124,6 +123,9 @@ export default function UploadStatement() {
   };
 
   const approvedDrafts = drafts.filter(d => d.review_status !== 'discarded');
+  const debitCount = approvedDrafts.filter(d => d.is_debit).length;
+  const creditCount = approvedDrafts.filter(d => !d.is_debit).length;
+  const needsReviewCount = drafts.filter(d => d.needs_review && d.review_status === 'pending').length;
 
   const handleSaveAll = async () => {
     if (!user || !profile || !trackerId) return;
@@ -213,8 +215,10 @@ export default function UploadStatement() {
         {step === 4 && (
           <div className="space-y-4">
             <div>
-              <h2 className="text-lg font-semibold">Review Expenses</h2>
-              <p className="text-sm text-muted-foreground">{approvedDrafts.length} ready · {drafts.filter(d => d.needs_review).length} need review</p>
+              <h2 className="text-lg font-semibold">Review Transactions</h2>
+              <p className="text-sm text-muted-foreground">
+                {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''} · {needsReviewCount} need review
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -234,7 +238,7 @@ export default function UploadStatement() {
                         <p className="text-xs text-warning mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
                       )}
                     </div>
-                    <p className={`font-mono text-sm font-semibold ${draft.is_debit ? '' : 'text-accent'}`}>
+                    <p className={`font-mono text-sm font-semibold ${draft.is_debit ? '' : 'text-emerald-600'}`}>
                       {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
                     </p>
                   </div>
@@ -244,7 +248,7 @@ export default function UploadStatement() {
 
             <div className="sticky bottom-4">
               <Button onClick={handleSaveAll} className="w-full h-12 shadow-lg" disabled={bulkCreate.isPending || approvedDrafts.length === 0}>
-                {bulkCreate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Save ${approvedDrafts.length} Expenses to Tracker`}
+                {bulkCreate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Save ${approvedDrafts.length} Transactions to Tracker`}
               </Button>
             </div>
           </div>

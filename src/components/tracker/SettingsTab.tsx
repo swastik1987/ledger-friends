@@ -11,9 +11,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Pencil, Check, X, Trash2, Users, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
 const PRESET_EMOJIS = ['🏷️', '🎯', '🏋️', '🎮', '🐕', '🏡', '☕', '🎵', '📸', '🧹', '🚰', '🎓', '🍕', '🚌', '🏖️', '💳', '🔧', '📺', '🧸', '🎪', '💎', '🧊', '🌿', '🎨', '🍣', '☂️', '🏪', '🎂', '📮', '🔑'];
+
+const STORAGE_KEY = 'expensesync-type-filter';
 
 interface Props {
   trackerId: string;
@@ -42,9 +45,27 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const [newCatIcon, setNewCatIcon] = useState('🏷️');
   const [newCatColor, setNewCatColor] = useState('#FF6B6B');
   const [deleteCountdown, setDeleteCountdown] = useState(0);
+  const [defaultView, setDefaultView] = useState<TransactionFilter>('all');
 
   const customCategories = categories.filter(c => !c.is_system && c.tracker_id === trackerId);
   const adminCount = members.filter(m => m.role === 'admin').length;
+
+  // Load default view preference
+  useEffect(() => {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      setDefaultView(data[trackerId] || 'all');
+    } catch { /* ignore */ }
+  }, [trackerId]);
+
+  const handleDefaultViewChange = (value: TransactionFilter) => {
+    setDefaultView(value);
+    try {
+      const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      data[trackerId] = value;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch { /* ignore */ }
+  };
 
   const handleSaveName = async () => {
     if (nameValue.trim() && nameValue !== tracker.name) {
@@ -55,8 +76,6 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
-    // Search by querying profiles - we can't search by email directly since it's in auth.users
-    // For now show a helpful message
     toast.error('No account found with that email. The user must sign up first.');
     setInviteEmail('');
   };
@@ -111,6 +130,33 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
           </div>
         </div>
       )}
+
+      {/* My Preferences */}
+      <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
+        <h3 className="font-semibold text-sm">My Preferences</h3>
+        <div>
+          <p className="text-sm text-muted-foreground mb-2">Default Transaction View</p>
+          <p className="text-xs text-muted-foreground mb-3">Shows which transactions you see first when opening this tracker.</p>
+          <div className="space-y-2">
+            {([
+              { value: 'all' as TransactionFilter, label: 'All Transactions' },
+              { value: 'debit' as TransactionFilter, label: 'Debits only (Expenses)' },
+              { value: 'credit' as TransactionFilter, label: 'Credits only (Income)' },
+            ]).map(opt => (
+              <label key={opt.value} className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="defaultView"
+                  checked={defaultView === opt.value}
+                  onChange={() => handleDefaultViewChange(opt.value)}
+                  className="h-4 w-4 text-primary"
+                />
+                <span className="text-sm">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* Members */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
@@ -199,7 +245,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Delete "{tracker.name}"?</AlertDialogTitle>
-                <AlertDialogDescription>This will permanently delete all expenses and tracker data. This cannot be undone.</AlertDialogDescription>
+                <AlertDialogDescription>This will permanently delete all transactions and tracker data. This cannot be undone.</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
