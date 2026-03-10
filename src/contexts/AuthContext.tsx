@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { Profile } from '@/types';
@@ -21,56 +21,48 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-async function fetchProfile(userId: string): Promise<Profile | null> {
-  const { data } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-  return data as Profile | null;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    let mounted = true;
+    mounted.current = true;
 
-    // First, get the initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!mounted) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        const p = await fetchProfile(session.user.id);
-        if (mounted) setProfile(p);
-      }
-      if (mounted) setLoading(false);
-    });
-
-    // Then listen for auth changes (sign in, sign out, token refresh)
+    // Set up auth state listener - handles INITIAL_SESSION automatically
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (!mounted) return;
+        console.log('[Auth] event:', event, 'session:', !!session);
+        if (!mounted.current) return;
+
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          const p = await fetchProfile(session.user.id);
-          if (mounted) setProfile(p);
+          // Use setTimeout to avoid Supabase deadlock on initial load
+          setTimeout(async () => {
+            if (!mounted.current) return;
+            const { data } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+            if (mounted.current) {
+              setProfile(data as Profile | null);
+              setLoading(false);
+            }
+          }, 0);
         } else {
           setProfile(null);
+          setLoading(false);
         }
-        if (mounted) setLoading(false);
       }
     );
 
     return () => {
-      mounted = false;
+      mounted.current = false;
       subscription.unsubscribe();
     };
   }, []);
