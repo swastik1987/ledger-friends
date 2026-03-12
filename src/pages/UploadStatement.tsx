@@ -72,7 +72,7 @@ export default function UploadStatement() {
         extractedText = XLSX.utils.sheet_to_csv(ws);
       } else if (ext === 'pdf') {
         const pdfjsLib = await import('pdfjs-dist');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
         const doc = await pdfjsLib.getDocument({ data: arrayBuffer, password: password || undefined }).promise;
         const pages: string[] = [];
         for (let i = 1; i <= doc.numPages; i++) {
