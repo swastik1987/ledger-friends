@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Upload as UploadIcon, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCategories } from '@/hooks/useTrackers';
 import { useBulkCreateExpenses } from '@/hooks/useExpenses';
@@ -145,11 +146,51 @@ export default function UploadStatement() {
     }));
 
     await bulkCreate.mutateAsync(expenses);
+
+    // Record category corrections for learning
+    const corrections = approvedDrafts.filter(d => d.category_changed);
+    if (corrections.length > 0) {
+      for (const d of corrections) {
+        const normalized = d.description.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const { data: existing } = await supabase
+          .from('category_learning')
+          .select('id, applied_count')
+          .eq('normalized_description', normalized)
+          .eq('category_id', d.suggested_category_id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from('category_learning')
+            .update({ applied_count: existing.applied_count + 1, updated_at: new Date().toISOString() })
+            .eq('id', existing.id);
+        } else {
+          await supabase.from('category_learning').insert({
+            normalized_description: normalized,
+            merchant_name: d.merchant_name || null,
+            category_id: d.suggested_category_id,
+            applied_count: 1,
+          });
+        }
+      }
+    }
+
     navigate(`/tracker/${trackerId}?tab=expenses`);
   };
 
   const toggleDraft = (tempId: string) => {
     setDrafts(prev => prev.map(d => d.temp_id === tempId ? { ...d, review_status: d.review_status === 'discarded' ? 'approved' : 'discarded' } : d));
+  };
+
+  const handleCategoryChange = (tempId: string, categoryId: string) => {
+    const cat = categories?.find(c => c.id === categoryId);
+    if (!cat) return;
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      suggested_category_id: categoryId,
+      suggested_category_name: cat.name,
+      category_changed: true,
+    } : d));
   };
 
   return (
@@ -233,7 +274,25 @@ export default function UploadStatement() {
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{draft.description}</p>
-                      <p className="text-xs text-muted-foreground">{draft.date} · {draft.suggested_category_name}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{draft.date} ·</span>
+                        <Select
+                          value={draft.suggested_category_id}
+                          onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
+                          disabled={draft.review_status === 'discarded'}
+                        >
+                          <SelectTrigger className="h-5 w-auto min-w-0 border-none bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-0.5 [&>svg]:h-3 [&>svg]:w-3">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories?.map(cat => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                <span>{cat.icon} {cat.name}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       {draft.needs_review && draft.review_status !== 'discarded' && (
                         <p className="text-xs text-warning mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
                       )}
