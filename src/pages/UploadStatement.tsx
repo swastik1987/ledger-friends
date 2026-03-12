@@ -146,11 +146,51 @@ export default function UploadStatement() {
     }));
 
     await bulkCreate.mutateAsync(expenses);
+
+    // Record category corrections for learning
+    const corrections = approvedDrafts.filter(d => d.category_changed);
+    if (corrections.length > 0) {
+      for (const d of corrections) {
+        const normalized = d.description.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+        const { data: existing } = await supabase
+          .from('category_learning')
+          .select('id, applied_count')
+          .eq('normalized_description', normalized)
+          .eq('category_id', d.suggested_category_id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from('category_learning')
+            .update({ applied_count: existing.applied_count + 1, updated_at: new Date().toISOString() })
+            .eq('id', existing.id);
+        } else {
+          await supabase.from('category_learning').insert({
+            normalized_description: normalized,
+            merchant_name: d.merchant_name || null,
+            category_id: d.suggested_category_id,
+            applied_count: 1,
+          });
+        }
+      }
+    }
+
     navigate(`/tracker/${trackerId}?tab=expenses`);
   };
 
   const toggleDraft = (tempId: string) => {
     setDrafts(prev => prev.map(d => d.temp_id === tempId ? { ...d, review_status: d.review_status === 'discarded' ? 'approved' : 'discarded' } : d));
+  };
+
+  const handleCategoryChange = (tempId: string, categoryId: string) => {
+    const cat = categories?.find(c => c.id === categoryId);
+    if (!cat) return;
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      suggested_category_id: categoryId,
+      suggested_category_name: cat.name,
+      category_changed: true,
+    } : d));
   };
 
   return (
