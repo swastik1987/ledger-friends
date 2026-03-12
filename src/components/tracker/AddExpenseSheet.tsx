@@ -30,6 +30,7 @@ interface Props {
 
 export default function AddExpenseSheet({ open, onOpenChange, trackerId, categories, editExpenseId, expenses }: Props) {
   const { user, profile } = useAuth();
+  const navigate = useNavigate();
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
@@ -37,6 +38,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
 
   const editExpense = editExpenseId ? expenses.find(e => e.id === editExpenseId) : null;
   const isEdit = !!editExpense;
+  const [showManualForm, setShowManualForm] = useState(false);
 
   const [amount, setAmount] = useState('');
   const [isDebit, setIsDebit] = useState(true);
