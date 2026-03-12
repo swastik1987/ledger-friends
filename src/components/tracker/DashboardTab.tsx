@@ -1,8 +1,8 @@
 import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { subMonths, format } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { subMonths, addMonths, format, parse } from 'date-fns';
+import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
@@ -119,14 +119,26 @@ export default function DashboardTab({ expenses, categories, month, onMonthChang
   if (expenses.length === 0) {
     return (
       <div className="px-4 py-3">
-        <Select value={month} onValueChange={onMonthChange}>
-          <SelectTrigger className="h-10 mb-4">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => { const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === prev)) onMonthChange(prev); }}
+            disabled={month === months[months.length - 1]?.value}
+            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+          ><ChevronLeft className="h-5 w-5" /></button>
+          <Select value={month} onValueChange={onMonthChange}>
+            <SelectTrigger className="flex-1 h-10">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <button
+            onClick={() => { const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === next)) onMonthChange(next); }}
+            disabled={month === months[0]?.value}
+            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+          ><ChevronRight className="h-5 w-5" /></button>
+        </div>
         <div className="text-center py-16">
           <BarChart2 className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
           <p className="font-semibold text-lg">No data for this month</p>
@@ -197,14 +209,26 @@ export default function DashboardTab({ expenses, categories, month, onMonthChang
 
   return (
     <div className="px-4 py-3 space-y-4">
-      <Select value={month} onValueChange={onMonthChange}>
-        <SelectTrigger className="h-10">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => { const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === prev)) onMonthChange(prev); }}
+          disabled={month === months[months.length - 1]?.value}
+          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+        ><ChevronLeft className="h-5 w-5" /></button>
+        <Select value={month} onValueChange={onMonthChange}>
+          <SelectTrigger className="flex-1 h-10">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <button
+          onClick={() => { const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === next)) onMonthChange(next); }}
+          disabled={month === months[0]?.value}
+          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+        ><ChevronRight className="h-5 w-5" /></button>
+      </div>
 
       {/* Type filter */}
       <TransactionTypeFilter value={typeFilter} onChange={onTypeFilterChange} />

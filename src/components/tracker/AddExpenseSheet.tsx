@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { Expense, Category, PaymentMethod } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
-import { Loader2, X, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Loader2, X, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -29,6 +30,7 @@ interface Props {
 
 export default function AddExpenseSheet({ open, onOpenChange, trackerId, categories, editExpenseId, expenses }: Props) {
   const { user, profile } = useAuth();
+  const navigate = useNavigate();
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
@@ -36,6 +38,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
 
   const editExpense = editExpenseId ? expenses.find(e => e.id === editExpenseId) : null;
   const isEdit = !!editExpense;
+  const [showManualForm, setShowManualForm] = useState(false);
 
   const [amount, setAmount] = useState('');
   const [isDebit, setIsDebit] = useState(true);
@@ -77,6 +80,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       setTagInput('');
       setReferenceNumber('');
       setDuplicate(null);
+      setShowManualForm(false);
+    }
+    if (open && editExpense) {
+      setShowManualForm(true);
     }
   }, [open, editExpense]);
 
@@ -152,6 +159,38 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
           </SheetHeader>
 
           <div className="py-4 space-y-5">
+            {/* Entry mode selector (add mode only) */}
+            {!isEdit && !showManualForm && (
+              <div className="space-y-3">
+                <button
+                  onClick={() => { onOpenChange(false); navigate(`/tracker/${trackerId}/upload`); }}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Upload className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-semibold text-sm">Upload Bank Statement</p>
+                    <p className="text-xs text-muted-foreground">Import transactions from PDF or CSV</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setShowManualForm(true)}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <PenLine className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-semibold text-sm">Add Manually</p>
+                    <p className="text-xs text-muted-foreground">Enter transaction details yourself</p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Manual form */}
+            {(isEdit || showManualForm) && <>
             {/* Amount */}
             <div className="text-center">
               <div className="inline-flex items-center gap-1">
@@ -324,6 +363,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
                 </AlertDialogContent>
               </AlertDialog>
             )}
+            </>}
           </div>
         </SheetContent>
       </Sheet>
