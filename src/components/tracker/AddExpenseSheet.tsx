@@ -80,6 +80,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       setTagInput('');
       setReferenceNumber('');
       setDuplicate(null);
+      setShowManualForm(false);
+    }
+    if (open && editExpense) {
+      setShowManualForm(true);
     }
   }, [open, editExpense]);
 
