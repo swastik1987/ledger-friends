@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { Expense, Category, PaymentMethod } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
-import { Loader2, X, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Loader2, X, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
