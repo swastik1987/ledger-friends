@@ -1,8 +1,8 @@
 import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { subMonths, format } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { subMonths, addMonths, format, parse } from 'date-fns';
+import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
