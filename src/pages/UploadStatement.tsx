@@ -274,7 +274,25 @@ export default function UploadStatement() {
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{draft.description}</p>
-                      <p className="text-xs text-muted-foreground">{draft.date} · {draft.suggested_category_name}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{draft.date} ·</span>
+                        <Select
+                          value={draft.suggested_category_id}
+                          onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
+                          disabled={draft.review_status === 'discarded'}
+                        >
+                          <SelectTrigger className="h-5 w-auto min-w-0 border-none bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-0.5 [&>svg]:h-3 [&>svg]:w-3">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories?.map(cat => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                <span>{cat.icon} {cat.name}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       {draft.needs_review && draft.review_status !== 'discarded' && (
                         <p className="text-xs text-warning mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
                       )}
