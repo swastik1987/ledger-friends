@@ -159,6 +159,38 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
           </SheetHeader>
 
           <div className="py-4 space-y-5">
+            {/* Entry mode selector (add mode only) */}
+            {!isEdit && !showManualForm && (
+              <div className="space-y-3">
+                <button
+                  onClick={() => { onOpenChange(false); navigate(`/tracker/${trackerId}/upload`); }}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Upload className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-semibold text-sm">Upload Bank Statement</p>
+                    <p className="text-xs text-muted-foreground">Import transactions from PDF or CSV</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setShowManualForm(true)}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <PenLine className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-semibold text-sm">Add Manually</p>
+                    <p className="text-xs text-muted-foreground">Enter transaction details yourself</p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Manual form */}
+            {(isEdit || showManualForm) && <>
             {/* Amount */}
             <div className="text-center">
               <div className="inline-flex items-center gap-1">
