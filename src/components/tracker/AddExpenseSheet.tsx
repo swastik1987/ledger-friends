@@ -363,6 +363,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
                 </AlertDialogContent>
               </AlertDialog>
             )}
+            </>}
           </div>
         </SheetContent>
       </Sheet>

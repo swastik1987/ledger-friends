@@ -111,6 +111,16 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
     <div className="px-4 py-3 space-y-3">
       {/* Month selector */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={() => {
+            const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
+            if (months.some(m => m.value === prev)) onMonthChange(prev);
+          }}
+          disabled={month === months[months.length - 1]?.value}
+          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
         <Select value={month} onValueChange={onMonthChange}>
           <SelectTrigger className="flex-1 h-10">
             <SelectValue />
@@ -121,6 +131,16 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
             ))}
           </SelectContent>
         </Select>
+        <button
+          onClick={() => {
+            const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
+            if (months.some(m => m.value === next)) onMonthChange(next);
+          }}
+          disabled={month === months[0]?.value}
+          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
         <button onClick={() => setShowExport(true)} className="p-2 text-muted-foreground hover:text-foreground">
           <Download className="h-5 w-5" />
         </button>
