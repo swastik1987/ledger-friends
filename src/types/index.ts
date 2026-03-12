@@ -74,6 +74,7 @@ export interface DraftExpense {
   needs_review: boolean;
   duplicate_of?: string;
   review_status: ReviewStatus;
+  category_changed?: boolean;
 }
 
 export interface TrackerWithStats extends Tracker {
