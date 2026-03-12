@@ -1,6 +1,6 @@
 import { Expense, Category } from '@/types';
-import { format, isToday, isYesterday, subMonths } from 'date-fns';
-import { Receipt, Plus, Download, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { format, isToday, isYesterday, subMonths, addMonths, parse } from 'date-fns';
+import { Receipt, Plus, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDeleteExpense } from '@/hooks/useExpenses';
