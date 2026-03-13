@@ -94,6 +94,44 @@ export function useBulkCreateExpenses() {
   });
 }
 
+export function useBulkUpdateCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string }) => {
+      const { error } = await supabase
+        .from('expenses')
+        .update({ category_id: categoryId } as any)
+        .in('id', ids);
+      if (error) throw error;
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      toast.success(`${count} transactions updated`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useBulkDeleteExpenses() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { error } = await supabase
+        .from('expenses')
+        .delete()
+        .in('id', ids);
+      if (error) throw error;
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      toast.success(`🗑️ ${count} transactions deleted`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
 export function useExpenseRealtime(trackerId: string) {
   const queryClient = useQueryClient();
 

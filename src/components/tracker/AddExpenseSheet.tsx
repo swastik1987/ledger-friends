@@ -5,17 +5,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Expense, Category, PaymentMethod } from '@/types';
+import { Expense, Category } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
-import { Loader2, X, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine } from 'lucide-react';
+import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-
-const PAYMENT_METHODS: PaymentMethod[] = ['UPI', 'Credit Card', 'Debit Card', 'Net Banking', 'Cash', 'Other'];
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -45,12 +43,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [merchantName, setMerchantName] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('');
   const [notes, setNotes] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState('');
-  const [referenceNumber, setReferenceNumber] = useState('');
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [duplicate, setDuplicate] = useState<Expense | null>(null);
@@ -62,28 +55,17 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       setDate(editExpense.date);
       setDescription(editExpense.description);
       setCategoryId(editExpense.category_id);
-      setMerchantName(editExpense.merchant_name || '');
-      setPaymentMethod((editExpense.payment_method as PaymentMethod) || '');
       setNotes(editExpense.notes || '');
-      setTags(editExpense.tags || []);
-      setReferenceNumber(editExpense.reference_number || '');
+      setShowManualForm(true);
     } else if (open && !editExpense) {
       setAmount('');
       setIsDebit(true);
       setDate(format(new Date(), 'yyyy-MM-dd'));
       setDescription('');
       setCategoryId('');
-      setMerchantName('');
-      setPaymentMethod('');
       setNotes('');
-      setTags([]);
-      setTagInput('');
-      setReferenceNumber('');
       setDuplicate(null);
       setShowManualForm(false);
-    }
-    if (open && editExpense) {
-      setShowManualForm(true);
     }
   }, [open, editExpense]);
 
@@ -121,11 +103,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       currency: 'INR',
       date,
       description,
-      merchant_name: merchantName || null,
-      payment_method: (paymentMethod || null) as PaymentMethod | null,
       notes: notes || null,
-      tags: tags.length > 0 ? tags : [],
-      reference_number: referenceNumber || null,
       is_debit: isDebit,
       source: 'manual' as const,
     };
@@ -138,16 +116,6 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
     onOpenChange(false);
   };
 
-  const handleTagKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.key === 'Enter' || e.key === ' ') && tagInput.trim()) {
-      e.preventDefault();
-      if (!tags.includes(tagInput.trim())) {
-        setTags([...tags, tagInput.trim()]);
-      }
-      setTagInput('');
-    }
-  };
-
   const isPending = createExpense.isPending || updateExpense.isPending;
 
   return (
@@ -155,7 +123,20 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       <Sheet open={open && !showCategoryPicker} onOpenChange={onOpenChange}>
         <SheetContent side="bottom" className="rounded-t-2xl h-[90vh] overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>{isEdit ? 'Edit Transaction' : 'Add Transaction'}</SheetTitle>
+            <div className="flex items-center justify-between">
+              <SheetTitle>{isEdit ? 'Edit Transaction' : 'Add Transaction'}</SheetTitle>
+              {(isEdit || showManualForm) && (
+                <Button
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={isPending || !amount || !description || !categoryId}
+                  className="h-9 px-3 gap-1.5"
+                >
+                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  {isEdit ? 'Update' : 'Save'}
+                </Button>
+              )}
+            </div>
           </SheetHeader>
 
           <div className="py-4 space-y-5">
@@ -270,54 +251,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
               </button>
             </div>
 
-            {/* Merchant */}
-            <div className="space-y-1.5">
-              <Label>Merchant Name</Label>
-              <Input value={merchantName} onChange={e => setMerchantName(e.target.value)} placeholder="e.g. Swiggy, BPCL" className="h-11" />
-            </div>
-
-            {/* Payment Method */}
-            <div className="space-y-1.5">
-              <Label>Payment Method</Label>
-              <div className="flex flex-wrap gap-2">
-                {PAYMENT_METHODS.map(pm => (
-                  <button
-                    key={pm}
-                    onClick={() => setPaymentMethod(paymentMethod === pm ? '' : pm)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors ${paymentMethod === pm ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-muted-foreground'}`}
-                  >
-                    {pm}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Notes */}
             <div className="space-y-1.5">
               <Label>Notes</Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes" rows={3} />
-            </div>
-
-            {/* Tags */}
-            <div className="space-y-1.5">
-              <Label>Tags</Label>
-              <div className="flex flex-wrap gap-1.5 mb-1">
-                {tags.map(tag => (
-                  <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted rounded-full text-xs">
-                    {tag}
-                    <button onClick={() => setTags(tags.filter(t => t !== tag))} className="text-muted-foreground hover:text-foreground">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <Input value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={handleTagKeyDown} placeholder="Type and press Space" className="h-11" />
-            </div>
-
-            {/* Reference */}
-            <div className="space-y-1.5">
-              <Label>Reference Number</Label>
-              <Input value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} placeholder="Transaction ID / Ref No." className="h-11" />
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Merchant, payment method, reference no., or any other details" rows={3} />
             </div>
 
             {/* Duplicate warning */}
@@ -334,11 +271,6 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
                 </div>
               </div>
             )}
-
-            {/* Save */}
-            <Button onClick={handleSave} className="w-full h-11" disabled={isPending || !amount || !description || !categoryId}>
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : (isEdit ? 'Update Transaction' : 'Save Transaction')}
-            </Button>
 
             {/* Delete (edit mode) */}
             {isEdit && (
