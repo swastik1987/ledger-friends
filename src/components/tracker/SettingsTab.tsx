@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
@@ -104,6 +104,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const [aiEmojis, setAiEmojis] = useState<string[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [showAllEmojis, setShowAllEmojis] = useState(false);
+  const [showSystemCats, setShowSystemCats] = useState(false);
   const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const customCategories = categories.filter(c => !c.is_system && c.tracker_id === trackerId);
@@ -394,10 +395,16 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
           </div>
         )}
 
-        {/* System categories */}
+        {/* System categories — collapsible */}
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">System</p>
-          {systemCategories.map(cat => (
+          <button
+            onClick={() => setShowSystemCats(!showSystemCats)}
+            className="flex items-center gap-1.5 w-full group"
+          >
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">System ({systemCategories.length})</p>
+            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 ${showSystemCats ? 'rotate-180' : ''}`} />
+          </button>
+          {showSystemCats && systemCategories.map(cat => (
             <div key={cat.id} className="flex items-center gap-3 py-1.5">
               <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm shrink-0" style={{ backgroundColor: cat.color + '20' }}>
                 {cat.icon}
