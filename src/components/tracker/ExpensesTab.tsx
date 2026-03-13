@@ -233,8 +233,11 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                         >
                           {expense.category?.icon}
                         </div>
-                        <p className="text-sm font-medium truncate">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
-                        <div className="ml-auto text-right shrink-0">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
+                          <p className="text-[11px] text-muted-foreground">by {expense.created_by_name?.split(' ')[0] || 'Unknown'}</p>
+                        </div>
+                        <div className="text-right shrink-0">
                           <div className="flex items-center justify-end gap-1">
                             {!expense.is_debit && <ArrowDownLeft className="h-3 w-3 text-emerald-500" />}
                             <p className={`font-mono font-semibold text-sm ${expense.is_debit ? 'text-foreground' : 'text-emerald-600'}`}>
