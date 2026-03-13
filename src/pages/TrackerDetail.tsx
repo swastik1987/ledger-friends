@@ -108,6 +108,7 @@ export default function TrackerDetail() {
 
           <TabsContent value="dashboard" className="mt-0">
             <DashboardTab
+              trackerId={trackerId!}
               expenses={expenses || []}
               categories={categories || []}
               month={month}
