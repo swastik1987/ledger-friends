@@ -18,6 +18,57 @@ const PRESET_EMOJIS = ['🏷️', '🎯', '🏋️', '🎮', '🐕', '🏡', '�
 
 const STORAGE_KEY = 'expensesync-type-filter';
 
+// Client-side keyword → emoji mapping for instant fallback suggestions
+const EMOJI_KEYWORD_MAP: Record<string, string[]> = {
+  food: ['🍽️', '🍕', '🍴'], dining: ['🍽️', '🍛', '🥘'], restaurant: ['🍽️', '🍕', '🥂'],
+  grocery: ['🛒', '🥦', '🧺'], groceries: ['🛒', '🥦', '🧺'], supermarket: ['🛒', '🏪', '🧺'],
+  transport: ['🚗', '🚌', '🚕'], travel: ['✈️', '🌍', '🧳'], flight: ['✈️', '🛫', '🛬'],
+  fuel: ['⛽', '🛢️', '🚗'], petrol: ['⛽', '🛢️', '🚗'], gas: ['⛽', '🛢️', '🔥'],
+  shop: ['🛍️', '🏬', '🛒'], shopping: ['🛍️', '🏬', '🛒'],
+  entertain: ['🎬', '🎮', '🎭'], movie: ['🎬', '🍿', '🎥'], game: ['🎮', '🕹️', '🎯'],
+  health: ['🏥', '💊', '🩺'], medical: ['🏥', '💊', '🩺'], doctor: ['👨‍⚕️', '🩺', '💊'],
+  utility: ['💡', '🔌', '🏠'], utilities: ['💡', '🔌', '🏠'], electric: ['💡', '⚡', '🔌'],
+  rent: ['🏠', '🏡', '🔑'], house: ['🏠', '🏡', '🔑'], home: ['🏠', '🏡', '🛋️'],
+  education: ['📚', '🎓', '✏️'], school: ['🏫', '📚', '🎓'], book: ['📚', '📖', '🎓'],
+  personal: ['💄', '💆', '🧴'], beauty: ['💄', '💅', '💆'], care: ['💆', '🧴', '💊'],
+  subscription: ['📱', '🔄', '💻'], subscriptions: ['📱', '🔄', '💻'],
+  emi: ['🏦', '💳', '📊'], loan: ['🏦', '💰', '📋'], insurance: ['🛡️', '📋', '🏦'],
+  invest: ['📈', '💹', '💰'], investment: ['📈', '💹', '💰'], stock: ['📈', '📊', '💹'],
+  gift: ['🎁', '🎀', '💝'], donation: ['🎁', '🤲', '💝'],
+  office: ['💼', '🏢', '💻'], business: ['💼', '📊', '🏢'], work: ['💼', '🏢', '💻'],
+  pet: ['🐾', '🐕', '🐱'], dog: ['🐕', '🐾', '🦮'], cat: ['🐱', '🐾', '😺'],
+  coffee: ['☕', '🫖', '🍵'], tea: ['🍵', '🫖', '☕'], drink: ['🍺', '🥤', '🍷'],
+  gym: ['🏋️', '💪', '🏃'], fitness: ['🏋️', '💪', '🏃'], sport: ['⚽', '🏃', '🏋️'],
+  music: ['🎵', '🎸', '🎧'], clothes: ['👕', '👗', '🧥'], clothing: ['👕', '👗', '🧥'],
+  phone: ['📱', '📞', '💻'], internet: ['🌐', '📡', '💻'], wifi: ['📡', '🌐', '💻'],
+  baby: ['👶', '🍼', '🧸'], kid: ['👶', '🧸', '🎠'], child: ['👶', '🧸', '🎠'],
+  car: ['🚗', '🔧', '⛽'], bike: ['🚲', '🏍️', '🚴'], taxi: ['🚕', '🚗', '📱'],
+  salary: ['💰', '💵', '🏦'], income: ['💰', '📈', '💵'], refund: ['🔄', '💸', '💰'],
+  cashback: ['🎁', '💸', '💰'], reward: ['🎁', '🏆', '⭐'],
+  parking: ['🅿️', '🚗', '🏢'], toll: ['🛣️', '🚗', '💳'],
+  water: ['💧', '🚰', '🌊'], laundry: ['🧺', '👕', '🧼'], clean: ['🧹', '🧽', '✨'],
+  vacation: ['🏖️', '✈️', '🌴'], holiday: ['🏖️', '🌴', '✈️'],
+  charity: ['🤲', '❤️', '🎁'], temple: ['🛕', '🙏', '⛩️'], church: ['⛪', '🙏', '✝️'],
+  tax: ['📋', '🏛️', '💰'], saving: ['🏦', '💰', '🐖'], savings: ['🏦', '💰', '🐖'],
+  maintenance: ['🔧', '🏠', '🛠️'], repair: ['🔧', '🛠️', '🏠'],
+};
+
+function getClientEmojiSuggestions(name: string): string[] {
+  const lower = name.toLowerCase().trim();
+  // Try exact keyword match first
+  for (const [keyword, emojis] of Object.entries(EMOJI_KEYWORD_MAP)) {
+    if (lower.includes(keyword)) return emojis;
+  }
+  // Try matching each word
+  const words = lower.split(/\s+/);
+  for (const word of words) {
+    for (const [keyword, emojis] of Object.entries(EMOJI_KEYWORD_MAP)) {
+      if (keyword.includes(word) || word.includes(keyword)) return emojis;
+    }
+  }
+  return ['🏷️', '📌', '📋']; // generic fallback
+}
+
 interface Props {
   trackerId: string;
   tracker: Tracker;
@@ -95,16 +146,26 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
       setAiEmojis([]);
       return;
     }
+
+    // Step 1: Instantly show client-side suggestions
+    const clientSuggestions = getClientEmojiSuggestions(name);
+    setAiEmojis(clientSuggestions);
+    setCatIcon(clientSuggestions[0]); // auto-select the first suggestion
+
+    // Step 2: Try upgrading with AI suggestions from edge function
     setAiLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('suggest-emojis', {
         body: { categoryName: name.trim() },
       });
       if (error) throw error;
-      const emojis = data?.emojis || [];
-      setAiEmojis(emojis.slice(0, 3));
+      const emojis = data?.emojis;
+      if (Array.isArray(emojis) && emojis.length >= 1) {
+        setAiEmojis(emojis.slice(0, 3));
+        setCatIcon(emojis[0]); // auto-select best AI suggestion
+      }
     } catch {
-      setAiEmojis([]);
+      // Edge function unavailable — keep client-side suggestions (already set above)
     } finally {
       setAiLoading(false);
     }
@@ -112,9 +173,9 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
   const handleCatNameChange = (value: string) => {
     setCatName(value);
-    // Debounce AI call — 800ms after user stops typing
+    // Debounce AI call — 600ms after user stops typing
     if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
-    aiDebounceRef.current = setTimeout(() => fetchAiEmojis(value), 800);
+    aiDebounceRef.current = setTimeout(() => fetchAiEmojis(value), 600);
   };
 
   // ─── Open sheet for Create ───
@@ -412,18 +473,14 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                AI Suggested Icons
+                Suggested Icons
+                {aiLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </Label>
-              {aiLoading ? (
-                <div className="flex items-center gap-2 py-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">Generating suggestions...</span>
-                </div>
-              ) : aiEmojis.length > 0 ? (
+              {aiEmojis.length > 0 ? (
                 <div className="flex gap-2">
                   {aiEmojis.map((emoji, i) => (
                     <button
-                      key={`ai-${i}`}
+                      key={`ai-${i}-${emoji}`}
                       onClick={() => setCatIcon(emoji)}
                       className={`h-14 w-14 rounded-xl text-2xl flex items-center justify-center transition-all ${
                         catIcon === emoji
@@ -436,7 +493,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                   ))}
                 </div>
               ) : catName.trim().length >= 2 ? (
-                <p className="text-xs text-muted-foreground py-2">Type a category name to get AI emoji suggestions</p>
+                <p className="text-xs text-muted-foreground py-2">Generating suggestions...</p>
               ) : (
                 <p className="text-xs text-muted-foreground py-2">Type at least 2 characters for suggestions</p>
               )}
