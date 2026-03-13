@@ -270,6 +270,25 @@ export function useCreateCategory(trackerId: string) {
   });
 }
 
+export function useUpdateCategory(trackerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name, icon, color }: { id: string; name: string; icon: string; color: string }) => {
+      const { error } = await supabase
+        .from('categories')
+        .update({ name, icon, color })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories', trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      toast.success('Category updated');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
 export function useDeleteCategory(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({

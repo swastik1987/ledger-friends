@@ -71,6 +71,7 @@ export interface DraftExpense {
   suggested_category_name: string;
   confidence: number;
   reference_number?: string;
+  notes?: string;
   needs_review: boolean;
   duplicate_of?: string;
   review_status: ReviewStatus;

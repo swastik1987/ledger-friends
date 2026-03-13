@@ -100,12 +100,13 @@ export default function UploadStatement() {
           date: t.date || new Date().toISOString().split('T')[0],
           description: t.description || 'Unknown',
           merchant_name: t.merchant_name,
-          amount: Math.abs(Number(t.amount) || 0),
+          amount: Math.round(Math.abs(Number(t.amount) || 0)),
           is_debit: t.is_debit !== false,
           suggested_category_id: matchedCat?.id || miscCategory?.id || '',
           suggested_category_name: matchedCat?.name || 'Miscellaneous',
           confidence: t.confidence || 0.5,
           reference_number: t.reference_number,
+          notes: t.raw_description || null,
           needs_review: (t.confidence || 0.5) < 0.75,
           review_status: 'pending' as const,
         };
@@ -143,6 +144,7 @@ export default function UploadStatement() {
       is_debit: d.is_debit,
       source: 'statement_upload' as const,
       reference_number: d.reference_number || null,
+      notes: d.notes || null,
     }));
 
     await bulkCreate.mutateAsync(expenses);
@@ -270,36 +272,39 @@ export default function UploadStatement() {
                       type="checkbox"
                       checked={draft.review_status !== 'discarded'}
                       onChange={() => toggleDraft(draft.temp_id)}
-                      className="h-4 w-4 rounded"
+                      className="h-4 w-4 rounded shrink-0"
                     />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{draft.description}</p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className="text-xs text-muted-foreground">{draft.date} ·</span>
-                        <Select
-                          value={draft.suggested_category_id}
-                          onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
-                          disabled={draft.review_status === 'discarded'}
-                        >
-                          <SelectTrigger className="h-5 w-auto min-w-0 border-none bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-0.5 [&>svg]:h-3 [&>svg]:w-3">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categories?.map(cat => (
-                              <SelectItem key={cat.id} value={cat.id}>
-                                <span>{cat.icon} {cat.name}</span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {draft.needs_review && draft.review_status !== 'discarded' && (
-                        <p className="text-xs text-warning mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
-                      )}
+                    <Select
+                      value={draft.suggested_category_id}
+                      onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
+                      disabled={draft.review_status === 'discarded'}
+                    >
+                      <SelectTrigger className="h-6 w-auto min-w-0 border-none bg-transparent p-0 text-sm font-medium hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-1 [&>svg]:h-3 [&>svg]:w-3">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories?.map(cat => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            <span>{cat.icon} {cat.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="ml-auto text-right shrink-0">
+                      <p className={`font-mono text-sm font-semibold ${draft.is_debit ? '' : 'text-emerald-600'}`}>
+                        {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{draft.date}</p>
                     </div>
-                    <p className={`font-mono text-sm font-semibold ${draft.is_debit ? '' : 'text-emerald-600'}`}>
-                      {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
-                    </p>
+                  </div>
+                  <div className="mt-2 pl-7 space-y-0.5">
+                    <p className="text-sm text-foreground text-left">{draft.description}</p>
+                    {draft.notes && (
+                      <p className="text-xs text-muted-foreground text-left line-clamp-2">{draft.notes}</p>
+                    )}
+                    {draft.needs_review && draft.review_status !== 'discarded' && (
+                      <p className="text-xs text-warning text-left mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
+                    )}
                   </div>
                 </div>
               ))}

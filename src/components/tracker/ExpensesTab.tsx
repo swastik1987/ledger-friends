@@ -224,24 +224,31 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                   >
                     <button
                       onClick={() => canModify && onEditExpense(expense.id)}
-                      className="w-full text-left flex items-center gap-3"
+                      className="w-full text-left"
                     >
-                      <div
-                        className="h-10 w-10 rounded-full flex items-center justify-center text-lg flex-shrink-0"
-                        style={{ backgroundColor: expense.category?.color + '20' }}
-                      >
-                        {expense.category?.icon}
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="h-10 w-10 rounded-full flex items-center justify-center text-lg shrink-0"
+                          style={{ backgroundColor: expense.category?.color + '20' }}
+                        >
+                          {expense.category?.icon}
+                        </div>
+                        <p className="text-sm font-medium truncate">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
+                        <div className="ml-auto text-right shrink-0">
+                          <div className="flex items-center justify-end gap-1">
+                            {!expense.is_debit && <ArrowDownLeft className="h-3 w-3 text-emerald-500" />}
+                            <p className={`font-mono font-semibold text-sm ${expense.is_debit ? 'text-foreground' : 'text-emerald-600'}`}>
+                              {expense.is_debit ? '' : '+'} ₹{expense.amount.toLocaleString('en-IN')}
+                            </p>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{format(new Date(expense.date + 'T00:00:00'), 'd MMM')}</p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{expense.description}</p>
-                        {expense.merchant_name && <p className="text-xs text-muted-foreground truncate">{expense.merchant_name}</p>}
-                        <p className="text-xs text-muted-foreground">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0 flex items-center gap-1">
-                        {!expense.is_debit && <ArrowDownLeft className="h-3 w-3 text-emerald-500" />}
-                        <p className={`font-mono font-semibold text-sm ${expense.is_debit ? 'text-foreground' : 'text-emerald-600'}`}>
-                          {expense.is_debit ? '' : '+'} ₹{expense.amount.toLocaleString('en-IN')}
-                        </p>
+                      <div className="mt-2 pl-[52px] space-y-0.5">
+                        <p className="text-sm text-foreground text-left">{expense.description}</p>
+                        {expense.notes && (
+                          <p className="text-xs text-muted-foreground text-left line-clamp-2">{expense.notes}</p>
+                        )}
                       </div>
                     </button>
                     {canModify && (

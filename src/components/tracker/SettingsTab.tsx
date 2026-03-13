@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tracker, TrackerMember, Category } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useCreateCategory, useDeleteCategory } from '@/hooks/useTrackers';
+import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useCreateCategory, useUpdateCategory, useDeleteCategory } from '@/hooks/useTrackers';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Pencil, Check, X, Trash2, Users, Loader2 } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
@@ -35,19 +35,28 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const removeMember = useRemoveMember(trackerId);
   const updateRole = useUpdateMemberRole(trackerId);
   const createCategory = useCreateCategory(trackerId);
+  const updateCategory = useUpdateCategory(trackerId);
   const deleteCategory = useDeleteCategory(trackerId);
 
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(tracker.name);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [showAddCategory, setShowAddCategory] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
-  const [newCatIcon, setNewCatIcon] = useState('🏷️');
-  const [newCatColor, setNewCatColor] = useState('#FF6B6B');
   const [deleteCountdown, setDeleteCountdown] = useState(0);
   const [defaultView, setDefaultView] = useState<TransactionFilter>('all');
 
+  // Category sheet state
+  const [showCategorySheet, setShowCategorySheet] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null); // null = creating new
+  const [catName, setCatName] = useState('');
+  const [catIcon, setCatIcon] = useState('🏷️');
+  const [catColor, setCatColor] = useState('#FF6B6B');
+  const [aiEmojis, setAiEmojis] = useState<string[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAllEmojis, setShowAllEmojis] = useState(false);
+  const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const customCategories = categories.filter(c => !c.is_system && c.tracker_id === trackerId);
+  const systemCategories = categories.filter(c => c.is_system);
   const adminCount = members.filter(m => m.role === 'admin').length;
 
   // Load default view preference
@@ -80,11 +89,77 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
     setInviteEmail('');
   };
 
-  const handleAddCategory = async () => {
-    if (!newCatName.trim()) return;
-    await createCategory.mutateAsync({ name: newCatName.trim(), icon: newCatIcon, color: newCatColor });
-    setShowAddCategory(false);
-    setNewCatName('');
+  // ─── AI Emoji Suggestions ───
+  const fetchAiEmojis = useCallback(async (name: string) => {
+    if (!name.trim() || name.trim().length < 2) {
+      setAiEmojis([]);
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('suggest-emojis', {
+        body: { categoryName: name.trim() },
+      });
+      if (error) throw error;
+      const emojis = data?.emojis || [];
+      setAiEmojis(emojis.slice(0, 3));
+    } catch {
+      setAiEmojis([]);
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
+
+  const handleCatNameChange = (value: string) => {
+    setCatName(value);
+    // Debounce AI call — 800ms after user stops typing
+    if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
+    aiDebounceRef.current = setTimeout(() => fetchAiEmojis(value), 800);
+  };
+
+  // ─── Open sheet for Create ───
+  const openCreateSheet = () => {
+    setEditingCategory(null);
+    setCatName('');
+    setCatIcon('🏷️');
+    setCatColor('#FF6B6B');
+    setAiEmojis([]);
+    setShowAllEmojis(false);
+    setShowCategorySheet(true);
+  };
+
+  // ─── Open sheet for Edit ───
+  const openEditSheet = (cat: Category) => {
+    setEditingCategory(cat);
+    setCatName(cat.name);
+    setCatIcon(cat.icon);
+    setCatColor(cat.color);
+    setAiEmojis([]);
+    setShowAllEmojis(false);
+    setShowCategorySheet(true);
+  };
+
+  // ─── Save Category (create or update) ───
+  const handleSaveCategory = async () => {
+    if (!catName.trim()) return;
+
+    if (editingCategory) {
+      if (editingCategory.is_system) {
+        // System category: create a tracker-scoped custom copy with the new values
+        await createCategory.mutateAsync({ name: catName.trim(), icon: catIcon, color: catColor });
+        toast.success('Custom version created for this tracker');
+      } else {
+        // Custom category: update in place
+        await updateCategory.mutateAsync({ id: editingCategory.id, name: catName.trim(), icon: catIcon, color: catColor });
+      }
+    } else {
+      // New category
+      await createCategory.mutateAsync({ name: catName.trim(), icon: catIcon, color: catColor });
+    }
+
+    setShowCategorySheet(false);
+    setCatName('');
+    setAiEmojis([]);
   };
 
   const handleDeleteTracker = async () => {
@@ -103,6 +178,8 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
       navigate('/');
     }
   };
+
+  const isSaving = createCategory.isPending || updateCategory.isPending;
 
   return (
     <div className="px-4 py-3 space-y-6">
@@ -217,21 +294,62 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
         )}
       </div>
 
-      {/* Custom Categories */}
+      {/* Categories */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
-        <h3 className="font-semibold text-sm">Custom Categories</h3>
-        {customCategories.map(cat => (
-          <div key={cat.id} className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm" style={{ backgroundColor: cat.color + '20' }}>
-              {cat.icon}
-            </div>
-            <span className="flex-1 text-sm">{cat.name}</span>
-            <button onClick={() => deleteCategory.mutate(cat.id)} className="p-1 text-muted-foreground hover:text-destructive">
-              <Trash2 className="h-4 w-4" />
-            </button>
+        <h3 className="font-semibold text-sm">Categories</h3>
+
+        {/* Custom categories */}
+        {customCategories.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Custom</p>
+            {customCategories.map(cat => (
+              <div key={cat.id} className="flex items-center gap-3 py-1.5">
+                <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                  {cat.icon}
+                </div>
+                <span className="flex-1 text-sm truncate">{cat.name}</span>
+                <button onClick={() => openEditSheet(cat)} className="p-1 text-muted-foreground hover:text-foreground">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <button className="p-1 text-muted-foreground hover:text-destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete "{cat.name}"?</AlertDialogTitle>
+                      <AlertDialogDescription>Expenses using this category will be moved to Miscellaneous.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => deleteCategory.mutate(cat.id)} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            ))}
           </div>
-        ))}
-        <Button variant="outline" size="sm" onClick={() => setShowAddCategory(true)} className="w-full h-10">Add Category</Button>
+        )}
+
+        {/* System categories */}
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">System</p>
+          {systemCategories.map(cat => (
+            <div key={cat.id} className="flex items-center gap-3 py-1.5">
+              <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                {cat.icon}
+              </div>
+              <span className="flex-1 text-sm truncate">{cat.name}</span>
+              <button onClick={() => openEditSheet(cat)} className="p-1 text-muted-foreground hover:text-foreground">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <Button variant="outline" size="sm" onClick={openCreateSheet} className="w-full h-10">Add Category</Button>
       </div>
 
       {/* Danger Zone */}
@@ -262,37 +380,122 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
         </div>
       )}
 
-      {/* Add Category Sheet */}
-      <Sheet open={showAddCategory} onOpenChange={setShowAddCategory}>
-        <SheetContent side="bottom" className="rounded-t-2xl">
+      {/* ─── Add / Edit Category Sheet ─── */}
+      <Sheet open={showCategorySheet} onOpenChange={setShowCategorySheet}>
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[85vh] overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>Add Category</SheetTitle>
+            <SheetTitle>
+              {editingCategory ? (editingCategory.is_system ? 'Customise System Category' : 'Edit Category') : 'Add Category'}
+            </SheetTitle>
           </SheetHeader>
           <div className="py-4 space-y-4">
+            {/* Info banner for system categories */}
+            {editingCategory?.is_system && (
+              <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-xs text-blue-700">
+                Editing a system category creates a custom version for this tracker. The original system category stays unchanged.
+              </div>
+            )}
+
+            {/* Name */}
             <div className="space-y-1.5">
               <Label>Name</Label>
-              <Input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Category name" className="h-11" />
+              <Input
+                value={catName}
+                onChange={e => handleCatNameChange(e.target.value)}
+                placeholder="Category name"
+                className="h-11"
+                autoFocus
+              />
             </div>
+
+            {/* AI Emoji Suggestions */}
             <div className="space-y-1.5">
-              <Label>Emoji</Label>
-              <div className="grid grid-cols-6 gap-2">
-                {PRESET_EMOJIS.map(e => (
-                  <button key={e} onClick={() => setNewCatIcon(e)} className={`h-10 w-full rounded-lg text-lg ${newCatIcon === e ? 'bg-primary/10 ring-2 ring-primary' : 'bg-muted'}`}>
-                    {e}
-                  </button>
-                ))}
+              <Label className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                AI Suggested Icons
+              </Label>
+              {aiLoading ? (
+                <div className="flex items-center gap-2 py-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">Generating suggestions...</span>
+                </div>
+              ) : aiEmojis.length > 0 ? (
+                <div className="flex gap-2">
+                  {aiEmojis.map((emoji, i) => (
+                    <button
+                      key={`ai-${i}`}
+                      onClick={() => setCatIcon(emoji)}
+                      className={`h-14 w-14 rounded-xl text-2xl flex items-center justify-center transition-all ${
+                        catIcon === emoji
+                          ? 'bg-primary/10 ring-2 ring-primary scale-105'
+                          : 'bg-muted hover:bg-muted/80'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              ) : catName.trim().length >= 2 ? (
+                <p className="text-xs text-muted-foreground py-2">Type a category name to get AI emoji suggestions</p>
+              ) : (
+                <p className="text-xs text-muted-foreground py-2">Type at least 2 characters for suggestions</p>
+              )}
+            </div>
+
+            {/* Manual emoji grid (collapsible) */}
+            <div className="space-y-1.5">
+              <button
+                onClick={() => setShowAllEmojis(!showAllEmojis)}
+                className="text-xs text-primary font-medium flex items-center gap-1"
+              >
+                {showAllEmojis ? 'Hide' : 'Show'} all emojis
+                <span className="text-[10px]">{showAllEmojis ? '▲' : '▼'}</span>
+              </button>
+              {showAllEmojis && (
+                <div className="grid grid-cols-6 gap-2 pt-1">
+                  {PRESET_EMOJIS.map(e => (
+                    <button
+                      key={e}
+                      onClick={() => setCatIcon(e)}
+                      className={`h-10 w-full rounded-lg text-lg ${catIcon === e ? 'bg-primary/10 ring-2 ring-primary' : 'bg-muted'}`}
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Selected icon preview */}
+            <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-3">
+              <div className="h-10 w-10 rounded-full flex items-center justify-center text-xl" style={{ backgroundColor: catColor + '20' }}>
+                {catIcon}
+              </div>
+              <div>
+                <p className="text-sm font-medium">{catName || 'Category Name'}</p>
+                <p className="text-xs text-muted-foreground">Preview</p>
               </div>
             </div>
+
+            {/* Color */}
             <div className="space-y-1.5">
               <Label>Color</Label>
               <div className="flex flex-wrap gap-2">
                 {PRESET_COLORS.map(c => (
-                  <button key={c} onClick={() => setNewCatColor(c)} className={`h-8 w-8 rounded-full ${newCatColor === c ? 'ring-2 ring-offset-2 ring-primary' : ''}`} style={{ backgroundColor: c }} />
+                  <button key={c} onClick={() => setCatColor(c)} className={`h-8 w-8 rounded-full ${catColor === c ? 'ring-2 ring-offset-2 ring-primary' : ''}`} style={{ backgroundColor: c }} />
                 ))}
               </div>
             </div>
-            <Button onClick={handleAddCategory} className="w-full h-11" disabled={!newCatName.trim() || createCategory.isPending}>
-              {createCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add Category'}
+
+            {/* Save button */}
+            <Button onClick={handleSaveCategory} className="w-full h-11" disabled={!catName.trim() || isSaving}>
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : editingCategory ? (
+                editingCategory.is_system ? 'Create Custom Version' : 'Save Changes'
+              ) : (
+                'Add Category'
+              )}
             </Button>
           </div>
         </SheetContent>
