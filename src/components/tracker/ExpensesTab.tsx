@@ -1,6 +1,6 @@
 import { Expense, Category } from '@/types';
 import { format, isToday, isYesterday, subMonths, addMonths, parse } from 'date-fns';
-import { Receipt, Plus, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Receipt, Plus, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDeleteExpense } from '@/hooks/useExpenses';
@@ -244,33 +244,45 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                           <p className="text-xs text-muted-foreground">{format(new Date(expense.date + 'T00:00:00'), 'd MMM')}</p>
                         </div>
                       </div>
-                      <div className="mt-2 pl-[52px] space-y-0.5">
-                        <p className="text-sm text-foreground text-left">{expense.description}</p>
-                        {expense.notes && (
-                          <p className="text-xs text-muted-foreground text-left line-clamp-2">{expense.notes}</p>
+                      <div className="mt-2 pl-[52px] flex items-start gap-2">
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <p className="text-sm text-foreground text-left">{expense.description}</p>
+                          {expense.notes && (
+                            <p className="text-xs text-muted-foreground text-left line-clamp-2">{expense.notes}</p>
+                          )}
+                        </div>
+                        {canModify && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onEditExpense(expense.id); }}
+                              className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <button
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
+                                  <AlertDialogDescription>This will permanently delete "{expense.description}".</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => deleteExpense.mutate(expense.id)} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
                         )}
                       </div>
                     </button>
-                    {canModify && (
-                      <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-border">
-                        <button onClick={() => onEditExpense(expense.id)} className="text-xs text-primary font-medium px-2 py-1">Edit</button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <button className="text-xs text-destructive font-medium px-2 py-1">Delete</button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
-                              <AlertDialogDescription>This will permanently delete "{expense.description}".</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => deleteExpense.mutate(expense.id)} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
                   </div>
                 );
               })}
