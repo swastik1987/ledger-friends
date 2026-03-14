@@ -102,24 +102,35 @@ export default function UploadStatement() {
     const interval = setInterval(() => setMsgIndex(i => (i + 1) % PROCESSING_MESSAGES.length), 1800);
 
     try {
-      let extractedText = '';
       let formatHint: string | null = null;
       const ext = file.name.split('.').pop()?.toLowerCase();
       const arrayBuffer = await file.arrayBuffer();
 
+      // Build text chunks to send in batches to avoid Gemini/Edge Function timeouts
+      const textChunks: string[] = [];
+      const PAGES_PER_CHUNK = 2;
+      const ROWS_PER_CHUNK = 40;
+
       if (ext === 'csv') {
         const text = new TextDecoder().decode(arrayBuffer);
-        // Detect format from raw CSV before parsing
         formatHint = detectFormatHint(text);
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
-        extractedText = JSON.stringify(result.data);
+        const rows = result.data as Record<string, unknown>[];
+        // Chunk CSV rows
+        for (let i = 0; i < rows.length; i += ROWS_PER_CHUNK) {
+          textChunks.push(JSON.stringify(rows.slice(i, i + ROWS_PER_CHUNK)));
+        }
       } else if (ext === 'xlsx' || ext === 'xls') {
         const wb = XLSX.read(arrayBuffer);
         const ws = wb.Sheets[wb.SheetNames[0]];
         const csvOutput = XLSX.utils.sheet_to_csv(ws);
-        // Detect format from converted CSV
         formatHint = detectFormatHint(csvOutput);
-        extractedText = csvOutput;
+        const lines = csvOutput.split('\n').filter(l => l.trim());
+        const header = lines[0] || '';
+        const dataLines = lines.slice(1);
+        for (let i = 0; i < dataLines.length; i += ROWS_PER_CHUNK) {
+          textChunks.push([header, ...dataLines.slice(i, i + ROWS_PER_CHUNK)].join('\n'));
+        }
       } else if (ext === 'pdf') {
         const pdfjsLib = await import('pdfjs-dist');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
@@ -130,16 +141,26 @@ export default function UploadStatement() {
           const content = await page.getTextContent();
           pages.push(content.items.map((item: any) => item.str).join(' '));
         }
-        extractedText = pages.join('\n');
+        // Chunk pages — send PAGES_PER_CHUNK pages at a time
+        for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
+          textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
+        }
       }
 
-      const { data, error } = await supabase.functions.invoke('parse-statement', {
-        body: { extractedText, formatHint },
-      });
+      // If only 1 chunk (small file), send as-is. Otherwise send in batches.
+      if (textChunks.length === 0) throw new Error('Could not extract text from file');
 
-      if (error) throw error;
+      const allTransactions: any[] = [];
+      for (const chunk of textChunks) {
+        const { data, error } = await supabase.functions.invoke('parse-statement', {
+          body: { extractedText: chunk, formatHint },
+        });
+        if (error) throw error;
+        const txns = data?.transactions || [];
+        allTransactions.push(...txns);
+      }
 
-      const transactions = data?.transactions || [];
+      const transactions = allTransactions;
       const miscCategory = categories?.find(c => c.name === 'Miscellaneous');
 
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
