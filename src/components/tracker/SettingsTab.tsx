@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tracker, TrackerMember, Category } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useCreateCategory, useUpdateCategory, useDeleteCategory } from '@/hooks/useTrackers';
+import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useInviteMember, useCreateCategory, useUpdateCategory, useDeleteCategory } from '@/hooks/useTrackers';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -85,6 +85,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const deleteTracker = useDeleteTracker();
   const removeMember = useRemoveMember(trackerId);
   const updateRole = useUpdateMemberRole(trackerId);
+  const inviteMember = useInviteMember(trackerId);
   const createCategory = useCreateCategory(trackerId);
   const updateCategory = useUpdateCategory(trackerId);
   const deleteCategory = useDeleteCategory(trackerId);
@@ -137,7 +138,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
-    toast.error('No account found with that email. The user must sign up first.');
+    await inviteMember.mutateAsync(inviteEmail.trim());
     setInviteEmail('');
   };
 
@@ -343,8 +344,10 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
         {isAdmin && (
           <div className="flex gap-2 pt-2 border-t border-border">
-            <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Email address" className="h-10 flex-1" />
-            <Button size="sm" className="h-10" onClick={handleInvite}>Add</Button>
+            <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Email address" className="h-10 flex-1" onKeyDown={e => e.key === 'Enter' && handleInvite()} />
+            <Button size="sm" className="h-10" onClick={handleInvite} disabled={inviteMember.isPending || !inviteEmail.trim()}>
+              {inviteMember.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+            </Button>
           </div>
         )}
 

@@ -179,20 +179,39 @@ export function useInviteMember(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (email: string) => {
-      const { data: profiles, error: profileErr } = await supabase
+      const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .ilike('full_name', `%${email}%`);
+        .ilike('email', email.trim())
+        .single();
 
-      // Look up by auth email
-      // We need to find user by email through profiles - but email is in auth.users
-      // Instead try to match: we'll search using a different approach
-      // Actually we can't query auth.users from client. Let's use a workaround.
-      // For now, we search profiles by email won't work because email isn't in profiles.
-      // We'll need the user to type the exact user ID or we look up differently.
-      // Actually - the spec says look up profiles by email. But email is in auth.users, not profiles.
-      // Let's just return an error message for now.
-      throw new Error('No account found with that email. The user must sign up first.');
+      if (profileErr || !profile) {
+        throw new Error('No account found with that email. The user must sign up first.');
+      }
+
+      // Check if already a member
+      const { data: existing } = await supabase
+        .from('tracker_members')
+        .select('id')
+        .eq('tracker_id', trackerId)
+        .eq('user_id', profile.id)
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error(`${profile.full_name} is already a member of this tracker.`);
+      }
+
+      const { error: insertErr } = await supabase
+        .from('tracker_members')
+        .insert({ tracker_id: trackerId, user_id: profile.id, role: 'member' });
+
+      if (insertErr) throw insertErr;
+      return profile.full_name;
+    },
+    onSuccess: (name) => {
+      queryClient.invalidateQueries({ queryKey: ['tracker-members', trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['trackers'] });
+      toast.success(`${name} added to tracker`);
     },
     onError: (err: Error) => toast.error(err.message),
   });
