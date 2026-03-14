@@ -1,16 +1,17 @@
 import { Expense, Category } from '@/types';
 import { format, isToday, isYesterday, subMonths, addMonths, parse } from 'date-fns';
-import { Receipt, Plus, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag } from 'lucide-react';
+import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses } from '@/hooks/useExpenses';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import NetBalanceBanner from './NetBalanceBanner';
@@ -79,27 +80,91 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
   // Bulk delete confirmation
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
+  // Filter state — persists across month changes, resets on page exit (component unmount)
+  const [filterUsers, setFilterUsers] = useState<Set<string>>(new Set());
+  const [filterCategories, setFilterCategories] = useState<Set<string>>(new Set());
+  const [filterOpen, setFilterOpen] = useState(false);
+
   const monthLabel = months.find(m => m.value === month)?.label || month;
 
-  // Clear selection when month or filter changes
+  // Extract unique users from current expenses
+  const uniqueUsers = useMemo(() => {
+    const map = new Map<string, string>(); // id -> name
+    expenses.forEach(e => {
+      if (e.created_by_id && e.created_by_name) {
+        map.set(e.created_by_id, e.created_by_name);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [expenses]);
+
+  // Extract categories used in current expenses
+  const usedCategories = useMemo(() => {
+    const ids = new Set(expenses.map(e => e.category_id));
+    return categories.filter(c => ids.has(c.id));
+  }, [expenses, categories]);
+
+  const activeFilterCount = filterUsers.size + filterCategories.size;
+
+  // Clear selection when month or type filter changes
   useEffect(() => {
     setSelectedIds(new Set());
     setIsSelecting(false);
   }, [month, typeFilter]);
 
-  // Filter expenses by type
-  const filteredExpenses = typeFilter === 'all' ? expenses
-    : typeFilter === 'debit' ? expenses.filter(e => e.is_debit)
-    : expenses.filter(e => !e.is_debit);
+  // Apply all filters: type + user + category
+  const filteredExpenses = useMemo(() => {
+    let result = expenses;
+
+    // Type filter
+    if (typeFilter === 'debit') result = result.filter(e => e.is_debit);
+    else if (typeFilter === 'credit') result = result.filter(e => !e.is_debit);
+
+    // User filter
+    if (filterUsers.size > 0) {
+      result = result.filter(e => filterUsers.has(e.created_by_id));
+    }
+
+    // Category filter
+    if (filterCategories.size > 0) {
+      result = result.filter(e => filterCategories.has(e.category_id));
+    }
+
+    return result;
+  }, [expenses, typeFilter, filterUsers, filterCategories]);
 
   const groups = groupByDate(filteredExpenses);
 
-  // Daily summaries use ALL expenses (not filtered)
+  // Daily summaries now use filtered expenses (per user's choice A5=A)
   const dailySummary = (dateExpenses: Expense[]) => {
-    const allForDate = expenses.filter(e => dateExpenses.length > 0 && e.date === dateExpenses[0].date);
+    const allForDate = filteredExpenses.filter(e => dateExpenses.length > 0 && e.date === dateExpenses[0].date);
     const dayDebits = allForDate.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
     const dayCredits = allForDate.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
     return { dayDebits, dayCredits };
+  };
+
+  // Toggle helpers for filter multi-select
+  const toggleFilterUser = (uid: string) => {
+    setFilterUsers(prev => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  };
+
+  const toggleFilterCategory = (catId: string) => {
+    setFilterCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId);
+      else next.add(catId);
+      return next;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setFilterUsers(new Set());
+    setFilterCategories(new Set());
   };
 
   // Long press handlers
@@ -148,7 +213,6 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
 
   const handleCardClick = useCallback((expense: Expense, canModify: boolean) => {
     if (longPressTriggeredRef.current) {
-      // Long press just happened, don't treat as click
       return;
     }
     if (isSelecting) {
@@ -163,7 +227,6 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
     const filtered = categories.filter(c =>
       c.name.toLowerCase().includes(bulkCategorySearch.toLowerCase())
     );
-    // Check if selected items are mostly credits
     const selectedExpenses = filteredExpenses.filter(e => selectedIds.has(e.id));
     const mostlyCredits = selectedExpenses.filter(e => !e.is_debit).length > selectedExpenses.length / 2;
     if (mostlyCredits) {
@@ -189,7 +252,6 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
   };
 
   const handleExport = () => {
-    // Export always uses ALL expenses, not filtered
     const rows = expenses.map(e => ({
       Date: e.date,
       Type: e.is_debit ? 'Debit' : 'Credit',
@@ -231,7 +293,6 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
           </div>
           <button
             onClick={() => {
-              // Select all visible
               const allIds = new Set(filteredExpenses.map(e => e.id));
               setSelectedIds(allIds);
             }}
@@ -278,17 +339,130 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
           <button onClick={() => setShowExport(true)} className="p-2 text-muted-foreground hover:text-foreground">
             <Download className="h-5 w-5" />
           </button>
-          <Button size="sm" className="h-10 w-10 p-0" onClick={onAddExpense}>
-            <Plus className="h-5 w-5" />
-          </Button>
+          {/* Filter button */}
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+            <PopoverTrigger asChild>
+              <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
+                <SlidersHorizontal className="h-5 w-5" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 p-0" sideOffset={8}>
+              <div className="p-3 border-b border-border flex items-center justify-between">
+                <p className="text-sm font-semibold">Filters</p>
+                {activeFilterCount > 0 && (
+                  <button onClick={clearAllFilters} className="text-xs text-primary font-medium hover:underline">
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-[60vh] overflow-y-auto">
+                {/* Users section */}
+                {uniqueUsers.length > 1 && (
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">By User</p>
+                    <div className="space-y-0.5">
+                      {uniqueUsers.map(u => {
+                        const isActive = filterUsers.has(u.id);
+                        return (
+                          <button
+                            key={u.id}
+                            onClick={() => toggleFilterUser(u.id)}
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
+                              isActive ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
+                            }`}
+                          >
+                            <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
+                              isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {u.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="flex-1 text-left truncate">{u.name}</span>
+                            {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Categories section */}
+                <div className="p-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">By Category</p>
+                  <div className="space-y-0.5">
+                    {usedCategories.map(cat => {
+                      const isActive = filterCategories.has(cat.id);
+                      return (
+                        <button
+                          key={cat.id}
+                          onClick={() => toggleFilterCategory(cat.id)}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
+                            isActive ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
+                          }`}
+                        >
+                          <span
+                            className="h-6 w-6 rounded-full flex items-center justify-center text-xs shrink-0"
+                            style={{ backgroundColor: cat.color + '20' }}
+                          >
+                            {cat.icon}
+                          </span>
+                          <span className="flex-1 text-left truncate">{cat.name}</span>
+                          {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
+                        </button>
+                      );
+                    })}
+                    {usedCategories.length === 0 && (
+                      <p className="text-xs text-muted-foreground py-2">No categories in this month</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+
+      {/* Active filter chips */}
+      {!isSelecting && activeFilterCount > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from(filterUsers).map(uid => {
+            const user = uniqueUsers.find(u => u.id === uid);
+            return user ? (
+              <span key={uid} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                {user.name.split(' ')[0]}
+                <button onClick={() => toggleFilterUser(uid)} className="hover:text-primary/70">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : null;
+          })}
+          {Array.from(filterCategories).map(catId => {
+            const cat = categories.find(c => c.id === catId);
+            return cat ? (
+              <span key={catId} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                {cat.icon} {cat.name}
+                <button onClick={() => toggleFilterCategory(catId)} className="hover:text-primary/70">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ) : null;
+          })}
+          <button onClick={clearAllFilters} className="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
+            Clear all
+          </button>
         </div>
       )}
 
       {/* Type filter */}
       {!isSelecting && <TransactionTypeFilter value={typeFilter} onChange={onTypeFilterChange} />}
 
-      {/* Net Balance Banner */}
-      {!isSelecting && <NetBalanceBanner expenses={expenses} monthLabel={monthLabel} activeFilter={typeFilter} />}
+      {/* Net Balance Banner — uses filtered expenses */}
+      {!isSelecting && <NetBalanceBanner expenses={filteredExpenses} monthLabel={monthLabel} activeFilter={typeFilter} />}
 
       {/* Loading */}
       {isLoading && (
@@ -311,7 +485,14 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       {/* Empty states */}
       {!isLoading && filteredExpenses.length === 0 && (
         <div className="text-center py-16">
-          {typeFilter === 'debit' ? (
+          {activeFilterCount > 0 ? (
+            <>
+              <SlidersHorizontal className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
+              <p className="font-semibold text-lg">No matching transactions</p>
+              <p className="text-sm text-muted-foreground mb-4">Try adjusting your filters</p>
+              <Button variant="outline" onClick={clearAllFilters} className="h-11">Clear Filters</Button>
+            </>
+          ) : typeFilter === 'debit' ? (
             <>
               <ArrowUpRight className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
               <p className="font-semibold text-lg">No debit transactions in {monthLabel}</p>
