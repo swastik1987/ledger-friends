@@ -13,6 +13,49 @@ import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
+/**
+ * Detects debit/credit column patterns from CSV/XLSX headers and first few rows.
+ * Returns a format hint string for the AI, or null if no pattern detected.
+ */
+function detectFormatHint(csvText: string): string | null {
+  const lines = csvText.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  const headerLine = lines[0].toLowerCase();
+  const hints: string[] = [];
+
+  // Pattern 1: Separate Withdrawal/Deposit columns
+  if (/withdrawal/.test(headerLine) && /deposit/.test(headerLine)) {
+    hints.push('This statement has separate "Withdrawal" and "Deposit" columns. Withdrawal = debit (money out), Deposit = credit (money in). A transaction has amount in one column and the other is empty or zero.');
+  }
+
+  // Pattern 2: Separate Debit/Credit amount columns
+  if ((/debit[_ ]?(amount|amt)?/.test(headerLine) && /credit[_ ]?(amount|amt)?/.test(headerLine)) ||
+      (/dr[_ ]?(amount|amt)/.test(headerLine) && /cr[_ ]?(amount|amt)/.test(headerLine))) {
+    hints.push('This statement has separate "Debit Amount" and "Credit Amount" columns (may also appear as "Dr Amount"/"Cr Amount"). Amount in the Debit/Dr column = money out, amount in the Credit/Cr column = money in.');
+  }
+
+  // Pattern 3: Dr/Cr type indicator column
+  if (/\b(dr\.?\/cr\.?|type|txn[ _]?type|transaction[ _]?type)\b/.test(headerLine)) {
+    hints.push('This statement has a transaction type column. Values like "Dr", "DR", "D", "Debit", "Purchase" = debit (money out). Values like "Cr", "CR", "C", "Credit", "Refund", "Receipt" = credit (money in).');
+  }
+
+  // Pattern 4: Check for sign-based patterns in data rows
+  const dataRows = lines.slice(1, Math.min(6, lines.length));
+  const hasNegativeAmounts = dataRows.some(row => /,-\d|,"-?\d/.test(row));
+  const hasPositiveSignAmounts = dataRows.some(row => /,\+\d/.test(row));
+  if (hasNegativeAmounts || hasPositiveSignAmounts) {
+    hints.push('This statement uses signed amounts. Negative (-) values = debit (money out). Positive (+) values = credit (money in).');
+  }
+
+  // Pattern 5: Balance column for cross-verification
+  if (/balance|closing|running/.test(headerLine)) {
+    hints.push('A running/closing balance column is present. Use it to verify: if balance decreased from previous row, the transaction is debit; if balance increased, it is credit.');
+  }
+
+  return hints.length > 0 ? hints.join(' ') : null;
+}
+
 const PROCESSING_MESSAGES = [
   '🔓 Unlocking your file securely...',
   '📄 Extracting transactions...',
@@ -60,17 +103,23 @@ export default function UploadStatement() {
 
     try {
       let extractedText = '';
+      let formatHint: string | null = null;
       const ext = file.name.split('.').pop()?.toLowerCase();
       const arrayBuffer = await file.arrayBuffer();
 
       if (ext === 'csv') {
         const text = new TextDecoder().decode(arrayBuffer);
+        // Detect format from raw CSV before parsing
+        formatHint = detectFormatHint(text);
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         extractedText = JSON.stringify(result.data);
       } else if (ext === 'xlsx' || ext === 'xls') {
         const wb = XLSX.read(arrayBuffer);
         const ws = wb.Sheets[wb.SheetNames[0]];
-        extractedText = XLSX.utils.sheet_to_csv(ws);
+        const csvOutput = XLSX.utils.sheet_to_csv(ws);
+        // Detect format from converted CSV
+        formatHint = detectFormatHint(csvOutput);
+        extractedText = csvOutput;
       } else if (ext === 'pdf') {
         const pdfjsLib = await import('pdfjs-dist');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
@@ -85,7 +134,7 @@ export default function UploadStatement() {
       }
 
       const { data, error } = await supabase.functions.invoke('parse-statement', {
-        body: { extractedText },
+        body: { extractedText, formatHint },
       });
 
       if (error) throw error;
@@ -95,19 +144,36 @@ export default function UploadStatement() {
 
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
         const matchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
+
+        // Safely determine is_debit — flag for review if unclear
+        let isDebit = true;
+        let debitUncertain = false;
+        if (t.is_debit === true || t.is_debit === 'true') {
+          isDebit = true;
+        } else if (t.is_debit === false || t.is_debit === 'false') {
+          isDebit = false;
+        } else if (t.is_debit === undefined || t.is_debit === null) {
+          // AI didn't return is_debit at all — flag for manual review
+          isDebit = true; // default assumption but mark uncertain
+          debitUncertain = true;
+        }
+
+        const confidence = t.confidence || 0.5;
+        const needsReview = confidence < 0.75 || debitUncertain;
+
         return {
           temp_id: `draft-${i}`,
           date: t.date || new Date().toISOString().split('T')[0],
           description: t.description || 'Unknown',
           merchant_name: t.merchant_name,
           amount: Math.round(Math.abs(Number(t.amount) || 0)),
-          is_debit: t.is_debit !== false,
+          is_debit: isDebit,
           suggested_category_id: matchedCat?.id || miscCategory?.id || '',
           suggested_category_name: matchedCat?.name || 'Miscellaneous',
-          confidence: t.confidence || 0.5,
+          confidence,
           reference_number: t.reference_number,
           notes: t.raw_description || null,
-          needs_review: (t.confidence || 0.5) < 0.75,
+          needs_review: needsReview,
           review_status: 'pending' as const,
         };
       });
@@ -192,6 +258,13 @@ export default function UploadStatement() {
       suggested_category_id: categoryId,
       suggested_category_name: cat.name,
       category_changed: true,
+    } : d));
+  };
+
+  const toggleDebitCredit = (tempId: string) => {
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      is_debit: !d.is_debit,
     } : d));
   };
 
@@ -291,9 +364,17 @@ export default function UploadStatement() {
                       </SelectContent>
                     </Select>
                     <div className="ml-auto text-right shrink-0">
-                      <p className={`font-mono text-sm font-semibold ${draft.is_debit ? '' : 'text-emerald-600'}`}>
-                        {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
-                      </p>
+                      <button
+                        onClick={() => toggleDebitCredit(draft.temp_id)}
+                        className={`font-mono text-sm font-semibold px-2 py-0.5 rounded-lg border transition-colors ${
+                          draft.is_debit
+                            ? 'border-transparent hover:border-red-200 hover:bg-red-50'
+                            : 'text-emerald-600 border-transparent hover:border-emerald-200 hover:bg-emerald-50'
+                        }`}
+                        title="Tap to toggle debit/credit"
+                      >
+                        {draft.is_debit ? '↑' : '↓'} {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
+                      </button>
                       <p className="text-xs text-muted-foreground">{draft.date}</p>
                     </div>
                   </div>
@@ -303,7 +384,9 @@ export default function UploadStatement() {
                       <p className="text-xs text-muted-foreground text-left line-clamp-2">{draft.notes}</p>
                     )}
                     {draft.needs_review && draft.review_status !== 'discarded' && (
-                      <p className="text-xs text-warning text-left mt-1">⚠️ Low confidence ({(draft.confidence * 100).toFixed(0)}%)</p>
+                      <p className="text-xs text-warning text-left mt-1">
+                        ⚠️ {draft.confidence < 0.75 ? `Low confidence (${(draft.confidence * 100).toFixed(0)}%)` : 'Verify debit/credit direction — tap amount to toggle'}
+                      </p>
                     )}
                   </div>
                 </div>

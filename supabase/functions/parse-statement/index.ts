@@ -10,12 +10,23 @@ const corsHeaders = {
 
 const SYSTEM_INSTRUCTION = `You are a financial data extraction specialist. Extract ONLY transaction rows from the provided bank or credit card statement text.
 
+CRITICAL — Identifying Debit vs Credit:
+Different banks use different formats to indicate debit (money out) and credit (money in). You MUST correctly identify the transaction direction by recognising ALL of these common patterns:
+- Separate columns: "Withdrawal Amount" / "Deposit Amount", or "Debit" / "Credit" columns — amount appears in one column, the other is empty or zero.
+- Dr/Cr suffix or column: Amount followed by "Dr" or "DR" = debit (money out). Amount followed by "Cr" or "CR" = credit (money in). A separate "Dr/Cr" column may indicate direction.
+- Sign-based: Negative amounts (-) or amounts with a minus sign = debit (money out). Positive amounts (+) = credit (money in). Some banks reverse this — use context clues like column headers.
+- Single amount column with type indicator: A "Transaction Type" or "Type" column with values like "Debit"/"Credit", "DR"/"CR", "D"/"C", "Purchase"/"Refund", "Payment"/"Receipt".
+- Credit card statements: "Payment" or "Credit" entries are money in (is_debit=false). Purchases and fees are money out (is_debit=true).
+- Balance column clues: If a running balance column exists, compare consecutive balances — if balance decreased, the transaction is debit; if increased, it is credit.
+If the format includes a hint from the client (e.g. "FORMAT_HINT: ..."), use it to confirm your interpretation.
+
 Rules:
 1. Discard everything that is not a transaction: account details, opening/closing balances, bank headers, footers, interest summaries, promotional content.
-2. For each transaction return: date (ISO format YYYY-MM-DD), description (clean payee name), raw_description (the entire original description text exactly as it appears in the statement, preserving all details, codes, and reference info), merchant_name (if identifiable separately), amount (positive number), is_debit (true = money out, false = credit/refund), reference_number (if present).
-3. Assign the best category from ONLY this list: Food & Dining, Groceries, Transport, Fuel, Shopping, Entertainment, Travel, Healthcare, Utilities, Rent, Education, Personal Care, Subscriptions, EMI/Loan, Insurance, Investments, Gifts & Donations, Office & Business, Miscellaneous
-4. Set confidence (0.0 to 1.0) for your category choice. Only use >0.85 when you are very certain.
-5. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
+2. For each transaction return: date (ISO format YYYY-MM-DD), description (clean payee name), raw_description (the entire original description text exactly as it appears in the statement, preserving all details, codes, and reference info), merchant_name (if identifiable separately), amount (always a positive number regardless of direction), is_debit (boolean: true = money out / expense / withdrawal / purchase, false = money in / credit / deposit / refund / salary), reference_number (if present).
+3. For DEBIT transactions (is_debit=true), assign the best category from: Food & Dining, Groceries, Transport, Fuel, Shopping, Entertainment, Travel, Healthcare, Utilities, Rent, Education, Personal Care, Subscriptions, EMI/Loan, Insurance, Investments, Gifts & Donations, Office & Business, Miscellaneous
+4. For CREDIT transactions (is_debit=false), assign the best category from: Salary / Income, Refund, Reimbursement, Cashback / Reward, Interest Earned, Other Income. If none of these fit, you may use a debit category.
+5. Set confidence (0.0 to 1.0) for your category choice. Only use >0.85 when you are very certain.
+6. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -23,7 +34,7 @@ serve(async (req) => {
   }
 
   try {
-    const { extractedText } = await req.json();
+    const { extractedText, formatHint } = await req.json();
     if (!extractedText || typeof extractedText !== 'string') {
       return new Response(JSON.stringify({ error: 'extractedText is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -33,7 +44,7 @@ serve(async (req) => {
 
     const geminiBody = {
       system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-      contents: [{ parts: [{ text: `Parse this statement:\n\n${extractedText}` }] }],
+      contents: [{ parts: [{ text: `${formatHint ? `FORMAT_HINT: ${formatHint}\n\n` : ''}Parse this statement:\n\n${extractedText}` }] }],
       generationConfig: {
         temperature: 0.1,
         responseMimeType: 'application/json',
