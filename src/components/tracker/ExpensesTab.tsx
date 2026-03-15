@@ -20,13 +20,11 @@ import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
-type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'category-asc' | 'category-desc';
+type SortOption = 'date-desc' | 'date-asc' | 'category-asc' | 'category-desc';
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: 'date-desc', label: 'Date (Newest first)' },
   { value: 'date-asc', label: 'Date (Oldest first)' },
-  { value: 'amount-desc', label: 'Amount (High to Low)' },
-  { value: 'amount-asc', label: 'Amount (Low to High)' },
   { value: 'category-asc', label: 'Category (A → Z)' },
   { value: 'category-desc', label: 'Category (Z → A)' },
 ];
@@ -36,7 +34,11 @@ const SORT_STORAGE_KEY = 'expensesync-sort-pref';
 function readSortPref(trackerId: string): SortOption {
   try {
     const data = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || '{}');
-    return data[trackerId] || 'date-desc';
+    const val = data[trackerId];
+    // Migrate old amount-* prefs to default
+    if (val === 'amount-desc' || val === 'amount-asc') return 'date-desc';
+    if (val === 'date-desc' || val === 'date-asc' || val === 'category-asc' || val === 'category-desc') return val;
+    return 'date-desc';
   } catch { return 'date-desc'; }
 }
 
@@ -65,13 +67,29 @@ function formatDateHeader(dateStr: string) {
   return format(d, 'EEE, d MMM');
 }
 
-function groupByDate(expenses: Expense[]) {
+function groupByDate(expenses: Expense[], ascending: boolean) {
   const groups: Record<string, Expense[]> = {};
   expenses.forEach(e => {
     if (!groups[e.date]) groups[e.date] = [];
     groups[e.date].push(e);
   });
-  return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+  // Sort groups by date key; within each group, amount descending
+  return Object.entries(groups)
+    .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
+    .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
+}
+
+function groupByCategory(expenses: Expense[], categories: Category[], ascending: boolean) {
+  const groups: Record<string, Expense[]> = {};
+  expenses.forEach(e => {
+    const catName = categories.find(c => c.id === e.category_id)?.name || 'Unknown';
+    if (!groups[catName]) groups[catName] = [];
+    groups[catName].push(e);
+  });
+  // Sort groups by category name; within each group, amount descending
+  return Object.entries(groups)
+    .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
+    .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
 }
 
 interface Props {
@@ -188,39 +206,18 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       result = result.filter(e => filterCategories.has(e.category_id));
     }
 
-    // Apply sorting
-    const sorted = [...result].sort((a, b) => {
-      switch (sortBy) {
-        case 'date-desc': return b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at);
-        case 'date-asc': return a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at);
-        case 'amount-desc': return b.amount - a.amount;
-        case 'amount-asc': return a.amount - b.amount;
-        case 'category-asc': {
-          const catA = categories.find(c => c.id === a.category_id)?.name || '';
-          const catB = categories.find(c => c.id === b.category_id)?.name || '';
-          return catA.localeCompare(catB);
-        }
-        case 'category-desc': {
-          const catA = categories.find(c => c.id === a.category_id)?.name || '';
-          const catB = categories.find(c => c.id === b.category_id)?.name || '';
-          return catB.localeCompare(catA);
-        }
-        default: return 0;
-      }
-    });
+    return result;
+  }, [expenses, typeFilter, filterUsers, filterCategories]);
 
-    return sorted;
-  }, [expenses, typeFilter, filterUsers, filterCategories, sortBy, categories]);
+  const isCategorySort = sortBy === 'category-asc' || sortBy === 'category-desc';
+  const isAscending = sortBy === 'date-asc' || sortBy === 'category-asc';
 
-  const groups = groupByDate(filteredExpenses);
-
-  // Daily summaries now use filtered expenses (per user's choice A5=A)
-  const dailySummary = (dateExpenses: Expense[]) => {
-    const allForDate = filteredExpenses.filter(e => dateExpenses.length > 0 && e.date === dateExpenses[0].date);
-    const dayDebits = allForDate.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
-    const dayCredits = allForDate.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
-    return { dayDebits, dayCredits };
-  };
+  const groups = useMemo(() => {
+    if (isCategorySort) {
+      return groupByCategory(filteredExpenses, categories, isAscending);
+    }
+    return groupByDate(filteredExpenses, isAscending);
+  }, [filteredExpenses, sortBy, categories, isCategorySort, isAscending]);
 
   // Toggle helpers for filter multi-select
   const toggleFilterUser = (uid: string) => {
@@ -617,18 +614,41 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       )}
 
       {/* Transaction groups */}
-      {!isLoading && groups.map(([date, items]) => {
-        const { dayDebits, dayCredits } = dailySummary(items);
+      {!isLoading && groups.map(([groupKey, items]) => {
+        const groupDebits = items.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
+        const groupCredits = items.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
+
+        // For category sort, find the category to show icon+color in header
+        const groupCategory = isCategorySort ? categories.find(c => c.name === groupKey) : null;
+
         return (
-          <div key={date}>
+          <div key={groupKey}>
             <div className="sticky top-[105px] bg-background py-1 z-[5]">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                {formatDateHeader(date)}
-              </p>
+              {isCategorySort ? (
+                <div className="flex items-center gap-2">
+                  {groupCategory && (
+                    <span
+                      className="h-5 w-5 rounded-full flex items-center justify-center text-xs"
+                      style={{ backgroundColor: (groupCategory.color || '#ccc') + '20' }}
+                    >
+                      {groupCategory.icon}
+                    </span>
+                  )}
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {groupKey}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {formatDateHeader(groupKey)}
+                </p>
+              )}
               <p className="text-[10px] text-muted-foreground">
-                <span className="text-red-500">↑ ₹{dayDebits.toLocaleString('en-IN')}</span>
+                <span className="text-red-500">↑ ₹{groupDebits.toLocaleString('en-IN')}</span>
                 {' '}
-                <span className="text-emerald-500">↓ ₹{dayCredits.toLocaleString('en-IN')}</span>
+                <span className="text-emerald-500">↓ ₹{groupCredits.toLocaleString('en-IN')}</span>
+                {' · '}
+                <span>{items.length} txn{items.length !== 1 ? 's' : ''}</span>
               </p>
             </div>
             <div className="space-y-2">

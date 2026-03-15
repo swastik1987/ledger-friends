@@ -36,8 +36,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
   const [searchParams] = useSearchParams();
 
   const handleCategoryClick = (categoryId: string, isDebit: boolean) => {
-    const typeValue = isDebit ? 'debit' : 'credit';
-    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeValue}&filterCategory=${categoryId}`);
+    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeFilter}&filterCategory=${categoryId}&month=${month}`);
   };
 
   // Fetch previous month data for MoM trend
