@@ -182,10 +182,16 @@ export default function UploadStatement() {
         const confidence = t.confidence || 0.5;
         const needsReview = confidence < 0.75 || debitUncertain;
 
+        // AI-curated short description (max 25 chars), raw description goes to notes
+        const rawDesc = t.raw_description || t.description || 'Unknown';
+        const shortDesc = (t.description || 'Unknown').length > 25
+          ? (t.description || 'Unknown').slice(0, 25).trim() + '…'
+          : (t.description || 'Unknown');
+
         return {
           temp_id: `draft-${i}`,
           date: t.date || new Date().toISOString().split('T')[0],
-          description: t.description || 'Unknown',
+          description: shortDesc,
           merchant_name: t.merchant_name,
           amount: Math.round(Math.abs(Number(t.amount) || 0)),
           is_debit: isDebit,
@@ -193,7 +199,7 @@ export default function UploadStatement() {
           suggested_category_name: matchedCat?.name || 'Miscellaneous',
           confidence,
           reference_number: t.reference_number,
-          notes: t.raw_description || null,
+          notes: rawDesc !== shortDesc ? rawDesc : null,
           needs_review: needsReview,
           review_status: 'pending' as const,
         };

@@ -1,6 +1,7 @@
 import { Expense, Category } from '@/types';
+import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, subMonths, addMonths, parse } from 'date-fns';
-import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check } from 'lucide-react';
+import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,6 +19,34 @@ import NetBalanceBanner from './NetBalanceBanner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
+
+type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'category-asc' | 'category-desc';
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'date-desc', label: 'Date (Newest first)' },
+  { value: 'date-asc', label: 'Date (Oldest first)' },
+  { value: 'amount-desc', label: 'Amount (High to Low)' },
+  { value: 'amount-asc', label: 'Amount (Low to High)' },
+  { value: 'category-asc', label: 'Category (A → Z)' },
+  { value: 'category-desc', label: 'Category (Z → A)' },
+];
+
+const SORT_STORAGE_KEY = 'expensesync-sort-pref';
+
+function readSortPref(trackerId: string): SortOption {
+  try {
+    const data = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || '{}');
+    return data[trackerId] || 'date-desc';
+  } catch { return 'date-desc'; }
+}
+
+function writeSortPref(trackerId: string, value: SortOption) {
+  try {
+    const data = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || '{}');
+    data[trackerId] = value;
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
 
 function generateMonths() {
   const months = [];
@@ -66,6 +95,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
   const bulkUpdateCategory = useBulkUpdateCategory();
   const bulkDeleteExpenses = useBulkDeleteExpenses();
   const [showExport, setShowExport] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -80,10 +110,38 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
   // Bulk delete confirmation
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
+  // Sort state — persists in localStorage
+  const [sortBy, setSortBy] = useState<SortOption>(() => readSortPref(trackerId));
+  const [sortOpen, setSortOpen] = useState(false);
+
+  const handleSortChange = (value: SortOption) => {
+    setSortBy(value);
+    writeSortPref(trackerId, value);
+    setSortOpen(false);
+  };
+
   // Filter state — persists across month changes, resets on page exit (component unmount)
   const [filterUsers, setFilterUsers] = useState<Set<string>>(new Set());
   const [filterCategories, setFilterCategories] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
+
+  // Auto-apply filters from URL params (e.g. from dashboard category click)
+  const filterAppliedRef = useRef(false);
+  useEffect(() => {
+    if (filterAppliedRef.current) return;
+    const urlFilterCat = searchParams.get('filterCategory');
+    const urlFilterType = searchParams.get('type');
+    if (urlFilterCat) {
+      setFilterCategories(new Set([urlFilterCat]));
+      // Clean up the URL param after applying
+      setSearchParams(prev => {
+        const params = new URLSearchParams(prev);
+        params.delete('filterCategory');
+        return params;
+      }, { replace: true });
+      filterAppliedRef.current = true;
+    }
+  }, [searchParams, setSearchParams]);
 
   const monthLabel = months.find(m => m.value === month)?.label || month;
 
@@ -130,8 +188,29 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       result = result.filter(e => filterCategories.has(e.category_id));
     }
 
-    return result;
-  }, [expenses, typeFilter, filterUsers, filterCategories]);
+    // Apply sorting
+    const sorted = [...result].sort((a, b) => {
+      switch (sortBy) {
+        case 'date-desc': return b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at);
+        case 'date-asc': return a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at);
+        case 'amount-desc': return b.amount - a.amount;
+        case 'amount-asc': return a.amount - b.amount;
+        case 'category-asc': {
+          const catA = categories.find(c => c.id === a.category_id)?.name || '';
+          const catB = categories.find(c => c.id === b.category_id)?.name || '';
+          return catA.localeCompare(catB);
+        }
+        case 'category-desc': {
+          const catA = categories.find(c => c.id === a.category_id)?.name || '';
+          const catB = categories.find(c => c.id === b.category_id)?.name || '';
+          return catB.localeCompare(catA);
+        }
+        default: return 0;
+      }
+    });
+
+    return sorted;
+  }, [expenses, typeFilter, filterUsers, filterCategories, sortBy, categories]);
 
   const groups = groupByDate(filteredExpenses);
 
@@ -339,6 +418,28 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
           <button onClick={() => setShowExport(true)} className="p-2 text-muted-foreground hover:text-foreground">
             <Download className="h-5 w-5" />
           </button>
+          {/* Sort button */}
+          <Popover open={sortOpen} onOpenChange={setSortOpen}>
+            <PopoverTrigger asChild>
+              <button className={`relative p-2 transition-colors ${sortBy !== 'date-desc' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                <ArrowUpDown className="h-5 w-5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-1" sideOffset={8}>
+              {SORT_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleSortChange(opt.value)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    sortBy === opt.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="flex-1 text-left">{opt.label}</span>
+                  {sortBy === opt.value && <Check className="h-4 w-4 text-primary shrink-0" />}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
           {/* Filter button */}
           <Popover open={filterOpen} onOpenChange={setFilterOpen}>
             <PopoverTrigger asChild>

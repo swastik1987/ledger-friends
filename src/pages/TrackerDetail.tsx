@@ -83,10 +83,10 @@ export default function TrackerDetail() {
       {/* Tabs */}
       <div className="max-w-lg mx-auto w-full flex-1">
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 bg-background rounded-none border-b border-border">
-            <TabsTrigger value="expenses">Transactions</TabsTrigger>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 bg-background rounded-none border-b border-border h-11 p-0">
+            <TabsTrigger value="expenses" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Transactions</TabsTrigger>
+            <TabsTrigger value="dashboard" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Dashboard</TabsTrigger>
+            <TabsTrigger value="settings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="expenses" className="mt-0">

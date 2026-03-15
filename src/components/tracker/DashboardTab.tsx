@@ -2,8 +2,9 @@ import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { subMonths, addMonths, format, parse } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, ChevronRightIcon } from 'lucide-react';
 import { useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useExpenses } from '@/hooks/useExpenses';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
@@ -31,6 +32,13 @@ interface Props {
 
 export default function DashboardTab({ trackerId, expenses, categories, month, onMonthChange, isLoading, typeFilter, onTypeFilterChange }: Props) {
   const months = generateMonths();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const handleCategoryClick = (categoryId: string, isDebit: boolean) => {
+    const typeValue = isDebit ? 'debit' : 'credit';
+    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeValue}&filterCategory=${categoryId}`);
+  };
 
   // Fetch previous month data for MoM trend
   const prevMonth = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
@@ -342,7 +350,11 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                 ? (totalDebits > 0 ? (d.total / totalDebits) * 100 : 0)
                 : (totalCredits > 0 ? (d.total / totalCredits) * 100 : 0);
             return (
-              <div key={`${d.category?.id}-${idx}`}>
+              <button
+                key={`${d.category?.id}-${idx}`}
+                className="w-full text-left hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-xl transition-colors cursor-pointer"
+                onClick={() => d.category?.id && handleCategoryClick(d.category.id, d.isDebit)}
+              >
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ backgroundColor: (d.category?.color || '#ccc') + '20' }}>
                     {d.category?.icon}
@@ -363,6 +375,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                   <p className={`font-mono text-sm font-semibold flex-shrink-0 ${d.isDebit ? 'text-foreground' : 'text-emerald-600'}`}>
                     {d.isDebit ? '' : '+'}₹{Math.round(d.total).toLocaleString('en-IN')}
                   </p>
+                  <ChevronRightIcon className="h-4 w-4 text-muted-foreground/50 flex-shrink-0" />
                 </div>
                 <div className="h-1.5 bg-muted rounded-full mt-2 ml-[52px]">
                   <div
@@ -373,7 +386,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                     }}
                   />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
