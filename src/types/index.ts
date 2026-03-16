@@ -81,4 +81,5 @@ export interface DraftExpense {
 export interface TrackerWithStats extends Tracker {
   member_count: number;
   monthly_total: number;
+  date_range?: { min: string; max: string }; // earliest and latest expense dates
 }

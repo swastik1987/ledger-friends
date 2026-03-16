@@ -44,10 +44,27 @@ export function useTrackers() {
 
         const monthlyTotal = expenses?.reduce((sum, e) => sum + Number(e.amount), 0) ?? 0;
 
+        // Get earliest and latest expense dates
+        const { data: minRow } = await supabase
+          .from('expenses')
+          .select('date')
+          .eq('tracker_id', tracker.id)
+          .order('date', { ascending: true })
+          .limit(1)
+          .single();
+        const { data: maxRow } = await supabase
+          .from('expenses')
+          .select('date')
+          .eq('tracker_id', tracker.id)
+          .order('date', { ascending: false })
+          .limit(1)
+          .single();
+
         results.push({
           ...tracker,
           member_count: memberCount ?? 0,
           monthly_total: monthlyTotal,
+          date_range: minRow && maxRow ? { min: minRow.date, max: maxRow.date } : undefined,
         } as TrackerWithStats);
       }
       return results;

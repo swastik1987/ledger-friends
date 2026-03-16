@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTrackers, useCreateTracker } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ChevronRight, FolderOpen, Plus, LogOut, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,7 +123,10 @@ export default function HomePage() {
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-lg truncate">{tracker.name}</p>
               <p className="font-mono text-lg font-medium">₹{tracker.monthly_total.toLocaleString('en-IN')}</p>
-              <p className="text-xs text-muted-foreground">{tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · Total spent</p>
+              <p className="text-xs text-muted-foreground">
+                {tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · Total spent
+                {tracker.date_range ? ` between ${format(parseISO(tracker.date_range.min), 'MMM yyyy')}${tracker.date_range.min.slice(0, 7) !== tracker.date_range.max.slice(0, 7) ? ` – ${format(parseISO(tracker.date_range.max), 'MMM yyyy')}` : ''}` : ''}
+              </p>
             </div>
             <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
           </button>

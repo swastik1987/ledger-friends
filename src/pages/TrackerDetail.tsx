@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTracker, useTrackerMembers, useCategories } from '@/hooks/useTrackers';
-import { useExpenses, useExpenseRealtime } from '@/hooks/useExpenses';
+import { useExpenses, useExpenseRealtime, useExpenseMonths } from '@/hooks/useExpenses';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useTransactionTypeFilter } from '@/hooks/useTransactionTypeFilter';
@@ -22,11 +22,16 @@ export default function TrackerDetail() {
   const { setActiveTrackerId } = useApp();
 
   const tab = searchParams.get('tab') || 'expenses';
-  const month = searchParams.get('month') || format(new Date(), 'yyyy-MM');
 
   const { data: tracker } = useTracker(trackerId!);
   const { data: members } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
+  const { data: availableMonths } = useExpenseMonths(trackerId!);
+
+  // Default to latest month with data (first non-'all' entry), fallback to current month
+  const latestMonth = availableMonths?.find(m => m.value !== 'all')?.value || format(new Date(), 'yyyy-MM');
+  const month = searchParams.get('month') || latestMonth;
+
   const { data: expenses, isLoading: expensesLoading } = useExpenses(trackerId!, month);
   const [typeFilter, setTypeFilter] = useTransactionTypeFilter(trackerId!);
 

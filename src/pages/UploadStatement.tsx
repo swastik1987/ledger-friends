@@ -116,10 +116,11 @@ function parseDateValue(val: string): string {
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
 
 /**
- * Find the best matching system/tracker category by name (>=80% similarity).
+ * Find the best matching system/tracker category by name.
+ * threshold defaults to 0.95 (95% similarity) for bulk Excel uploads.
  * Returns the matched Category or null.
  */
-function findBestCategoryMatch(name: string, categories: Category[]): Category | null {
+function findBestCategoryMatch(name: string, categories: Category[], threshold = 0.95): Category | null {
   if (!name) return null;
   let best: Category | null = null;
   let bestScore = 0;
@@ -130,7 +131,7 @@ function findBestCategoryMatch(name: string, categories: Category[]): Category |
       best = cat;
     }
   }
-  return bestScore >= 0.8 ? best : null;
+  return bestScore >= threshold ? best : null;
 }
 
 // ──────────────────────────────────────────────────────────────────────
