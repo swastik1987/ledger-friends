@@ -287,16 +287,14 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
     setIsSelecting(false);
   }, []);
 
-  const handleCardClick = useCallback((expense: Expense, canModify: boolean) => {
+  const handleCardClick = useCallback((expense: Expense) => {
     if (longPressTriggeredRef.current) {
       return;
     }
     if (isSelecting) {
       toggleSelect(expense.id);
-    } else if (canModify) {
-      onEditExpense(expense.id);
     }
-  }, [isSelecting, toggleSelect, onEditExpense]);
+  }, [isSelecting, toggleSelect]);
 
   // Bulk category change
   const sortedBulkCategories = (() => {
@@ -667,7 +665,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                     onContextMenu={(e) => e.preventDefault()}
                   >
                     <button
-                      onClick={() => handleCardClick(expense, canModify)}
+                      onClick={() => handleCardClick(expense)}
                       className="w-full text-left"
                     >
                       <div className="flex items-center gap-3">

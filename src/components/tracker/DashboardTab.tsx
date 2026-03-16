@@ -2,10 +2,11 @@ import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { subMonths, addMonths, format, parse } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, ChevronRightIcon } from 'lucide-react';
-import { useMemo } from 'react';
+import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, ChevronRightIcon, GitCompareArrows, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useExpenses } from '@/hooks/useExpenses';
+import { Button } from '@/components/ui/button';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
@@ -42,6 +43,20 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
   // Fetch previous month data for MoM trend
   const prevMonth = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
   const { data: prevExpenses } = useExpenses(trackerId, prevMonth);
+
+  // Comparison mode state
+  const [compareEnabled, setCompareEnabled] = useState(false);
+  const [compareMonth, setCompareMonth] = useState(() => prevMonth);
+  // Available comparison months = all months except the currently selected one
+  const compareMonths = useMemo(() => months.filter(m => m.value !== month), [months, month]);
+  // Fetch comparison month data (only when enabled)
+  const { data: compareExpenses } = useExpenses(trackerId, compareEnabled ? compareMonth : '');
+
+  // Reset compare month to prev when main month changes
+  useEffect(() => {
+    const newPrev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
+    setCompareMonth(newPrev);
+  }, [month]);
 
   const debitExpenses = useMemo(() => expenses.filter(e => e.is_debit), [expenses]);
   const creditExpenses = useMemo(() => expenses.filter(e => !e.is_debit), [expenses]);
@@ -148,7 +163,44 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
     return netCategoryData;
   }, [typeFilter, debitCategoryData, creditCategoryData, netCategoryData]);
 
-  const breakdownMaxTotal = Math.max(...breakdownData.map(d => d.total), 1);
+  // Build comparison category data
+  const compareCategoryMap = useMemo(() => {
+    if (!compareEnabled || !compareExpenses) return new Map<string, number>();
+    const map = new Map<string, number>();
+    const filtered = typeFilter === 'debit'
+      ? compareExpenses.filter(e => e.is_debit)
+      : typeFilter === 'credit'
+        ? compareExpenses.filter(e => !e.is_debit)
+        : compareExpenses;
+    filtered.forEach(e => {
+      map.set(e.category_id, (map.get(e.category_id) || 0) + e.amount);
+    });
+    return map;
+  }, [compareEnabled, compareExpenses, typeFilter]);
+
+  // Merged breakdown: current + categories only in comparison month
+  const mergedBreakdownData = useMemo(() => {
+    if (!compareEnabled || !compareExpenses) return breakdownData;
+    const currentCatIds = new Set(breakdownData.map(d => d.category?.id));
+    const extraEntries: typeof breakdownData = [];
+    compareCategoryMap.forEach((total, catId) => {
+      if (!currentCatIds.has(catId)) {
+        const cat = categories.find(c => c.id === catId);
+        if (cat) {
+          const isDebit = typeFilter === 'credit' ? false : typeFilter === 'debit' ? true :
+            (compareExpenses || []).filter(e => e.category_id === catId && e.is_debit).reduce((s, e) => s + e.amount, 0) >=
+            (compareExpenses || []).filter(e => e.category_id === catId && !e.is_debit).reduce((s, e) => s + e.amount, 0);
+          extraEntries.push({ category: cat, total: 0, count: 0, isDebit: isDebit });
+        }
+      }
+    });
+    return [...breakdownData, ...extraEntries];
+  }, [breakdownData, compareEnabled, compareExpenses, compareCategoryMap, categories, typeFilter]);
+
+  const breakdownMaxTotal = Math.max(
+    ...mergedBreakdownData.map(d => Math.max(d.total, compareCategoryMap.get(d.category?.id || '') || 0)),
+    1
+  );
 
   // Top 5
   const top5 = useMemo(() => {
@@ -336,18 +388,59 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
       </div>
 
       {/* Category Breakdown */}
-      {breakdownData.length > 0 && (
+      {(mergedBreakdownData.length > 0 || compareEnabled) && (
         <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
-          <h3 className="font-semibold text-sm">
-            {typeFilter === 'debit' ? 'Spending by Category' : typeFilter === 'credit' ? 'Income by Category' : 'Category Breakdown (Net)'}
-          </h3>
-          {breakdownData.map((d, idx) => {
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-semibold text-sm">
+              {typeFilter === 'debit' ? 'Spending by Category' : typeFilter === 'credit' ? 'Income by Category' : 'Category Breakdown (Net)'}
+            </h3>
+            {!compareEnabled ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-primary"
+                onClick={() => setCompareEnabled(true)}
+              >
+                <GitCompareArrows className="h-3.5 w-3.5" />
+                Compare
+              </Button>
+            ) : (
+              <button
+                onClick={() => setCompareEnabled(false)}
+                className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {compareEnabled && (
+            <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-2">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">vs</span>
+              <Select value={compareMonth} onValueChange={setCompareMonth}>
+                <SelectTrigger className="h-8 text-xs flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {compareMonths.map(m => (
+                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {mergedBreakdownData.map((d, idx) => {
+            const compareTotal = compareCategoryMap.get(d.category?.id || '') || 0;
             const pctOfMax = breakdownMaxTotal > 0 ? (d.total / breakdownMaxTotal) * 100 : 0;
+            const comparePctOfMax = breakdownMaxTotal > 0 ? (compareTotal / breakdownMaxTotal) * 100 : 0;
             const pctOfTotal = typeFilter === 'all'
               ? (totalDebits + totalCredits > 0 ? (d.total / (totalDebits + totalCredits)) * 100 : 0)
               : typeFilter === 'debit'
                 ? (totalDebits > 0 ? (d.total / totalDebits) * 100 : 0)
                 : (totalCredits > 0 ? (d.total / totalCredits) * 100 : 0);
+            // Change percentage for comparison
+            const changePct = compareEnabled && compareTotal > 0
+              ? Math.round(((d.total - compareTotal) / compareTotal) * 100)
+              : compareEnabled && d.total > 0 ? 100 : null;
             return (
               <button
                 key={`${d.category?.id}-${idx}`}
@@ -369,21 +462,54 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                       )}
                       <p className="font-medium text-sm truncate">{d.category?.name}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">{d.count} txn{d.count !== 1 ? 's' : ''} · {pctOfTotal.toFixed(1)}%</p>
+                    <p className="text-xs text-muted-foreground">
+                      {d.count > 0 ? `${d.count} txn${d.count !== 1 ? 's' : ''} · ${pctOfTotal.toFixed(1)}%` : 'No txns this month'}
+                    </p>
                   </div>
-                  <p className={`font-mono text-sm font-semibold flex-shrink-0 ${d.isDebit ? 'text-foreground' : 'text-emerald-600'}`}>
-                    {d.isDebit ? '' : '+'}₹{Math.round(d.total).toLocaleString('en-IN')}
-                  </p>
+                  <div className="text-right flex-shrink-0">
+                    <p className={`font-mono text-sm font-semibold ${d.isDebit ? 'text-foreground' : 'text-emerald-600'}`}>
+                      {d.total > 0 ? `${d.isDebit ? '' : '+'}₹${Math.round(d.total).toLocaleString('en-IN')}` : '-'}
+                    </p>
+                    {compareEnabled && (
+                      <div className="flex items-center justify-end gap-1 mt-0.5">
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {compareTotal > 0 ? `₹${Math.round(compareTotal).toLocaleString('en-IN')}` : '-'}
+                        </span>
+                        {changePct !== null && (
+                          <span className={`text-[10px] font-medium ${
+                            d.isDebit
+                              ? (changePct > 0 ? 'text-amber-600' : 'text-emerald-600')
+                              : (changePct > 0 ? 'text-emerald-600' : 'text-amber-600')
+                          }`}>
+                            {changePct > 0 ? '+' : ''}{changePct}%
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <ChevronRightIcon className="h-4 w-4 text-muted-foreground/50 flex-shrink-0" />
                 </div>
-                <div className="h-1.5 bg-muted rounded-full mt-2 ml-[52px]">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${pctOfMax}%`,
-                      backgroundColor: d.isDebit ? (d.category?.color || '#ccc') : '#10B981',
-                    }}
-                  />
+                <div className="mt-2 ml-[52px] space-y-1">
+                  <div className="h-1.5 bg-muted rounded-full">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${pctOfMax}%`,
+                        backgroundColor: d.isDebit ? (d.category?.color || '#ccc') : '#10B981',
+                      }}
+                    />
+                  </div>
+                  {compareEnabled && (
+                    <div className="h-1.5 bg-muted rounded-full">
+                      <div
+                        className="h-full rounded-full transition-all duration-500 opacity-40"
+                        style={{
+                          width: `${comparePctOfMax}%`,
+                          backgroundColor: d.isDebit ? (d.category?.color || '#ccc') : '#10B981',
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </button>
             );
