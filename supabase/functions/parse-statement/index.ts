@@ -28,18 +28,57 @@ Rules:
 5. Set confidence (0.0 to 1.0) for your category choice. Only use >0.85 when you are very certain.
 6. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
 
+const EMOJI_INSTRUCTION = `You are an emoji expert. For each category name provided, suggest the single best emoji that visually represents that category. Return a JSON object where each key is the category name and the value is a single emoji character. No markdown, no explanation. Response must start with { and end with }.`;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { extractedText, formatHint } = await req.json();
-    if (!extractedText || typeof extractedText !== 'string') {
-      return new Response(JSON.stringify({ error: 'extractedText is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+    const body = await req.json();
+    const { mode } = body;
+
     if (!GEMINI_API_KEY) {
       return new Response(JSON.stringify({ error: 'GEMINI_API_KEY secret not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Mode: suggest-emojis — returns { categoryName: emoji } mapping
+    if (mode === 'suggest-emojis') {
+      const { categoryNames } = body;
+      if (!Array.isArray(categoryNames) || categoryNames.length === 0) {
+        return new Response(JSON.stringify({ emojis: {} }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const geminiBody = {
+        system_instruction: { parts: [{ text: EMOJI_INSTRUCTION }] },
+        contents: [{ parts: [{ text: `Suggest emojis for these categories:\n${categoryNames.join('\n')}` }] }],
+        generationConfig: { temperature: 0.3, responseMimeType: 'application/json' },
+      };
+
+      const geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(geminiBody),
+      });
+
+      if (!geminiRes.ok) {
+        const err = await geminiRes.text();
+        return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const geminiData = await geminiRes.json();
+      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const cleaned = rawText.replace(/```json|```/gi, '').trim();
+      const emojis = JSON.parse(cleaned);
+
+      return new Response(JSON.stringify({ emojis }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Default mode: parse statement
+    const { extractedText, formatHint } = body;
+    if (!extractedText || typeof extractedText !== 'string') {
+      return new Response(JSON.stringify({ error: 'extractedText is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const geminiBody = {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Upload as UploadIcon, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,15 +8,134 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCategories } from '@/hooks/useTrackers';
 import { useBulkCreateExpenses } from '@/hooks/useExpenses';
 import { supabase } from '@/integrations/supabase/client';
-import { DraftExpense } from '@/types';
+import { DraftExpense, Category } from '@/types';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { useQueryClient } from '@tanstack/react-query';
+
+// ──────────────────────────────────────────────────────────────────────
+// Fuzzy string similarity (Levenshtein-based, 0..1)
+// ──────────────────────────────────────────────────────────────────────
+function editDistance(a: string, b: string): number {
+  const m: number[][] = Array.from({ length: b.length + 1 }, (_, i) =>
+    Array.from({ length: a.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= b.length; i++)
+    for (let j = 1; j <= a.length; j++)
+      m[i][j] = b[i - 1] === a[j - 1]
+        ? m[i - 1][j - 1]
+        : Math.min(m[i - 1][j - 1] + 1, m[i][j - 1] + 1, m[i - 1][j] + 1);
+  return m[b.length][a.length];
+}
+
+function similarity(a: string, b: string): number {
+  const na = a.toLowerCase().trim();
+  const nb = b.toLowerCase().trim();
+  if (na === nb) return 1;
+  const longer = na.length > nb.length ? na : nb;
+  const shorter = na.length > nb.length ? nb : na;
+  if (longer.length === 0) return 1;
+  return (longer.length - editDistance(longer, shorter)) / longer.length;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Bulk Excel column header detection
+// ──────────────────────────────────────────────────────────────────────
+const DATE_PATTERNS = /^(date|transaction[_ ]?date|txn[_ ]?date|value[_ ]?date|posting[_ ]?date)$/i;
+const CATEGORY_PATTERNS = /^(category|category[_ ]?name|expense[_ ]?category|type[_ ]?category)$/i;
+const DESCRIPTION_PATTERNS = /^(description|narration|details|particulars|remarks|memo)$/i;
+const TYPE_PATTERNS = /^(type|transaction[_ ]?type|txn[_ ]?type|debit[/_]credit|dr[/_]cr|direction)$/i;
+const AMOUNT_PATTERNS = /^(amount|total|value|sum|transaction[_ ]?amount)$/i;
+const NOTES_PATTERNS = /^(notes|comments|remark|additional[_ ]?info|memo|note)$/i;
+const MERCHANT_PATTERNS = /^(merchant|merchant[_ ]?name|payee|vendor|store)$/i;
+
+interface BulkColumnMap {
+  date: string;
+  category: string;
+  description: string;
+  type: string;
+  amount: string;
+  notes?: string;
+  merchant?: string;
+}
+
+function detectBulkUploadColumns(headers: string[]): BulkColumnMap | null {
+  const map: Partial<BulkColumnMap> = {};
+  for (const h of headers) {
+    const trimmed = h.trim();
+    if (DATE_PATTERNS.test(trimmed)) map.date = h;
+    else if (CATEGORY_PATTERNS.test(trimmed)) map.category = h;
+    else if (DESCRIPTION_PATTERNS.test(trimmed)) map.description = h;
+    else if (TYPE_PATTERNS.test(trimmed)) map.type = h;
+    else if (AMOUNT_PATTERNS.test(trimmed)) map.amount = h;
+    else if (NOTES_PATTERNS.test(trimmed)) map.notes = h;
+    else if (MERCHANT_PATTERNS.test(trimmed)) map.merchant = h;
+  }
+  // Must have at least date, category, description, type, amount
+  if (map.date && map.category && map.description && map.type && map.amount) {
+    return map as BulkColumnMap;
+  }
+  return null;
+}
+
+function parseTypeValue(val: string): boolean | null {
+  const v = (val || '').toLowerCase().trim();
+  if (['debit', 'dr', 'd', 'expense', 'withdrawal', 'out', 'purchase'].includes(v)) return true;
+  if (['credit', 'cr', 'c', 'income', 'deposit', 'in', 'refund', 'receipt'].includes(v)) return false;
+  return null; // unknown — needs review
+}
+
+function parseDateValue(val: string): string {
+  if (!val) return new Date().toISOString().split('T')[0];
+  // Try ISO first
+  if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
+  // Try DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = val.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`;
+  // Try MM/DD/YYYY
+  const mdyMatch = val.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (mdyMatch) {
+    const m = parseInt(mdyMatch[1]);
+    if (m > 12) return `${mdyMatch[3]}-${mdyMatch[2].padStart(2, '0')}-${mdyMatch[1].padStart(2, '0')}`;
+    return `${mdyMatch[3]}-${mdyMatch[1].padStart(2, '0')}-${mdyMatch[2].padStart(2, '0')}`;
+  }
+  // Try Excel serial number
+  const num = Number(val);
+  if (!isNaN(num) && num > 40000 && num < 60000) {
+    const d = new Date((num - 25569) * 86400 * 1000);
+    return d.toISOString().split('T')[0];
+  }
+  // Fallback: try native Date parse
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
+}
+
+// Pick a random preset color for new categories
+const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
 
 /**
- * Detects debit/credit column patterns from CSV/XLSX headers and first few rows.
- * Returns a format hint string for the AI, or null if no pattern detected.
+ * Find the best matching system/tracker category by name (>=80% similarity).
+ * Returns the matched Category or null.
  */
+function findBestCategoryMatch(name: string, categories: Category[]): Category | null {
+  if (!name) return null;
+  let best: Category | null = null;
+  let bestScore = 0;
+  for (const cat of categories) {
+    const score = similarity(name, cat.name);
+    if (score > bestScore) {
+      bestScore = score;
+      best = cat;
+    }
+  }
+  return bestScore >= 0.8 ? best : null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Bank statement format detection (existing)
+// ──────────────────────────────────────────────────────────────────────
 function detectFormatHint(csvText: string): string | null {
   const lines = csvText.split('\n').filter(l => l.trim());
   if (lines.length < 2) return null;
@@ -24,31 +143,22 @@ function detectFormatHint(csvText: string): string | null {
   const headerLine = lines[0].toLowerCase();
   const hints: string[] = [];
 
-  // Pattern 1: Separate Withdrawal/Deposit columns
   if (/withdrawal/.test(headerLine) && /deposit/.test(headerLine)) {
     hints.push('This statement has separate "Withdrawal" and "Deposit" columns. Withdrawal = debit (money out), Deposit = credit (money in). A transaction has amount in one column and the other is empty or zero.');
   }
-
-  // Pattern 2: Separate Debit/Credit amount columns
   if ((/debit[_ ]?(amount|amt)?/.test(headerLine) && /credit[_ ]?(amount|amt)?/.test(headerLine)) ||
       (/dr[_ ]?(amount|amt)/.test(headerLine) && /cr[_ ]?(amount|amt)/.test(headerLine))) {
     hints.push('This statement has separate "Debit Amount" and "Credit Amount" columns (may also appear as "Dr Amount"/"Cr Amount"). Amount in the Debit/Dr column = money out, amount in the Credit/Cr column = money in.');
   }
-
-  // Pattern 3: Dr/Cr type indicator column
   if (/\b(dr\.?\/cr\.?|type|txn[ _]?type|transaction[ _]?type)\b/.test(headerLine)) {
     hints.push('This statement has a transaction type column. Values like "Dr", "DR", "D", "Debit", "Purchase" = debit (money out). Values like "Cr", "CR", "C", "Credit", "Refund", "Receipt" = credit (money in).');
   }
-
-  // Pattern 4: Check for sign-based patterns in data rows
   const dataRows = lines.slice(1, Math.min(6, lines.length));
   const hasNegativeAmounts = dataRows.some(row => /,-\d|,"-?\d/.test(row));
   const hasPositiveSignAmounts = dataRows.some(row => /,\+\d/.test(row));
   if (hasNegativeAmounts || hasPositiveSignAmounts) {
     hints.push('This statement uses signed amounts. Negative (-) values = debit (money out). Positive (+) values = credit (money in).');
   }
-
-  // Pattern 5: Balance column for cross-verification
   if (/balance|closing|running/.test(headerLine)) {
     hints.push('A running/closing balance column is present. Use it to verify: if balance decreased from previous row, the transaction is debit; if balance increased, it is credit.');
   }
@@ -65,12 +175,20 @@ const PROCESSING_MESSAGES = [
   '✅ Almost done...',
 ];
 
+const BULK_PROCESSING_MESSAGES = [
+  '📊 Reading your spreadsheet...',
+  '🔍 Matching categories...',
+  '🧠 AI is generating icons for new categories...',
+  '✅ Almost done...',
+];
+
 export default function UploadStatement() {
   const { trackerId } = useParams<{ trackerId: string }>();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { data: categories } = useCategories(trackerId);
   const bulkCreate = useBulkCreateExpenses();
+  const queryClient = useQueryClient();
 
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
@@ -78,6 +196,11 @@ export default function UploadStatement() {
   const [processing, setProcessing] = useState(false);
   const [msgIndex, setMsgIndex] = useState(0);
   const [drafts, setDrafts] = useState<DraftExpense[]>([]);
+  // Track newly created categories during bulk import so the review screen can use them
+  const newCategoriesRef = useRef<Category[]>([]);
+
+  // Combined categories: existing + newly created
+  const allCategories = [...(categories || []), ...newCategoriesRef.current];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -88,12 +211,176 @@ export default function UploadStatement() {
     setFile(f);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!file) return;
     const ext = file.name.split('.').pop()?.toLowerCase();
+
+    // For CSV/XLSX, check if it's a structured bulk upload
+    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+      const isBulk = await detectAndProcessBulk();
+      if (isBulk) return; // Handled as bulk import
+    }
+
     if (ext === 'pdf') { setStep(2); } else { processFile(); }
   };
 
+  // ──────────────────────────────────────────────────────────────────
+  // Bulk Excel import — client-side parsing, no AI for transactions
+  // ──────────────────────────────────────────────────────────────────
+  const detectAndProcessBulk = async (): Promise<boolean> => {
+    if (!file || !trackerId || !categories) return false;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const arrayBuffer = await file.arrayBuffer();
+
+    let rows: Record<string, string>[] = [];
+    let headers: string[] = [];
+
+    if (ext === 'csv') {
+      const text = new TextDecoder().decode(arrayBuffer);
+      const result = Papa.parse(text, { header: true, skipEmptyLines: true });
+      rows = result.data as Record<string, string>[];
+      headers = result.meta.fields || [];
+    } else {
+      const wb = XLSX.read(arrayBuffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as string[][];
+      if (jsonData.length < 2) return false;
+      headers = jsonData[0].map(h => String(h || '').trim());
+      rows = jsonData.slice(1).filter(r => r.some(c => c)).map(r => {
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => { obj[h] = String(r[i] || ''); });
+        return obj;
+      });
+    }
+
+    const columnMap = detectBulkUploadColumns(headers);
+    if (!columnMap) return false; // Not a bulk upload — fall through to AI parsing
+
+    // It's a bulk upload — process it
+    setStep(3);
+    setProcessing(true);
+    const interval = setInterval(() => setMsgIndex(i => (i + 1) % BULK_PROCESSING_MESSAGES.length), 1800);
+
+    try {
+      // 1. Collect all unique category names from the file
+      const categoryNamesInFile = [...new Set(
+        rows.map(r => (r[columnMap.category] || '').trim()).filter(Boolean)
+      )];
+
+      // 2. Match each against existing categories (>=80% fuzzy match)
+      const categoryMapping: Record<string, Category> = {};
+      const unmatchedNames: string[] = [];
+
+      for (const name of categoryNamesInFile) {
+        const match = findBestCategoryMatch(name, categories);
+        if (match) {
+          categoryMapping[name] = match;
+        } else {
+          unmatchedNames.push(name);
+        }
+      }
+
+      // 3. For unmatched categories, get AI-generated emojis and create them
+      if (unmatchedNames.length > 0) {
+        let emojiMap: Record<string, string> = {};
+        try {
+          const { data, error } = await supabase.functions.invoke('parse-statement', {
+            body: { mode: 'suggest-emojis', categoryNames: unmatchedNames },
+          });
+          if (!error && data?.emojis) {
+            emojiMap = data.emojis;
+          }
+        } catch {
+          // AI emoji generation failed — use fallback
+        }
+
+        for (const name of unmatchedNames) {
+          const emoji = emojiMap[name] || '🏷️';
+          const color = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)];
+
+          const { data: newCat, error: catError } = await supabase
+            .from('categories')
+            .insert({
+              tracker_id: trackerId,
+              name: name,
+              icon: emoji,
+              color: color,
+              is_system: false,
+              created_by: user?.id,
+            })
+            .select()
+            .single();
+
+          if (!catError && newCat) {
+            const cat = newCat as Category;
+            categoryMapping[name] = cat;
+            newCategoriesRef.current.push(cat);
+          }
+        }
+
+        // Refresh categories cache
+        if (unmatchedNames.length > 0) {
+          queryClient.invalidateQueries({ queryKey: ['categories', trackerId] });
+        }
+      }
+
+      // 4. Build draft expenses from rows
+      const miscCategory = categories.find(c => c.name === 'Miscellaneous');
+
+      const draftExpenses: DraftExpense[] = rows
+        .filter(r => {
+          const amt = parseFloat(String(r[columnMap.amount] || '0').replace(/[^0-9.\-]/g, ''));
+          return !isNaN(amt) && amt !== 0 && r[columnMap.description]?.trim();
+        })
+        .map((r, i) => {
+          const catName = (r[columnMap.category] || '').trim();
+          const matchedCat = categoryMapping[catName];
+          const typeVal = parseTypeValue(r[columnMap.type] || '');
+          const isDebit = typeVal ?? true;
+          const debitUncertain = typeVal === null;
+          const amt = Math.round(Math.abs(parseFloat(String(r[columnMap.amount] || '0').replace(/[^0-9.\-]/g, ''))));
+
+          const description = (r[columnMap.description] || 'Unknown').trim();
+          const notes = columnMap.notes ? (r[columnMap.notes] || '').trim() : '';
+          const merchant = columnMap.merchant ? (r[columnMap.merchant] || '').trim() : '';
+
+          return {
+            temp_id: `bulk-${i}`,
+            date: parseDateValue(r[columnMap.date] || ''),
+            description: description.length > 25 ? description.slice(0, 25).trim() + '...' : description,
+            merchant_name: merchant || undefined,
+            amount: amt,
+            is_debit: isDebit,
+            suggested_category_id: matchedCat?.id || miscCategory?.id || '',
+            suggested_category_name: matchedCat?.name || 'Miscellaneous',
+            confidence: matchedCat ? 1.0 : 0.5,
+            notes: (notes || (description.length > 25 ? description : '')) || undefined,
+            needs_review: debitUncertain || !matchedCat,
+            review_status: 'pending' as const,
+          };
+        });
+
+      setDrafts(draftExpenses);
+      setStep(4);
+
+      if (unmatchedNames.length > 0) {
+        toast.success(`${unmatchedNames.length} new categor${unmatchedNames.length === 1 ? 'y' : 'ies'} created`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to process bulk file');
+      setStep(1);
+    } finally {
+      clearInterval(interval);
+      setProcessing(false);
+      setFile(null);
+    }
+
+    return true;
+  };
+
+  // ──────────────────────────────────────────────────────────────────
+  // Bank statement AI processing (existing flow)
+  // ──────────────────────────────────────────────────────────────────
   const processFile = async () => {
     if (!file) return;
     setStep(3);
@@ -106,7 +393,6 @@ export default function UploadStatement() {
       const ext = file.name.split('.').pop()?.toLowerCase();
       const arrayBuffer = await file.arrayBuffer();
 
-      // Build text chunks to send in batches to avoid Gemini/Edge Function timeouts
       const textChunks: string[] = [];
       const PAGES_PER_CHUNK = 2;
       const ROWS_PER_CHUNK = 40;
@@ -116,7 +402,6 @@ export default function UploadStatement() {
         formatHint = detectFormatHint(text);
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         const rows = result.data as Record<string, unknown>[];
-        // Chunk CSV rows
         for (let i = 0; i < rows.length; i += ROWS_PER_CHUNK) {
           textChunks.push(JSON.stringify(rows.slice(i, i + ROWS_PER_CHUNK)));
         }
@@ -141,13 +426,11 @@ export default function UploadStatement() {
           const content = await page.getTextContent();
           pages.push(content.items.map((item: any) => item.str).join(' '));
         }
-        // Chunk pages — send PAGES_PER_CHUNK pages at a time
         for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
           textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
         }
       }
 
-      // If only 1 chunk (small file), send as-is. Otherwise send in batches.
       if (textChunks.length === 0) throw new Error('Could not extract text from file');
 
       const allTransactions: any[] = [];
@@ -166,7 +449,6 @@ export default function UploadStatement() {
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
         const matchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
 
-        // Safely determine is_debit — flag for review if unclear
         let isDebit = true;
         let debitUncertain = false;
         if (t.is_debit === true || t.is_debit === 'true') {
@@ -174,18 +456,16 @@ export default function UploadStatement() {
         } else if (t.is_debit === false || t.is_debit === 'false') {
           isDebit = false;
         } else if (t.is_debit === undefined || t.is_debit === null) {
-          // AI didn't return is_debit at all — flag for manual review
-          isDebit = true; // default assumption but mark uncertain
+          isDebit = true;
           debitUncertain = true;
         }
 
         const confidence = t.confidence || 0.5;
         const needsReview = confidence < 0.75 || debitUncertain;
 
-        // AI-curated short description (max 25 chars), raw description goes to notes
         const rawDesc = t.raw_description || t.description || 'Unknown';
         const shortDesc = (t.description || 'Unknown').length > 25
-          ? (t.description || 'Unknown').slice(0, 25).trim() + '…'
+          ? (t.description || 'Unknown').slice(0, 25).trim() + '...'
           : (t.description || 'Unknown');
 
         return {
@@ -278,7 +558,7 @@ export default function UploadStatement() {
   };
 
   const handleCategoryChange = (tempId: string, categoryId: string) => {
-    const cat = categories?.find(c => c.id === categoryId);
+    const cat = allCategories.find(c => c.id === categoryId);
     if (!cat) return;
     setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
       ...d,
@@ -311,8 +591,10 @@ export default function UploadStatement() {
         {step === 1 && (
           <div className="space-y-6 text-center">
             <div>
-              <h2 className="text-lg font-semibold">Upload Bank Statement</h2>
-              <p className="text-sm text-muted-foreground mt-1">Your file is processed entirely in your browser. We never store your document.</p>
+              <h2 className="text-lg font-semibold">Upload Transactions</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Upload a bank statement (PDF/CSV/XLSX) for AI parsing, or a structured Excel with Date, Category, Description, Type, Amount columns for direct import.
+              </p>
             </div>
             <label className="block border-2 border-dashed border-border rounded-2xl p-8 cursor-pointer hover:border-primary/50 transition-colors">
               <input type="file" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileChange} className="hidden" />
@@ -330,7 +612,7 @@ export default function UploadStatement() {
                 </>
               )}
             </label>
-            <Button onClick={handleContinue} disabled={!file} className="w-full h-11">Continue →</Button>
+            <Button onClick={handleContinue} disabled={!file} className="w-full h-11">Continue &rarr;</Button>
           </div>
         )}
 
@@ -341,14 +623,18 @@ export default function UploadStatement() {
               <p className="text-sm text-muted-foreground mt-1">Some bank statements are password protected. Enter the password below, or skip if yours isn't.</p>
             </div>
             <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="PDF password" className="h-11" />
-            <Button onClick={processFile} className="w-full h-11">Unlock & Continue →</Button>
-            <button onClick={() => { setPassword(''); processFile(); }} className="w-full text-sm text-primary font-medium">Skip — No Password →</button>
+            <Button onClick={processFile} className="w-full h-11">Unlock & Continue &rarr;</Button>
+            <button onClick={() => { setPassword(''); processFile(); }} className="w-full text-sm text-primary font-medium">Skip — No Password &rarr;</button>
           </div>
         )}
 
         {step === 3 && (
           <div className="flex flex-col items-center justify-center py-20 space-y-6">
-            <p className="text-lg font-medium text-center animate-pulse">{PROCESSING_MESSAGES[msgIndex]}</p>
+            <p className="text-lg font-medium text-center animate-pulse">
+              {(processing && drafts.length === 0)
+                ? (msgIndex < BULK_PROCESSING_MESSAGES.length ? BULK_PROCESSING_MESSAGES[msgIndex] : PROCESSING_MESSAGES[msgIndex % PROCESSING_MESSAGES.length])
+                : PROCESSING_MESSAGES[msgIndex]}
+            </p>
             <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
               <div className="h-full bg-primary rounded-full animate-[shimmer_1.5s_ease-in-out_infinite] w-1/3" />
             </div>
@@ -360,7 +646,7 @@ export default function UploadStatement() {
             <div>
               <h2 className="text-lg font-semibold">Review Transactions</h2>
               <p className="text-sm text-muted-foreground">
-                {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''} · {needsReviewCount} need review
+                {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''}{needsReviewCount > 0 ? ` · ${needsReviewCount} need review` : ''}
               </p>
             </div>
 
@@ -383,7 +669,7 @@ export default function UploadStatement() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {categories?.map(cat => (
+                        {allCategories.map(cat => (
                           <SelectItem key={cat.id} value={cat.id}>
                             <span>{cat.icon} {cat.name}</span>
                           </SelectItem>
