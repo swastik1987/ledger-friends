@@ -51,7 +51,9 @@ function writeSortPref(trackerId: string, value: SortOption) {
 }
 
 function generateMonths() {
-  const months = [];
+  const months: { value: string; label: string }[] = [
+    { value: 'all', label: 'All Months' },
+  ];
   const now = new Date();
   for (let i = 0; i < 24; i++) {
     const d = subMonths(now, i);
@@ -382,10 +384,11 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
-              if (months.some(m => m.value === prev)) onMonthChange(prev);
+              if (month === 'all') return;
+              const idx = months.findIndex(m => m.value === month);
+              if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value);
             }}
-            disabled={month === months[months.length - 1]?.value}
+            disabled={month === 'all' || month === months[months.length - 1]?.value}
             className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             <ChevronLeft className="h-5 w-5" />
@@ -402,10 +405,12 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
           </Select>
           <button
             onClick={() => {
-              const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
-              if (months.some(m => m.value === next)) onMonthChange(next);
+              if (month === 'all') return;
+              const idx = months.findIndex(m => m.value === month);
+              // idx 0 is 'all', idx 1 is current month — go to previous index (more recent)
+              if (idx > 1) onMonthChange(months[idx - 1].value);
             }}
-            disabled={month === months[0]?.value}
+            disabled={month === 'all' || month === months[1]?.value}
             className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
           >
             <ChevronRight className="h-5 w-5" />

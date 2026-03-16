@@ -8,16 +8,20 @@ export function useExpenses(trackerId: string, month: string) {
   return useQuery({
     queryKey: ['expenses', trackerId, month],
     queryFn: async () => {
-      const [year, mon] = month.split('-').map(Number);
-      const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-      const endDate = new Date(year, mon, 0).toISOString().split('T')[0];
-
-      const { data, error } = await supabase
+      let query = supabase
         .from('expenses')
         .select('*, category:categories(*)')
-        .eq('tracker_id', trackerId)
-        .gte('date', startDate)
-        .lte('date', endDate)
+        .eq('tracker_id', trackerId);
+
+      // If month is 'all', skip date filters — fetch everything for this tracker
+      if (month && month !== 'all') {
+        const [year, mon] = month.split('-').map(Number);
+        const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
+        const endDate = new Date(year, mon, 0).toISOString().split('T')[0];
+        query = query.gte('date', startDate).lte('date', endDate);
+      }
+
+      const { data, error } = await query
         .order('date', { ascending: false })
         .order('created_at', { ascending: false });
 

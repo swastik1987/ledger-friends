@@ -11,7 +11,9 @@ import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
 function generateMonths() {
-  const months = [];
+  const months: { value: string; label: string }[] = [
+    { value: 'all', label: 'All Months' },
+  ];
   const now = new Date();
   for (let i = 0; i < 24; i++) {
     const d = subMonths(now, i);
@@ -40,20 +42,25 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
     navigate(`/tracker/${trackerId}?tab=expenses&type=${typeFilter}&filterCategory=${categoryId}&month=${month}`);
   };
 
-  // Fetch previous month data for MoM trend
-  const prevMonth = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
+  // Fetch previous month data for MoM trend (skip when viewing all months)
+  const isAllMonths = month === 'all';
+  const prevMonth = isAllMonths ? '' : format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
   const { data: prevExpenses } = useExpenses(trackerId, prevMonth);
 
   // Comparison mode state
   const [compareEnabled, setCompareEnabled] = useState(false);
-  const [compareMonth, setCompareMonth] = useState(() => prevMonth);
-  // Available comparison months = all months except the currently selected one
-  const compareMonths = useMemo(() => months.filter(m => m.value !== month), [months, month]);
-  // Fetch comparison month data (only when enabled)
-  const { data: compareExpenses } = useExpenses(trackerId, compareEnabled ? compareMonth : '');
+  const [compareMonth, setCompareMonth] = useState(() => prevMonth || format(subMonths(new Date(), 1), 'yyyy-MM'));
+  // Available comparison months = all specific months except the currently selected one
+  const compareMonths = useMemo(() => months.filter(m => m.value !== month && m.value !== 'all'), [months, month]);
+  // Fetch comparison month data (only when enabled and not viewing all)
+  const { data: compareExpenses } = useExpenses(trackerId, compareEnabled && !isAllMonths ? compareMonth : '');
 
-  // Reset compare month to prev when main month changes
+  // Reset compare month to prev when main month changes; disable compare for "all"
   useEffect(() => {
+    if (month === 'all') {
+      setCompareEnabled(false);
+      return;
+    }
     const newPrev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
     setCompareMonth(newPrev);
   }, [month]);
@@ -223,8 +230,8 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 mb-4">
           <button
-            onClick={() => { const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === prev)) onMonthChange(prev); }}
-            disabled={month === months[months.length - 1]?.value}
+            onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value); }}
+            disabled={month === 'all' || month === months[months.length - 1]?.value}
             className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
           ><ChevronLeft className="h-5 w-5" /></button>
           <Select value={month} onValueChange={onMonthChange}>
@@ -236,14 +243,14 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
             </SelectContent>
           </Select>
           <button
-            onClick={() => { const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === next)) onMonthChange(next); }}
-            disabled={month === months[0]?.value}
+            onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx > 1) onMonthChange(months[idx - 1].value); }}
+            disabled={month === 'all' || month === months[1]?.value}
             className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
           ><ChevronRight className="h-5 w-5" /></button>
         </div>
         <div className="text-center py-16">
           <BarChart2 className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-          <p className="font-semibold text-lg">No data for this month</p>
+          <p className="font-semibold text-lg">No data for this period</p>
           <p className="text-sm text-muted-foreground">Add transactions to see your dashboard</p>
         </div>
       </div>
@@ -333,8 +340,8 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
       {/* Month selector */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => { const prev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === prev)) onMonthChange(prev); }}
-          disabled={month === months[months.length - 1]?.value}
+          onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value); }}
+          disabled={month === 'all' || month === months[months.length - 1]?.value}
           className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
         ><ChevronLeft className="h-5 w-5" /></button>
         <Select value={month} onValueChange={onMonthChange}>
@@ -346,8 +353,8 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
           </SelectContent>
         </Select>
         <button
-          onClick={() => { const next = format(addMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM'); if (months.some(m => m.value === next)) onMonthChange(next); }}
-          disabled={month === months[0]?.value}
+          onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx > 1) onMonthChange(months[idx - 1].value); }}
+          disabled={month === 'all' || month === months[1]?.value}
           className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
         ><ChevronRight className="h-5 w-5" /></button>
       </div>
@@ -395,6 +402,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
               {typeFilter === 'debit' ? 'Spending by Category' : typeFilter === 'credit' ? 'Income by Category' : 'Category Breakdown (Net)'}
             </h3>
             {!compareEnabled ? (
+              !isAllMonths && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -404,6 +412,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                 <GitCompareArrows className="h-3.5 w-3.5" />
                 Compare
               </Button>
+              )
             ) : (
               <button
                 onClick={() => setCompareEnabled(false)}
