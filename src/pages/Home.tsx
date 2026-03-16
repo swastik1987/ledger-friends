@@ -29,7 +29,7 @@ export default function HomePage() {
   const createTracker = useCreateTracker();
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
-  const currentMonth = format(new Date(), 'MMMM yyyy');
+
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -123,7 +123,7 @@ export default function HomePage() {
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-lg truncate">{tracker.name}</p>
               <p className="font-mono text-lg font-medium">₹{tracker.monthly_total.toLocaleString('en-IN')}</p>
-              <p className="text-xs text-muted-foreground">{tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · {currentMonth}</p>
+              <p className="text-xs text-muted-foreground">{tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · Total spent</p>
             </div>
             <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
           </button>

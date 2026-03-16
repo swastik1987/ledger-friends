@@ -3,6 +3,51 @@ import { supabase } from '@/integrations/supabase/client';
 import { Expense, Category } from '@/types';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
+import { format, parse } from 'date-fns';
+
+/**
+ * Fetches the distinct months that have transactions for a tracker.
+ * Returns sorted array of { value: 'yyyy-MM', label: 'MMMM yyyy' } with 'all' at top.
+ */
+export function useExpenseMonths(trackerId: string) {
+  return useQuery({
+    queryKey: ['expense-months', trackerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('date')
+        .eq('tracker_id', trackerId);
+
+      if (error) throw error;
+
+      // Extract unique yyyy-MM values
+      const monthSet = new Set<string>();
+      (data || []).forEach(e => {
+        if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
+      });
+
+      // Sort descending (newest first)
+      const sorted = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+
+      const months: { value: string; label: string }[] = [
+        { value: 'all', label: 'All Months' },
+      ];
+      for (const m of sorted) {
+        const d = parse(m, 'yyyy-MM', new Date());
+        months.push({ value: m, label: format(d, 'MMMM yyyy') });
+      }
+
+      // If no transactions exist, add current month as fallback
+      if (sorted.length === 0) {
+        const now = new Date();
+        months.push({ value: format(now, 'yyyy-MM'), label: format(now, 'MMMM yyyy') });
+      }
+
+      return months;
+    },
+    enabled: !!trackerId,
+  });
+}
 
 export function useExpenses(trackerId: string, month: string) {
   return useQuery({
@@ -45,6 +90,7 @@ export function useCreateExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success('Transaction saved');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -61,6 +107,7 @@ export function useUpdateExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success('Transaction updated');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -76,6 +123,7 @@ export function useDeleteExpense() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast('🗑️ Transaction deleted');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -92,6 +140,7 @@ export function useBulkCreateExpenses() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success(`✅ ${count} transactions imported successfully!`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -111,6 +160,7 @@ export function useBulkUpdateCategory() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success(`${count} transactions updated`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -130,6 +180,7 @@ export function useBulkDeleteExpenses() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success(`🗑️ ${count} transactions deleted`);
     },
     onError: (err: Error) => toast.error(err.message),

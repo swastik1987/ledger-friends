@@ -3,7 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
 import { toast } from 'sonner';
-import { startOfMonth, endOfMonth } from 'date-fns';
 
 export function useTrackers() {
   const { user } = useAuth();
@@ -29,10 +28,6 @@ export function useTrackers() {
 
       if (error) throw error;
 
-      const now = new Date();
-      const monthStart = startOfMonth(now).toISOString().split('T')[0];
-      const monthEnd = endOfMonth(now).toISOString().split('T')[0];
-
       const results: TrackerWithStats[] = [];
       for (const tracker of trackers || []) {
         const { count: memberCount } = await supabase
@@ -40,13 +35,12 @@ export function useTrackers() {
           .select('*', { count: 'exact', head: true })
           .eq('tracker_id', tracker.id);
 
+        // Sum ALL debit expenses across all months
         const { data: expenses } = await supabase
           .from('expenses')
           .select('amount')
           .eq('tracker_id', tracker.id)
-          .eq('is_debit', true)
-          .gte('date', monthStart)
-          .lte('date', monthEnd);
+          .eq('is_debit', true);
 
         const monthlyTotal = expenses?.reduce((sum, e) => sum + Number(e.amount), 0) ?? 0;
 

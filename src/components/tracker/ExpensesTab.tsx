@@ -1,12 +1,12 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
-import { format, isToday, isYesterday, subMonths, addMonths, parse } from 'date-fns';
+import { format, isToday, isYesterday, parse } from 'date-fns';
 import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses } from '@/hooks/useExpenses';
+import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -50,17 +50,7 @@ function writeSortPref(trackerId: string, value: SortOption) {
   } catch { /* ignore */ }
 }
 
-function generateMonths() {
-  const months: { value: string; label: string }[] = [
-    { value: 'all', label: 'All Months' },
-  ];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = subMonths(now, i);
-    months.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') });
-  }
-  return months;
-}
+// generateMonths removed — now using useExpenseMonths hook
 
 function formatDateHeader(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -110,7 +100,7 @@ interface Props {
 }
 
 export default function ExpensesTab({ trackerId, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange }: Props) {
-  const months = generateMonths();
+  const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
   const bulkDeleteExpenses = useBulkDeleteExpenses();

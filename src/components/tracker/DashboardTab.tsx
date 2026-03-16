@@ -1,26 +1,14 @@
 import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { subMonths, addMonths, format, parse } from 'date-fns';
+import { subMonths, format, parse } from 'date-fns';
 import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, ChevronRightIcon, GitCompareArrows, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useExpenses } from '@/hooks/useExpenses';
+import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
-
-function generateMonths() {
-  const months: { value: string; label: string }[] = [
-    { value: 'all', label: 'All Months' },
-  ];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = subMonths(now, i);
-    months.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMMM yyyy') });
-  }
-  return months;
-}
 
 interface Props {
   trackerId: string;
@@ -34,7 +22,7 @@ interface Props {
 }
 
 export default function DashboardTab({ trackerId, expenses, categories, month, onMonthChange, isLoading, typeFilter, onTypeFilterChange }: Props) {
-  const months = generateMonths();
+  const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
