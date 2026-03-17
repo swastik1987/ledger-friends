@@ -55,7 +55,7 @@ export function useExpenses(trackerId: string, month: string) {
     queryFn: async () => {
       let query = supabase
         .from('expenses')
-        .select('*, category:categories(*), created_by_profile:profiles!created_by_id(*)')
+        .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
         .eq('tracker_id', trackerId);
 
       // If month is 'all', skip date filters — fetch everything for this tracker
@@ -103,7 +103,7 @@ export function useUpdateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Expense> & { id: string }) => {
-      const { category, ...rest } = updates;
+      const { category, created_by_profile, ...rest } = updates;
       const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
       if (error) throw error;
     },
@@ -303,7 +303,7 @@ export function useDuplicateCheck(trackerId: string) {
   return async (date: string, amount: number, description: string): Promise<Expense | null> => {
     const { data } = await supabase
       .from('expenses')
-      .select('*, category:categories(*), created_by_profile:profiles!created_by_id(*)')
+      .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
       .eq('tracker_id', trackerId)
       .eq('date', date)
       .eq('amount', amount)
