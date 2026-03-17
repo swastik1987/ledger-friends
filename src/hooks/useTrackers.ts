@@ -78,12 +78,12 @@ export function useCreateTracker() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async ({ name, currency = 'INR' }: { name: string; currency?: string }) => {
       if (!user) throw new Error('Not authenticated');
 
       const { data: tracker, error } = await supabase
         .from('trackers')
-        .insert({ name, admin_id: user.id })
+        .insert({ name, currency, admin_id: user.id })
         .select()
         .single();
 
@@ -158,8 +158,11 @@ export function useCategories(trackerId?: string) {
 export function useUpdateTracker() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      const { error } = await supabase.from('trackers').update({ name }).eq('id', id);
+    mutationFn: async ({ id, name, currency }: { id: string; name?: string; currency?: string }) => {
+      const updates: Record<string, string> = {};
+      if (name !== undefined) updates.name = name;
+      if (currency !== undefined) updates.currency = currency;
+      const { error } = await supabase.from('trackers').update(updates).eq('id', id);
       if (error) throw error;
     },
     onSuccess: (_, vars) => {
@@ -169,6 +172,86 @@ export function useUpdateTracker() {
     },
     onError: (err: Error) => toast.error(err.message),
   });
+}
+
+export function useConvertTrackerCurrency() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ trackerId, newCurrency, convertExisting }: { trackerId: string; newCurrency: string; convertExisting: boolean }) => {
+      // Update tracker currency
+      const { error: tErr } = await supabase.from('trackers').update({ currency: newCurrency }).eq('id', trackerId);
+      if (tErr) throw tErr;
+
+      if (convertExisting) {
+        // Fetch all expenses for this tracker
+        const { data: expenses, error: eErr } = await supabase
+          .from('expenses')
+          .select('id, amount, currency, date')
+          .eq('tracker_id', trackerId);
+        if (eErr) throw eErr;
+        if (!expenses?.length) return;
+
+        // Find expenses that need conversion (current currency != new currency)
+        const toConvert = expenses.filter(e => e.currency !== newCurrency);
+        if (!toConvert.length) return;
+
+        // Build conversion requests
+        const conversions = toConvert.map(e => ({
+          from: e.currency,
+          to: newCurrency,
+          amount: Number(e.amount),
+          date: e.date,
+        }));
+
+        // Call edge function for bulk conversion
+        const { data, error: fnErr } = await supabase.functions.invoke('convert-currency', {
+          body: { conversions },
+        });
+        if (fnErr) throw fnErr;
+
+        const results = data?.results || [];
+
+        // Update each expense with converted amount
+        for (let i = 0; i < toConvert.length; i++) {
+          const result = results[i];
+          if (result?.error) continue;
+
+          const exp = toConvert[i];
+          const { error: uErr } = await supabase
+            .from('expenses')
+            .update({
+              original_amount: Number(exp.amount),
+              original_currency: exp.currency,
+              amount: result.converted_amount,
+              currency: newCurrency,
+              conversion_rate: result.rate,
+              conversion_note: `Converted from ${getCurrencySymbol(exp.currency)}${Number(exp.amount).toLocaleString()} ${exp.currency} @ ${result.rate}`,
+            } as any)
+            .eq('id', exp.id);
+          if (uErr) console.error('Failed to update expense', exp.id, uErr);
+        }
+      } else {
+        // Just update all expenses to new currency label without converting amounts
+        const { error } = await supabase
+          .from('expenses')
+          .update({ currency: newCurrency } as any)
+          .eq('tracker_id', trackerId);
+        if (error) throw error;
+      }
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['tracker', vars.trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['trackers'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      toast.success('Currency updated');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+function getCurrencySymbol(code: string): string {
+  const map: Record<string, string> = { INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ', SGD: 'S$', AUD: 'A$', CAD: 'C$', JPY: '¥', SAR: '﷼' };
+  return map[code] || '';
 }
 
 export function useDeleteTracker() {

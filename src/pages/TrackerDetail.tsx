@@ -97,6 +97,7 @@ export default function TrackerDetail() {
           <TabsContent value="expenses" className="mt-0">
             <ExpensesTab
               trackerId={trackerId!}
+              trackerCurrency={tracker.currency || 'INR'}
               expenses={expenses || []}
               categories={categories || []}
               isLoading={expensesLoading}
@@ -114,6 +115,7 @@ export default function TrackerDetail() {
           <TabsContent value="dashboard" className="mt-0">
             <DashboardTab
               trackerId={trackerId!}
+              trackerCurrency={tracker.currency || 'INR'}
               expenses={expenses || []}
               categories={categories || []}
               month={month}
@@ -141,6 +143,7 @@ export default function TrackerDetail() {
         open={showAddExpense}
         onOpenChange={(open) => { setShowAddExpense(open); if (!open) setEditingExpenseId(null); }}
         trackerId={trackerId!}
+        trackerCurrency={tracker.currency || 'INR'}
         categories={categories || []}
         editExpenseId={editingExpenseId}
         expenses={expenses || []}

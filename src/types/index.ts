@@ -55,6 +55,10 @@ export interface Expense {
   reference_number?: string;
   is_debit: boolean;
   source: ExpenseSource;
+  original_amount?: number;
+  original_currency?: string;
+  conversion_rate?: number;
+  conversion_note?: string;
   created_at: string;
   updated_at: string;
   category?: Category;
@@ -76,6 +80,7 @@ export interface DraftExpense {
   duplicate_of?: string;
   review_status: ReviewStatus;
   category_changed?: boolean;
+  detected_currency?: string; // currency detected from statement (ISO code)
 }
 
 export interface TrackerWithStats extends Tracker {

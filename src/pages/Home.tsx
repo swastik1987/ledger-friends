@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTrackers, useCreateTracker } from '@/hooks/useTrackers';
+import { useTrackers, useCreateTracker, useInviteMember } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
 import { format, parseISO } from 'date-fns';
-import { ChevronRight, FolderOpen, Plus, LogOut, Loader2 } from 'lucide-react';
+import { ChevronRight, FolderOpen, Plus, LogOut, Loader2, UserPlus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
+import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -26,17 +29,49 @@ export default function HomePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newCurrency, setNewCurrency] = useState('INR');
+  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
+  const [inviteInput, setInviteInput] = useState('');
   const createTracker = useCreateTracker();
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
 
+  const addInviteEmail = () => {
+    const email = inviteInput.trim().toLowerCase();
+    if (email && !inviteEmails.includes(email)) {
+      setInviteEmails([...inviteEmails, email]);
+    }
+    setInviteInput('');
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    const tracker = await createTracker.mutateAsync(newName.trim());
-    setShowCreate(false);
-    setNewName('');
+    const tracker = await createTracker.mutateAsync({ name: newName.trim(), currency: newCurrency });
     if (tracker) {
+      // Invite members after creation
+      for (const email of inviteEmails) {
+        try {
+          const { data: prof } = await (await import('@/integrations/supabase/client')).supabase
+            .from('profiles')
+            .select('id, full_name')
+            .ilike('email', email)
+            .single();
+          if (prof) {
+            await (await import('@/integrations/supabase/client')).supabase
+              .from('tracker_members')
+              .insert({ tracker_id: tracker.id, user_id: prof.id, role: 'member' });
+            toast.success(`${prof.full_name} added to tracker`);
+          } else {
+            toast.error(`No account found for ${email}`);
+          }
+        } catch {
+          toast.error(`Failed to invite ${email}`);
+        }
+      }
+      setShowCreate(false);
+      setNewName('');
+      setNewCurrency('INR');
+      setInviteEmails([]);
       setActiveTrackerId(tracker.id);
       navigate(`/tracker/${tracker.id}`);
     }
@@ -122,7 +157,7 @@ export default function HomePage() {
             <div className="w-1 h-12 rounded-full bg-primary flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-lg truncate">{tracker.name}</p>
-              <p className="font-mono text-lg font-medium">₹{tracker.monthly_total.toLocaleString('en-IN')}</p>
+              <p className="font-mono text-lg font-medium">{formatAmountShort(tracker.monthly_total, tracker.currency)}</p>
               <p className="text-xs text-muted-foreground">
                 {tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · Total spent
                 {tracker.date_range ? ` between ${format(parseISO(tracker.date_range.min), 'MMM yyyy')}${tracker.date_range.min.slice(0, 7) !== tracker.date_range.max.slice(0, 7) ? ` – ${format(parseISO(tracker.date_range.max), 'MMM yyyy')}` : ''}` : ''}
@@ -170,10 +205,45 @@ export default function HomePage() {
             </div>
             <div className="space-y-2">
               <Label>Currency</Label>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted rounded-lg px-3 py-2.5">
-                <span>₹ INR</span>
-                <span className="text-xs">(Multi-currency coming soon)</span>
+              <Select value={newCurrency} onValueChange={setNewCurrency}>
+                <SelectTrigger className="h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map(c => (
+                    <SelectItem key={c.code} value={c.code}>
+                      {c.symbol} {c.code} — {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Invite Members (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={inviteInput}
+                  onChange={e => setInviteInput(e.target.value)}
+                  placeholder="Email address"
+                  className="flex-1"
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addInviteEmail(); } }}
+                />
+                <Button type="button" size="sm" variant="outline" className="h-10 px-3" onClick={addInviteEmail} disabled={!inviteInput.trim()}>
+                  <UserPlus className="h-4 w-4" />
+                </Button>
               </div>
+              {inviteEmails.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {inviteEmails.map(email => (
+                    <span key={email} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                      {email}
+                      <button onClick={() => setInviteEmails(inviteEmails.filter(e => e !== email))}>
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <Button onClick={handleCreate} className="w-full h-11" disabled={createTracker.isPending || !newName.trim()}>
               {createTracker.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Tracker'}

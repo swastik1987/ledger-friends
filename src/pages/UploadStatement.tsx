@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCategories } from '@/hooks/useTrackers';
+import { useCategories, useTracker } from '@/hooks/useTrackers';
 import { useBulkCreateExpenses } from '@/hooks/useExpenses';
 import { supabase } from '@/integrations/supabase/client';
 import { DraftExpense, Category } from '@/types';
+import { getCurrency, formatAmountShort } from '@/lib/currencies';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -188,6 +189,8 @@ export default function UploadStatement() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { data: categories } = useCategories(trackerId);
+  const { data: tracker } = useTracker(trackerId!);
+  const trackerCurrency = tracker?.currency || 'INR';
   const bulkCreate = useBulkCreateExpenses();
   const queryClient = useQueryClient();
 
@@ -483,6 +486,7 @@ export default function UploadStatement() {
           notes: rawDesc !== shortDesc ? rawDesc : null,
           needs_review: needsReview,
           review_status: 'pending' as const,
+          detected_currency: t.currency || undefined,
         };
       });
 
@@ -505,21 +509,68 @@ export default function UploadStatement() {
 
   const handleSaveAll = async () => {
     if (!user || !profile || !trackerId) return;
-    const expenses = approvedDrafts.map(d => ({
-      tracker_id: trackerId,
-      created_by_id: user.id,
-      created_by_name: profile.full_name,
-      category_id: d.suggested_category_id,
-      amount: d.amount,
-      currency: 'INR',
-      date: d.date,
-      description: d.description,
-      merchant_name: d.merchant_name || null,
-      is_debit: d.is_debit,
-      source: 'statement_upload' as const,
-      reference_number: d.reference_number || null,
-      notes: d.notes || null,
-    }));
+
+    // Check if any drafts have a foreign currency that needs conversion
+    const needsConversion = approvedDrafts.filter(
+      d => d.detected_currency && d.detected_currency !== trackerCurrency
+    );
+
+    let conversionResults: Record<string, { converted_amount: number; rate: number; note: string }> = {};
+
+    if (needsConversion.length > 0) {
+      try {
+        const conversions = needsConversion.map(d => ({
+          from: d.detected_currency!,
+          to: trackerCurrency,
+          amount: d.amount,
+          date: d.date,
+        }));
+
+        const { data, error } = await supabase.functions.invoke('convert-currency', {
+          body: { conversions },
+        });
+        if (!error && data?.results) {
+          needsConversion.forEach((d, i) => {
+            const result = data.results[i];
+            if (result && !result.error) {
+              const sym = getCurrency(d.detected_currency!).symbol;
+              conversionResults[d.temp_id] = {
+                converted_amount: result.converted_amount,
+                rate: result.rate,
+                note: `Converted from ${sym}${d.amount.toLocaleString()} ${d.detected_currency} @ ${result.rate}`,
+              };
+            }
+          });
+        }
+      } catch {
+        toast.error('Currency conversion failed — saving in original amounts');
+      }
+    }
+
+    const expenses = approvedDrafts.map(d => {
+      const conv = conversionResults[d.temp_id];
+      return {
+        tracker_id: trackerId,
+        created_by_id: user.id,
+        created_by_name: profile.full_name,
+        category_id: d.suggested_category_id,
+        amount: conv ? conv.converted_amount : d.amount,
+        currency: trackerCurrency,
+        date: d.date,
+        description: d.description,
+        merchant_name: d.merchant_name || null,
+        is_debit: d.is_debit,
+        source: 'statement_upload' as const,
+        reference_number: d.reference_number || null,
+        notes: d.notes || null,
+        ...(conv ? {
+          original_amount: d.amount,
+          original_currency: d.detected_currency,
+          conversion_rate: conv.rate,
+          conversion_note: conv.note,
+        } : {}),
+      };
+    });
 
     await bulkCreate.mutateAsync(expenses);
 
@@ -687,7 +738,7 @@ export default function UploadStatement() {
                         }`}
                         title="Tap to toggle debit/credit"
                       >
-                        {draft.is_debit ? '↑' : '↓'} {draft.is_debit ? '' : '+'}₹{draft.amount.toLocaleString('en-IN')}
+                        {draft.is_debit ? '↑' : '↓'} {draft.is_debit ? '' : '+'}{formatAmountShort(draft.amount, draft.detected_currency || trackerCurrency)}
                       </button>
                       <p className="text-xs text-muted-foreground">{draft.date}</p>
                     </div>

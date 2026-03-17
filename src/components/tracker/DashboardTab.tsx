@@ -9,9 +9,11 @@ import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
+import { formatAmountShort } from '@/lib/currencies';
 
 interface Props {
   trackerId: string;
+  trackerCurrency: string;
   expenses: Expense[];
   categories: Category[];
   month: string;
@@ -21,7 +23,7 @@ interface Props {
   onTypeFilterChange: (v: TransactionFilter) => void;
 }
 
-export default function DashboardTab({ trackerId, expenses, categories, month, onMonthChange, isLoading, typeFilter, onTypeFilterChange }: Props) {
+export default function DashboardTab({ trackerId, trackerCurrency, expenses, categories, month, onMonthChange, isLoading, typeFilter, onTypeFilterChange }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -127,26 +129,26 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
       const trend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
       const largest = [...debitExpenses].sort((a, b) => b.amount - a.amount)[0];
       return [
-        { label: 'Total Spent', value: `₹${Math.round(totalDebits).toLocaleString('en-IN')}`, color: 'text-red-600', trend, trendContext: 'spending' },
+        { label: 'Total Spent', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend, trendContext: 'spending' },
         { label: 'Transactions', value: String(debitExpenses.length) },
-        { label: 'Largest Expense', value: largest ? `₹${Math.round(largest.amount).toLocaleString('en-IN')}` : '-' },
+        { label: 'Largest Expense', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-' },
       ];
     } else if (typeFilter === 'credit') {
       const trend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
       const largest = [...creditExpenses].sort((a, b) => b.amount - a.amount)[0];
       return [
-        { label: 'Total Received', value: `₹${Math.round(totalCredits).toLocaleString('en-IN')}`, color: 'text-emerald-600', trend, trendContext: 'income' },
+        { label: 'Total Received', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend, trendContext: 'income' },
         { label: 'Transactions', value: String(creditExpenses.length) },
-        { label: 'Largest Credit', value: largest ? `₹${Math.round(largest.amount).toLocaleString('en-IN')}` : '-', color: 'text-emerald-600' },
+        { label: 'Largest Credit', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', color: 'text-emerald-600' },
       ];
     } else {
       const debitTrend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
       const creditTrend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
       const net = totalDebits - totalCredits;
       return [
-        { label: 'Total Out', value: `₹${Math.round(totalDebits).toLocaleString('en-IN')}`, color: 'text-red-600', trend: debitTrend, trendContext: 'spending' },
-        { label: 'Total In', value: `₹${Math.round(totalCredits).toLocaleString('en-IN')}`, color: 'text-emerald-600', trend: creditTrend, trendContext: 'income' },
-        { label: 'Net Balance', value: `${net < 0 ? '+' : ''}₹${Math.round(Math.abs(net)).toLocaleString('en-IN')}`, color: net <= 0 ? 'text-emerald-600' : 'text-red-600' },
+        { label: 'Total Out', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend: debitTrend, trendContext: 'spending' },
+        { label: 'Total In', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend: creditTrend, trendContext: 'income' },
+        { label: 'Net Balance', value: `${net < 0 ? '+' : ''}${formatAmountShort(Math.round(Math.abs(net)), trackerCurrency)}`, color: net <= 0 ? 'text-emerald-600' : 'text-red-600' },
       ];
     }
   }, [typeFilter, debitExpenses, creditExpenses, totalDebits, totalCredits, prevDebitTotal, prevCreditTotal, prevExpenses]);
@@ -269,7 +271,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                   content={() => (
                     <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle">
                       <tspan x="50%" dy="-6" className="fill-foreground font-mono text-base font-bold">
-                        ₹{Math.round(total).toLocaleString('en-IN')}
+                        {formatAmountShort(Math.round(total), trackerCurrency)}
                       </tspan>
                       <tspan x="50%" dy="18" className="fill-muted-foreground text-[10px]">
                         {label}
@@ -286,7 +288,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                   return (
                     <div className="bg-card border border-border rounded-lg p-2 shadow-lg text-xs">
                       <p className="font-semibold">{d.icon} {d.name}</p>
-                      <p className="font-mono">₹{Math.round(d.value).toLocaleString('en-IN')} ({pct}%)</p>
+                      <p className="font-mono">{formatAmountShort(Math.round(d.value), trackerCurrency)} ({pct}%)</p>
                     </div>
                   );
                 }}
@@ -309,7 +311,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                 <div key={`${d.category?.id}-${i}`} className="flex items-center gap-2">
                   <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.category?.color }} />
                   <span className="flex-1 truncate text-xs text-muted-foreground">{d.category?.icon} {d.category?.name}</span>
-                  <span className="font-mono text-xs">₹{Math.round(d.total).toLocaleString('en-IN')}</span>
+                  <span className="font-mono text-xs">{formatAmountShort(Math.round(d.total), trackerCurrency)}</span>
                   <span className="text-[10px] text-muted-foreground w-10 text-right">{pct}%</span>
                 </div>
               );
@@ -465,12 +467,12 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className={`font-mono text-sm font-semibold ${d.isDebit ? 'text-foreground' : 'text-emerald-600'}`}>
-                      {d.total > 0 ? `${d.isDebit ? '' : '+'}₹${Math.round(d.total).toLocaleString('en-IN')}` : '-'}
+                      {d.total > 0 ? `${d.isDebit ? '' : '+'}${formatAmountShort(Math.round(d.total), trackerCurrency)}` : '-'}
                     </p>
                     {compareEnabled && (
                       <div className="flex items-center justify-end gap-1 mt-0.5">
                         <span className="font-mono text-[10px] text-muted-foreground">
-                          {compareTotal > 0 ? `₹${Math.round(compareTotal).toLocaleString('en-IN')}` : '-'}
+                          {compareTotal > 0 ? formatAmountShort(Math.round(compareTotal), trackerCurrency) : '-'}
                         </span>
                         {changePct !== null && (
                           <span className={`text-[10px] font-medium ${
@@ -533,7 +535,7 @@ export default function DashboardTab({ trackerId, expenses, categories, month, o
                 <p className="text-xs text-muted-foreground">{format(new Date(e.date + 'T00:00:00'), 'd MMM')} · {e.category?.name}</p>
               </div>
               <p className={`font-mono text-sm font-semibold flex-shrink-0 ${e.is_debit ? '' : 'text-emerald-600'}`}>
-                {e.is_debit ? '' : '+'}₹{Math.round(e.amount).toLocaleString('en-IN')}
+                {e.is_debit ? '' : '+'}{formatAmountShort(Math.round(e.amount), trackerCurrency)}
               </p>
             </div>
           ))}

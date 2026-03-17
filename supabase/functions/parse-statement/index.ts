@@ -26,7 +26,8 @@ Rules:
 3. For DEBIT transactions (is_debit=true), assign the best category from: Food & Dining, Groceries, Transport, Fuel, Shopping, Entertainment, Travel, Healthcare, Utilities, Rent, Education, Personal Care, Subscriptions, EMI/Loan, Insurance, Investments, Gifts & Donations, Office & Business, Miscellaneous
 4. For CREDIT transactions (is_debit=false), assign the best category from: Salary / Income, Refund, Reimbursement, Cashback / Reward, Interest Earned, Other Income. If none of these fit, you may use a debit category.
 5. Set confidence (0.0 to 1.0) for your category choice. Only use >0.85 when you are very certain.
-6. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
+6. Detect the currency used in the statement. Look for currency symbols (₹, $, €, £, د.إ, S$, A$, C$, ¥, ﷼), ISO codes (INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY, SAR), or bank country context. Include a "currency" field (ISO 3-letter code) on each transaction. If you cannot determine the currency, omit the field.
+7. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
 
 const EMOJI_INSTRUCTION = `You are an emoji expert. For each category name provided, suggest the single best emoji that visually represents that category. Return a JSON object where each key is the category name and the value is a single emoji character. No markdown, no explanation. Response must start with { and end with }.`;
 

@@ -1,14 +1,16 @@
 import { ArrowUpRight, ArrowDownLeft, Equal } from 'lucide-react';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { Expense } from '@/types';
+import { formatAmountShort } from '@/lib/currencies';
 
 interface Props {
   expenses: Expense[];
   monthLabel: string;
   activeFilter: TransactionFilter;
+  currencyCode: string;
 }
 
-export default function NetBalanceBanner({ expenses, monthLabel, activeFilter }: Props) {
+export default function NetBalanceBanner({ expenses, monthLabel, activeFilter, currencyCode }: Props) {
   const debits = expenses.filter(e => e.is_debit);
   const credits = expenses.filter(e => !e.is_debit);
   const totalOut = debits.reduce((s, e) => s + e.amount, 0);
@@ -24,7 +26,7 @@ export default function NetBalanceBanner({ expenses, monthLabel, activeFilter }:
             <ArrowUpRight className="h-3.5 w-3.5 text-red-500" />
             <span className="text-xs text-red-600 font-medium">Total Out</span>
           </div>
-          <p className="font-mono text-sm font-bold text-red-600">₹{totalOut.toLocaleString('en-IN')}</p>
+          <p className="font-mono text-sm font-bold text-red-600">{formatAmountShort(totalOut, currencyCode)}</p>
           <p className="text-[10px] text-muted-foreground">{debits.length} debit{debits.length !== 1 ? 's' : ''}</p>
         </div>
 
@@ -34,7 +36,7 @@ export default function NetBalanceBanner({ expenses, monthLabel, activeFilter }:
             <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-500" />
             <span className="text-xs text-emerald-600 font-medium">Total In</span>
           </div>
-          <p className="font-mono text-sm font-bold text-emerald-600">₹{totalIn.toLocaleString('en-IN')}</p>
+          <p className="font-mono text-sm font-bold text-emerald-600">{formatAmountShort(totalIn, currencyCode)}</p>
           <p className="text-[10px] text-muted-foreground">{credits.length} credit{credits.length !== 1 ? 's' : ''}</p>
         </div>
 
@@ -45,7 +47,7 @@ export default function NetBalanceBanner({ expenses, monthLabel, activeFilter }:
             <span className="text-xs text-muted-foreground font-medium">Net</span>
           </div>
           <p className={`font-mono text-sm font-bold ${net <= 0 ? 'text-emerald-600' : 'text-foreground'}`}>
-            {net < 0 ? '+' : ''}₹{Math.abs(net).toLocaleString('en-IN')}
+            {net < 0 ? '+' : ''}{formatAmountShort(Math.abs(net), currencyCode)}
           </p>
           <p className="text-[10px] text-muted-foreground">{monthLabel}</p>
         </div>

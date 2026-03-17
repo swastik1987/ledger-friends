@@ -2,16 +2,18 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tracker, TrackerMember, Category } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useInviteMember, useCreateCategory, useUpdateCategory, useDeleteCategory } from '@/hooks/useTrackers';
+import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useInviteMember, useCreateCategory, useUpdateCategory, useDeleteCategory, useConvertTrackerCurrency } from '@/hooks/useTrackers';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown, Search, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
+import { CURRENCIES, getCurrency } from '@/lib/currencies';
 
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
 const PRESET_EMOJIS = ['🏷️', '🎯', '🏋️', '🎮', '🐕', '🏡', '☕', '🎵', '📸', '🧹', '🚰', '🎓', '🍕', '🚌', '🏖️', '💳', '🔧', '📺', '🧸', '🎪', '💎', '🧊', '🌿', '🎨', '🍣', '☂️', '🏪', '🎂', '📮', '🔑'];
@@ -90,11 +92,18 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const updateCategory = useUpdateCategory(trackerId);
   const deleteCategory = useDeleteCategory(trackerId);
 
+  const convertCurrency = useConvertTrackerCurrency();
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(tracker.name);
   const [inviteEmail, setInviteEmail] = useState('');
   const [deleteCountdown, setDeleteCountdown] = useState(0);
   const [defaultView, setDefaultView] = useState<TransactionFilter>('all');
+
+  // Currency change state
+  const [showCurrencyChange, setShowCurrencyChange] = useState(false);
+  const [pendingCurrency, setPendingCurrency] = useState(tracker.currency);
+  const [showConvertDialog, setShowConvertDialog] = useState(false);
 
   // Category sheet state
   const [showCategorySheet, setShowCategorySheet] = useState(false);
@@ -313,9 +322,28 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
               </>
             )}
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>₹ INR</span>
-            <span className="text-xs">(Multi-currency coming soon)</span>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Currency</Label>
+            <Select
+              value={tracker.currency}
+              onValueChange={(val) => {
+                if (val !== tracker.currency) {
+                  setPendingCurrency(val);
+                  setShowConvertDialog(true);
+                }
+              }}
+            >
+              <SelectTrigger className="h-10">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CURRENCIES.map(c => (
+                  <SelectItem key={c.code} value={c.code}>
+                    {c.symbol} {c.code} — {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       )}
@@ -597,6 +625,43 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* ─── Currency Change Dialog ─── */}
+      <AlertDialog open={showConvertDialog} onOpenChange={setShowConvertDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change currency to {getCurrency(pendingCurrency).symbol} {pendingCurrency}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Would you like to convert all existing transaction amounts from {getCurrency(tracker.currency).symbol} {tracker.currency} to {getCurrency(pendingCurrency).symbol} {pendingCurrency} using historical exchange rates?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button
+              onClick={async () => {
+                setShowConvertDialog(false);
+                await convertCurrency.mutateAsync({ trackerId, newCurrency: pendingCurrency, convertExisting: true });
+              }}
+              disabled={convertCurrency.isPending}
+              className="w-full"
+            >
+              {convertCurrency.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Yes, convert amounts
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setShowConvertDialog(false);
+                await convertCurrency.mutateAsync({ trackerId, newCurrency: pendingCurrency, convertExisting: false });
+              }}
+              disabled={convertCurrency.isPending}
+              className="w-full"
+            >
+              No, just change the label
+            </Button>
+            <AlertDialogCancel className="w-full">Cancel</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ─── Add / Edit Category Sheet ─── */}
       <Sheet open={showCategorySheet} onOpenChange={setShowCategorySheet}>

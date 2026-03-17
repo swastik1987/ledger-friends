@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Expense, Category } from '@/types';
+import { Expense, Category, Tracker } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
-import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check } from 'lucide-react';
+import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check, RefreshCw } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CURRENCIES, getCurrency } from '@/lib/currencies';
+import { supabase } from '@/integrations/supabase/client';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -21,12 +24,13 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trackerId: string;
+  trackerCurrency: string;
   categories: Category[];
   editExpenseId: string | null;
   expenses: Expense[];
 }
 
-export default function AddExpenseSheet({ open, onOpenChange, trackerId, categories, editExpenseId, expenses }: Props) {
+export default function AddExpenseSheet({ open, onOpenChange, trackerId, trackerCurrency, categories, editExpenseId, expenses }: Props) {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const createExpense = useCreateExpense();
@@ -44,6 +48,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [notes, setNotes] = useState('');
+  const [expenseCurrency, setExpenseCurrency] = useState(trackerCurrency);
+  const [isConverting, setIsConverting] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [duplicate, setDuplicate] = useState<Expense | null>(null);
@@ -56,6 +62,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       setDescription(editExpense.description);
       setCategoryId(editExpense.category_id);
       setNotes(editExpense.notes || '');
+      setExpenseCurrency(editExpense.currency || trackerCurrency);
       setShowManualForm(true);
     } else if (open && !editExpense) {
       setAmount('');
@@ -64,10 +71,11 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
       setDescription('');
       setCategoryId('');
       setNotes('');
+      setExpenseCurrency(trackerCurrency);
       setDuplicate(null);
       setShowManualForm(false);
     }
-  }, [open, editExpense]);
+  }, [open, editExpense, trackerCurrency]);
 
   const handleDescriptionBlur = useCallback(async () => {
     if (!isEdit && date && amount && description) {
@@ -94,18 +102,46 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
   const handleSave = async () => {
     if (!amount || !description || !categoryId || !user || !profile) return;
 
+    const originalAmount = parseFloat(amount);
+    let finalAmount = originalAmount;
+    let conversionFields: Record<string, any> = {};
+
+    // If expense currency differs from tracker currency, convert
+    if (expenseCurrency !== trackerCurrency) {
+      setIsConverting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('convert-currency', {
+          body: { from: expenseCurrency, to: trackerCurrency, amount: originalAmount, date },
+        });
+        if (error) throw error;
+        finalAmount = data.converted_amount;
+        const fromSymbol = getCurrency(expenseCurrency).symbol;
+        conversionFields = {
+          original_amount: originalAmount,
+          original_currency: expenseCurrency,
+          conversion_rate: data.rate,
+          conversion_note: `Converted from ${fromSymbol}${originalAmount.toLocaleString()} ${expenseCurrency} @ ${data.rate}`,
+        };
+      } catch (err: any) {
+        setIsConverting(false);
+        return;
+      }
+      setIsConverting(false);
+    }
+
     const expenseData = {
       tracker_id: trackerId,
       created_by_id: user.id,
       created_by_name: profile.full_name,
       category_id: categoryId,
-      amount: parseFloat(amount),
-      currency: 'INR',
+      amount: finalAmount,
+      currency: trackerCurrency,
       date,
       description,
       notes: notes || null,
       is_debit: isDebit,
       source: 'manual' as const,
+      ...conversionFields,
     };
 
     if (isEdit) {
@@ -116,7 +152,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
     onOpenChange(false);
   };
 
-  const isPending = createExpense.isPending || updateExpense.isPending;
+  const isPending = createExpense.isPending || updateExpense.isPending || isConverting;
 
   return (
     <>
@@ -172,10 +208,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
 
             {/* Manual form */}
             {(isEdit || showManualForm) && <>
-            {/* Amount */}
-            <div className="text-center">
+            {/* Amount + Currency */}
+            <div className="text-center space-y-2">
               <div className="inline-flex items-center gap-1">
-                <span className={`font-mono text-3xl ${isDebit ? 'text-red-600' : 'text-emerald-600'}`}>₹</span>
+                <span className={`font-mono text-3xl ${isDebit ? 'text-red-600' : 'text-emerald-600'}`}>{getCurrency(expenseCurrency).symbol}</span>
                 <input
                   type="number"
                   value={amount}
@@ -184,6 +220,26 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
                   className={`font-mono text-4xl font-bold text-center bg-transparent border-none outline-none w-48 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isDebit ? 'text-red-600' : 'text-emerald-600'}`}
                   autoFocus={!isEdit}
                 />
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <Select value={expenseCurrency} onValueChange={setExpenseCurrency}>
+                  <SelectTrigger className="h-8 w-auto min-w-[120px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.map(c => (
+                      <SelectItem key={c.code} value={c.code}>
+                        {c.symbol} {c.code}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {expenseCurrency !== trackerCurrency && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3" />
+                    Will convert to {getCurrency(trackerCurrency).symbol} {trackerCurrency}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -263,7 +319,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, categor
                 <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-sm font-medium">Similar transaction found</p>
-                  <p className="text-xs text-muted-foreground">"{duplicate.description}" on {duplicate.date} for ₹{duplicate.amount.toLocaleString('en-IN')}</p>
+                  <p className="text-xs text-muted-foreground">"{duplicate.description}" on {duplicate.date} for {formatAmountShort(duplicate.amount, trackerCurrency)}</p>
                   <div className="flex gap-2 mt-2">
                     <button onClick={() => setDuplicate(null)} className="text-xs font-medium text-primary">Add Anyway</button>
                     <button onClick={() => onOpenChange(false)} className="text-xs font-medium text-muted-foreground">Cancel</button>

@@ -18,6 +18,7 @@ import * as XLSX from 'xlsx';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import NetBalanceBanner from './NetBalanceBanner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
+import { getCurrency, formatAmountShort } from '@/lib/currencies';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -87,6 +88,7 @@ function groupByCategory(expenses: Expense[], categories: Category[], ascending:
 
 interface Props {
   trackerId: string;
+  trackerCurrency: string;
   expenses: Expense[];
   categories: Category[];
   isLoading: boolean;
@@ -100,7 +102,7 @@ interface Props {
   onTypeFilterChange: (v: TransactionFilter) => void;
 }
 
-export default function ExpensesTab({ trackerId, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange }: Props) {
+export default function ExpensesTab({ trackerId, trackerCurrency, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
@@ -352,7 +354,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       Description: e.description,
       Merchant: e.merchant_name || '',
       Category: e.category?.name || '',
-      'Amount (₹)': e.amount,
+      [`Amount (${getCurrency(trackerCurrency).symbol})`]: e.amount,
       'Payment Method': e.payment_method || '',
       Notes: e.notes || '',
       Tags: e.tags?.join(', ') || '',
@@ -581,7 +583,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
       {!isSelecting && <TransactionTypeFilter value={typeFilter} onChange={onTypeFilterChange} />}
 
       {/* Net Balance Banner — uses filtered expenses */}
-      {!isSelecting && <NetBalanceBanner expenses={filteredExpenses} monthLabel={monthLabel} activeFilter={typeFilter} />}
+      {!isSelecting && <NetBalanceBanner expenses={filteredExpenses} monthLabel={monthLabel} activeFilter={typeFilter} currencyCode={trackerCurrency} />}
 
       {/* Loading */}
       {isLoading && (
@@ -665,9 +667,9 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                 </p>
               )}
               <p className="text-[10px] text-muted-foreground">
-                <span className="text-red-500">↑ ₹{groupDebits.toLocaleString('en-IN')}</span>
+                <span className="text-red-500">↑ {formatAmountShort(groupDebits, trackerCurrency)}</span>
                 {' '}
-                <span className="text-emerald-500">↓ ₹{groupCredits.toLocaleString('en-IN')}</span>
+                <span className="text-emerald-500">↓ {formatAmountShort(groupCredits, trackerCurrency)}</span>
                 {' · '}
                 <span>{items.length} txn{items.length !== 1 ? 's' : ''}</span>
               </p>
@@ -723,7 +725,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                           <div className="flex items-center justify-end gap-1">
                             {!expense.is_debit && <ArrowDownLeft className="h-3 w-3 text-emerald-500" />}
                             <p className={`font-mono font-semibold text-sm ${expense.is_debit ? 'text-foreground' : 'text-emerald-600'}`}>
-                              {expense.is_debit ? '' : '+'} ₹{expense.amount.toLocaleString('en-IN')}
+                              {expense.is_debit ? '' : '+'}{formatAmountShort(expense.amount, trackerCurrency)}
                             </p>
                           </div>
                           <p className="text-xs text-muted-foreground">{format(new Date(expense.date + 'T00:00:00'), 'd MMM')}</p>
@@ -733,6 +735,9 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
                         <div className="mt-2 pl-[52px] flex items-start gap-2">
                           <div className="flex-1 min-w-0 space-y-0.5">
                             <p className="text-sm text-foreground text-left">{expense.description}</p>
+                            {expense.conversion_note && (
+                              <p className="text-[11px] text-muted-foreground text-left italic">{expense.conversion_note}</p>
+                            )}
                             {expense.notes && (
                               <p className="text-xs text-muted-foreground text-left line-clamp-2">{expense.notes}</p>
                             )}
