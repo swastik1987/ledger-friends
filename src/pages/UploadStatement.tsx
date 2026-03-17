@@ -170,21 +170,25 @@ function detectFormatHint(csvText: string): string | null {
   return hints.length > 0 ? hints.join(' ') : null;
 }
 
-const PROCESSING_MESSAGES = [
-  '🔓 Unlocking your file securely...',
-  '📄 Extracting transactions...',
-  '🧠 AI is categorising your transactions...',
-  '🔍 Checking for duplicates...',
-  '🗑️ Destroying document from memory...',
-  '✅ Almost done...',
-];
-
-const BULK_PROCESSING_MESSAGES = [
-  '📊 Reading your spreadsheet...',
-  '🔍 Matching categories...',
-  '🧠 AI is generating icons for new categories...',
-  '✅ Almost done...',
-];
+// Custom error classes for specific failure scenarios
+class PasswordRequiredError extends Error {
+  constructor(msg = 'This PDF is password protected. Please go back and enter the correct password.') { super(msg); this.name = 'PasswordRequiredError'; }
+}
+class WrongPasswordError extends Error {
+  constructor(msg = 'Incorrect password. Please go back and try again with the correct password.') { super(msg); this.name = 'WrongPasswordError'; }
+}
+class FileUnreadableError extends Error {
+  constructor(msg = "This file couldn't be read. It may be corrupted or an unsupported format.") { super(msg); this.name = 'FileUnreadableError'; }
+}
+class EmptyFileError extends Error {
+  constructor(msg = 'This file appears to be empty or has no data rows to process.') { super(msg); this.name = 'EmptyFileError'; }
+}
+class NoTransactionsError extends Error {
+  constructor(msg = "No transactions found. This file doesn't appear to be a bank statement.") { super(msg); this.name = 'NoTransactionsError'; }
+}
+class ParseServiceError extends Error {
+  constructor(msg = 'Statement parsing failed. Please check your connection and try again.') { super(msg); this.name = 'ParseServiceError'; }
+}
 
 function NudgeUploadModes() {
   const { show, dismiss } = useNudge('upload-two-modes');
@@ -205,7 +209,8 @@ export default function UploadStatement() {
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [msgIndex, setMsgIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
   const [drafts, setDrafts] = useState<DraftExpense[]>([]);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
@@ -270,9 +275,13 @@ export default function UploadStatement() {
     // It's a bulk upload — process it
     setStep(3);
     setProcessing(true);
-    const interval = setInterval(() => setMsgIndex(i => (i + 1) % BULK_PROCESSING_MESSAGES.length), 1800);
+    setProgress(0);
+    setProgressMessage('📊 Reading your spreadsheet...');
 
     try {
+      setProgress(20);
+      setProgressMessage('🔍 Matching categories...');
+
       // 1. Collect all unique category names from the file
       const categoryNamesInFile = [...new Set(
         rows.map(r => (r[columnMap.category] || '').trim()).filter(Boolean)
@@ -290,9 +299,11 @@ export default function UploadStatement() {
           unmatchedNames.push(name);
         }
       }
+      setProgress(50);
 
       // 3. For unmatched categories, get AI-generated emojis and create them
       if (unmatchedNames.length > 0) {
+        setProgressMessage('🧠 Creating new categories...');
         let emojiMap: Record<string, string> = {};
         try {
           const { data, error } = await supabase.functions.invoke('parse-statement', {
@@ -335,6 +346,9 @@ export default function UploadStatement() {
         }
       }
 
+      setProgress(80);
+      setProgressMessage('✅ Preparing review...');
+
       // 4. Build draft expenses from rows
       const miscCategory = categories.find(c => c.name === 'Miscellaneous');
 
@@ -371,7 +385,13 @@ export default function UploadStatement() {
           };
         });
 
+      setProgress(100);
       setDrafts(draftExpenses);
+
+      if (draftExpenses.length === 0) {
+        throw new EmptyFileError('No valid transaction rows found in this file.');
+      }
+
       setStep(4);
 
       if (unmatchedNames.length > 0) {
@@ -381,7 +401,6 @@ export default function UploadStatement() {
       toast.error(err?.message || 'Failed to process bulk file');
       setStep(1);
     } finally {
-      clearInterval(interval);
       setProcessing(false);
       setFile(null);
     }
@@ -396,8 +415,8 @@ export default function UploadStatement() {
     if (!file) return;
     setStep(3);
     setProcessing(true);
-
-    const interval = setInterval(() => setMsgIndex(i => (i + 1) % PROCESSING_MESSAGES.length), 1800);
+    setProgress(0);
+    setProgressMessage('🔓 Reading your file...');
 
     try {
       let formatHint: string | null = null;
@@ -408,20 +427,29 @@ export default function UploadStatement() {
       const PAGES_PER_CHUNK = 2;
       const ROWS_PER_CHUNK = 40;
 
+      // ── Stage 1: Extract text (0% → 15%) ──
       if (ext === 'csv') {
         const text = new TextDecoder().decode(arrayBuffer);
+        if (!text.trim()) throw new EmptyFileError();
         formatHint = detectFormatHint(text);
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         const rows = result.data as Record<string, unknown>[];
+        if (rows.length === 0) throw new EmptyFileError();
         for (let i = 0; i < rows.length; i += ROWS_PER_CHUNK) {
           textChunks.push(JSON.stringify(rows.slice(i, i + ROWS_PER_CHUNK)));
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
-        const wb = XLSX.read(arrayBuffer);
+        let wb: any;
+        try {
+          wb = XLSX.read(arrayBuffer);
+        } catch {
+          throw new FileUnreadableError();
+        }
         const ws = wb.Sheets[wb.SheetNames[0]];
         const csvOutput = XLSX.utils.sheet_to_csv(ws);
+        if (!csvOutput.trim() || csvOutput.split('\n').filter((l: string) => l.trim()).length < 2) throw new EmptyFileError();
         formatHint = detectFormatHint(csvOutput);
-        const lines = csvOutput.split('\n').filter(l => l.trim());
+        const lines = csvOutput.split('\n').filter((l: string) => l.trim());
         const header = lines[0] || '';
         const dataLines = lines.slice(1);
         for (let i = 0; i < dataLines.length; i += ROWS_PER_CHUNK) {
@@ -430,29 +458,69 @@ export default function UploadStatement() {
       } else if (ext === 'pdf') {
         const pdfjsLib = await import('pdfjs-dist');
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-        const doc = await pdfjsLib.getDocument({ data: arrayBuffer, password: password || undefined }).promise;
+
+        let doc: any;
+        try {
+          doc = await pdfjsLib.getDocument({ data: arrayBuffer, password: password || undefined }).promise;
+        } catch (pdfErr: any) {
+          const msg = String(pdfErr?.message || '').toLowerCase();
+          if (msg.includes('password') && !password) {
+            throw new PasswordRequiredError();
+          } else if (msg.includes('password')) {
+            throw new WrongPasswordError();
+          } else if (msg.includes('invalid') || msg.includes('corrupt') || msg.includes('not a pdf')) {
+            throw new FileUnreadableError();
+          }
+          throw new FileUnreadableError();
+        }
+
         const pages: string[] = [];
         for (let i = 1; i <= doc.numPages; i++) {
           const page = await doc.getPage(i);
           const content = await page.getTextContent();
           pages.push(content.items.map((item: any) => item.str).join(' '));
         }
+
+        const allText = pages.join(' ').trim();
+        if (!allText) throw new EmptyFileError('This PDF has no extractable text. It may be a scanned image. Try a CSV or Excel file instead.');
+
         for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
           textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
         }
       }
 
-      if (textChunks.length === 0) throw new Error('Could not extract text from file');
+      if (textChunks.length === 0) throw new EmptyFileError();
+      setProgress(15);
 
+      // ── Stage 2: AI parsing (15% → 80%) ──
+      setProgressMessage('🧠 AI is categorising your transactions...');
       const allTransactions: any[] = [];
-      for (const chunk of textChunks) {
-        const { data, error } = await supabase.functions.invoke('parse-statement', {
-          body: { extractedText: chunk, formatHint },
-        });
-        if (error) throw error;
+      const chunkProgressRange = 65; // 15% to 80%
+
+      for (let ci = 0; ci < textChunks.length; ci++) {
+        const chunk = textChunks[ci];
+        let data: any;
+        let error: any;
+        try {
+          const result = await supabase.functions.invoke('parse-statement', {
+            body: { extractedText: chunk, formatHint },
+          });
+          data = result.data;
+          error = result.error;
+        } catch {
+          throw new ParseServiceError();
+        }
+        if (error) throw new ParseServiceError();
         const txns = data?.transactions || [];
         allTransactions.push(...txns);
+        setProgress(15 + Math.round(((ci + 1) / textChunks.length) * chunkProgressRange));
       }
+
+      if (allTransactions.length === 0) throw new NoTransactionsError();
+
+      // ── Stage 3: Build drafts (80% → 95%) ──
+      setProgress(80);
+      setProgressMessage('🔍 Checking for duplicates...');
 
       const transactions = allTransactions;
       const miscCategory = categories?.find(c => c.name === 'Miscellaneous');
@@ -497,13 +565,22 @@ export default function UploadStatement() {
         };
       });
 
+      // ── Stage 4: Done (95% → 100%) ──
+      setProgress(95);
+      setProgressMessage('✅ Almost done...');
+
       setDrafts(draftExpenses);
+      setProgress(100);
       setStep(4);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to process file');
-      setStep(1);
+      if (err instanceof PasswordRequiredError || err instanceof WrongPasswordError) {
+        toast.error(err.message);
+        setStep(2); // Go back to password step
+      } else {
+        toast.error(err?.message || 'Failed to process file');
+        setStep(1);
+      }
     } finally {
-      clearInterval(interval);
       setProcessing(false);
       setFile(null);
     }
@@ -689,13 +766,17 @@ export default function UploadStatement() {
 
         {step === 3 && (
           <div className="flex flex-col items-center justify-center py-20 space-y-6">
-            <p className="text-lg font-medium text-center animate-pulse">
-              {(processing && drafts.length === 0)
-                ? (msgIndex < BULK_PROCESSING_MESSAGES.length ? BULK_PROCESSING_MESSAGES[msgIndex] : PROCESSING_MESSAGES[msgIndex % PROCESSING_MESSAGES.length])
-                : PROCESSING_MESSAGES[msgIndex]}
+            <p className="text-lg font-medium text-center transition-opacity duration-300">
+              {progressMessage}
             </p>
-            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full animate-[shimmer_1.5s_ease-in-out_infinite] w-1/3" />
+            <div className="w-full space-y-2">
+              <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-700 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground text-center">{progress}%</p>
             </div>
           </div>
         )}
