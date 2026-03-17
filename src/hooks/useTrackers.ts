@@ -322,19 +322,27 @@ export function useUpdateCategory(trackerId: string) {
 export function useDeleteCategory(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (categoryId: string) => {
-      // Move expenses to Miscellaneous first
-      const { data: misc } = await supabase
-        .from('categories')
-        .select('id')
-        .eq('name', 'Miscellaneous')
-        .eq('is_system', true)
-        .single();
-
-      if (misc) {
+    mutationFn: async ({
+      categoryId,
+      deleteTransactions,
+      reassignCategoryId,
+    }: {
+      categoryId: string;
+      deleteTransactions?: boolean;
+      reassignCategoryId?: string;
+    }) => {
+      if (deleteTransactions) {
+        // Delete all transactions using this category in this tracker
         await supabase
           .from('expenses')
-          .update({ category_id: misc.id })
+          .delete()
+          .eq('category_id', categoryId)
+          .eq('tracker_id', trackerId);
+      } else if (reassignCategoryId) {
+        // Move transactions to the chosen category
+        await supabase
+          .from('expenses')
+          .update({ category_id: reassignCategoryId } as any)
           .eq('category_id', categoryId)
           .eq('tracker_id', trackerId);
       }
@@ -345,6 +353,7 @@ export function useDeleteCategory(trackerId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       toast.success('Category deleted');
     },
     onError: (err: Error) => toast.error(err.message),

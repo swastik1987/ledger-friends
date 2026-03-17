@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown, Search, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 
@@ -107,6 +107,13 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const [showAllEmojis, setShowAllEmojis] = useState(false);
   const [showSystemCats, setShowSystemCats] = useState(false);
   const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Category delete flow state
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null);
+  const [deleteCatTxnCount, setDeleteCatTxnCount] = useState(0);
+  const [deleteCatStep, setDeleteCatStep] = useState<'choose' | 'pick-category'>('choose');
+  const [reassignCategoryId, setReassignCategoryId] = useState<string>('');
+  const [reassignSearch, setReassignSearch] = useState('');
 
   const customCategories = categories.filter(c => !c.is_system && c.tracker_id === trackerId);
   const systemCategories = categories.filter(c => c.is_system);
@@ -242,6 +249,48 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
     }
   };
 
+  const openDeleteCategoryFlow = async (cat: Category) => {
+    const { count } = await supabase
+      .from('expenses')
+      .select('*', { count: 'exact', head: true })
+      .eq('category_id', cat.id)
+      .eq('tracker_id', trackerId);
+
+    setDeletingCategory(cat);
+    setDeleteCatTxnCount(count ?? 0);
+    setDeleteCatStep('choose');
+    setReassignCategoryId('');
+    setReassignSearch('');
+  };
+
+  const handleDeleteCategoryWithTransactions = async () => {
+    if (!deletingCategory) return;
+    await deleteCategory.mutateAsync({
+      categoryId: deletingCategory.id,
+      deleteTransactions: true,
+    });
+    setDeletingCategory(null);
+  };
+
+  const handleDeleteCategoryReassign = async () => {
+    if (!deletingCategory || !reassignCategoryId) return;
+    await deleteCategory.mutateAsync({
+      categoryId: deletingCategory.id,
+      reassignCategoryId,
+    });
+    setDeletingCategory(null);
+  };
+
+  const handleDeleteCategoryNoTxns = async () => {
+    if (!deletingCategory) return;
+    await deleteCategory.mutateAsync({ categoryId: deletingCategory.id });
+    setDeletingCategory(null);
+  };
+
+  const reassignableCategories = categories
+    .filter(c => c.id !== deletingCategory?.id)
+    .filter(c => c.name.toLowerCase().includes(reassignSearch.toLowerCase()));
+
   const isSaving = createCategory.isPending || updateCategory.isPending;
 
   return (
@@ -376,23 +425,9 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                 <button onClick={() => openEditSheet(cat)} className="p-1 text-muted-foreground hover:text-foreground">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <button className="p-1 text-muted-foreground hover:text-destructive">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete "{cat.name}"?</AlertDialogTitle>
-                      <AlertDialogDescription>Expenses using this category will be moved to Miscellaneous.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => deleteCategory.mutate(cat.id)} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                <button onClick={() => openDeleteCategoryFlow(cat)} className="p-1 text-muted-foreground hover:text-destructive">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             ))}
           </div>
@@ -450,6 +485,118 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
           </Button>
         </div>
       )}
+
+      {/* ─── Delete Category Flow ─── */}
+      <Sheet open={!!deletingCategory} onOpenChange={(open) => { if (!open) setDeletingCategory(null); }}>
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[80vh] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Delete "{deletingCategory?.name}"</SheetTitle>
+          </SheetHeader>
+          <div className="py-4 space-y-4">
+            {deleteCatTxnCount === 0 ? (
+              <>
+                <p className="text-sm text-muted-foreground">No transactions use this category. It can be safely deleted.</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setDeletingCategory(null)}>Cancel</Button>
+                  <Button className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={handleDeleteCategoryNoTxns} disabled={deleteCategory.isPending}>
+                    {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Category'}
+                  </Button>
+                </div>
+              </>
+            ) : deleteCatStep === 'choose' ? (
+              <>
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
+                  <p className="text-sm text-amber-800 font-medium">{deleteCatTxnCount} transaction{deleteCatTxnCount > 1 ? 's' : ''} use this category</p>
+                  <p className="text-xs text-amber-700 mt-1">Choose what to do with these transactions before deleting the category.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full h-12 justify-start gap-3"
+                  onClick={() => setDeleteCatStep('pick-category')}
+                >
+                  <Tag className="h-4 w-4 text-primary" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">Keep transactions</p>
+                    <p className="text-xs text-muted-foreground">Move them to another category</p>
+                  </div>
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full h-12 justify-start gap-3 border-destructive/30 text-destructive hover:bg-destructive/5"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <div className="text-left">
+                        <p className="text-sm font-medium">Delete transactions too</p>
+                        <p className="text-xs opacity-70">Permanently delete all {deleteCatTxnCount} transaction{deleteCatTxnCount > 1 ? 's' : ''}</p>
+                      </div>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete {deleteCatTxnCount} transactions?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete the "{deletingCategory?.name}" category and all {deleteCatTxnCount} transaction{deleteCatTxnCount > 1 ? 's' : ''} using it. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteCategoryWithTransactions} className="bg-destructive text-destructive-foreground">
+                        {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete All'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                <Button variant="ghost" className="w-full" onClick={() => setDeletingCategory(null)}>Cancel</Button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Move {deleteCatTxnCount} transaction{deleteCatTxnCount > 1 ? 's' : ''} to:
+                </p>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={reassignSearch}
+                    onChange={e => setReassignSearch(e.target.value)}
+                    placeholder="Search categories..."
+                    className="pl-9 h-10"
+                  />
+                </div>
+                <div className="max-h-[40vh] overflow-y-auto space-y-1">
+                  {reassignableCategories.map(cat => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setReassignCategoryId(cat.id)}
+                      className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-sm transition-colors ${
+                        reassignCategoryId === cat.id ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
+                      }`}
+                    >
+                      <span className="h-7 w-7 rounded-full flex items-center justify-center text-xs shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                        {cat.icon}
+                      </span>
+                      <span className="flex-1 text-left truncate">{cat.name}</span>
+                      {!cat.is_system && <span className="text-[10px] text-muted-foreground">Custom</span>}
+                      {reassignCategoryId === cat.id && <Check className="h-4 w-4 text-primary shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setDeleteCatStep('choose')}>Back</Button>
+                  <Button
+                    className="flex-1"
+                    disabled={!reassignCategoryId || deleteCategory.isPending}
+                    onClick={handleDeleteCategoryReassign}
+                  >
+                    {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Move & Delete'}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ─── Add / Edit Category Sheet ─── */}
       <Sheet open={showCategorySheet} onOpenChange={setShowCategorySheet}>

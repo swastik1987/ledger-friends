@@ -187,6 +187,88 @@ export function useBulkDeleteExpenses() {
   });
 }
 
+export function useBulkMoveExpenses() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      targetTrackerId,
+      expenses,
+      sourceCategories,
+      targetCategories,
+    }: {
+      ids: string[];
+      targetTrackerId: string;
+      expenses: Expense[];
+      sourceCategories: Category[];
+      targetCategories: Category[];
+    }) => {
+      const selected = expenses.filter(e => ids.includes(e.id));
+
+      // Build map of category IDs that need to be created in target tracker
+      const categoryMap = new Map<string, string>(); // old category_id -> new category_id
+
+      for (const exp of selected) {
+        if (categoryMap.has(exp.category_id)) continue;
+
+        const sourceCat = sourceCategories.find(c => c.id === exp.category_id);
+        if (!sourceCat) continue;
+
+        // System categories are shared — no need to create
+        if (sourceCat.is_system) {
+          categoryMap.set(exp.category_id, exp.category_id);
+          continue;
+        }
+
+        // Check if a custom category with the same name exists in target
+        const existingInTarget = targetCategories.find(
+          c => c.name.toLowerCase() === sourceCat.name.toLowerCase() && (c.is_system || c.tracker_id === targetTrackerId)
+        );
+
+        if (existingInTarget) {
+          categoryMap.set(exp.category_id, existingInTarget.id);
+        } else {
+          // Create the category in the target tracker
+          const { data: newCat, error: catErr } = await supabase
+            .from('categories')
+            .insert({
+              name: sourceCat.name,
+              icon: sourceCat.icon,
+              color: sourceCat.color,
+              tracker_id: targetTrackerId,
+              is_system: false,
+            })
+            .select()
+            .single();
+
+          if (catErr) throw catErr;
+          categoryMap.set(exp.category_id, newCat.id);
+        }
+      }
+
+      // Update each expense: change tracker_id and category_id
+      for (const exp of selected) {
+        const newCatId = categoryMap.get(exp.category_id) || exp.category_id;
+        const { error } = await supabase
+          .from('expenses')
+          .update({ tracker_id: targetTrackerId, category_id: newCatId } as any)
+          .eq('id', exp.id);
+        if (error) throw error;
+      }
+
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['trackers'] });
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      toast.success(`${count} transactions moved`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
 export function useExpenseRealtime(trackerId: string) {
   const queryClient = useQueryClient();
 

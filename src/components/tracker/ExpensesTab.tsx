@@ -1,12 +1,13 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown } from 'lucide-react';
+import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useExpenseMonths } from '@/hooks/useExpenses';
+import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
+import { useTrackers, useCategories } from '@/hooks/useTrackers';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -104,6 +105,8 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
   const bulkDeleteExpenses = useBulkDeleteExpenses();
+  const bulkMoveExpenses = useBulkMoveExpenses();
+  const { data: allTrackers } = useTrackers();
   const [showExport, setShowExport] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -119,6 +122,9 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
 
   // Bulk delete confirmation
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+
+  // Bulk move to another tracker
+  const [showMoveTrackerPicker, setShowMoveTrackerPicker] = useState(false);
 
   // Sort state — persists in localStorage
   const [sortBy, setSortBy] = useState<SortOption>(() => readSortPref(trackerId));
@@ -317,6 +323,28 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
     clearSelection();
   };
 
+  const handleBulkMove = async (targetTrackerId: string) => {
+    const ids = Array.from(selectedIds);
+    setShowMoveTrackerPicker(false);
+
+    // Fetch target tracker's categories
+    const { data: targetCats } = await (await import('@/integrations/supabase/client')).supabase
+      .from('categories')
+      .select('*')
+      .or(`is_system.eq.true,tracker_id.eq.${targetTrackerId}`);
+
+    await bulkMoveExpenses.mutateAsync({
+      ids,
+      targetTrackerId,
+      expenses,
+      sourceCategories: categories,
+      targetCategories: (targetCats || []) as Category[],
+    });
+    clearSelection();
+  };
+
+  const otherTrackers = (allTrackers || []).filter(t => t.id !== trackerId);
+
   const handleExport = () => {
     const rows = expenses.map(e => ({
       Date: e.date,
@@ -344,7 +372,7 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
     setShowExport(false);
   };
 
-  const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending;
+  const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
 
   return (
     <div className="px-4 py-3 space-y-3">
@@ -767,6 +795,18 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
               <Tag className="h-4 w-4" />
               Category
             </Button>
+            {otherTrackers.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 gap-1.5"
+                onClick={() => setShowMoveTrackerPicker(true)}
+                disabled={isBulkPending}
+              >
+                {bulkMoveExpenses.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoveRight className="h-4 w-4" />}
+                Move
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -837,6 +877,35 @@ export default function ExpensesTab({ trackerId, expenses, categories, isLoading
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Move to Tracker Sheet */}
+      <Sheet open={showMoveTrackerPicker} onOpenChange={setShowMoveTrackerPicker}>
+        <SheetContent side="bottom" className="rounded-t-2xl">
+          <SheetHeader>
+            <SheetTitle>Move {selectedIds.size} transaction{selectedIds.size > 1 ? 's' : ''} to...</SheetTitle>
+          </SheetHeader>
+          <div className="py-3 space-y-1">
+            {otherTrackers.map(t => (
+              <button
+                key={t.id}
+                onClick={() => handleBulkMove(t.id)}
+                disabled={isBulkPending}
+                className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted"
+              >
+                <div className="w-1 h-8 rounded-full bg-primary shrink-0" />
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-medium">{t.name}</p>
+                  <p className="text-xs text-muted-foreground">{t.member_count} member{t.member_count !== 1 ? 's' : ''}</p>
+                </div>
+                <MoveRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            ))}
+            {otherTrackers.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No other trackers available</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Export Sheet */}
       <Sheet open={showExport} onOpenChange={setShowExport}>
