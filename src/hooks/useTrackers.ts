@@ -347,6 +347,12 @@ export function useDeleteCategory(trackerId: string) {
           .eq('tracker_id', trackerId);
       }
 
+      // Remove category_learning references before deleting the category
+      await supabase
+        .from('category_learning')
+        .delete()
+        .eq('category_id', categoryId);
+
       const { error } = await supabase.from('categories').delete().eq('id', categoryId);
       if (error) throw error;
     },
