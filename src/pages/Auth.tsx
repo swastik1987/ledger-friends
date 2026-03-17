@@ -23,7 +23,10 @@ export default function AuthPage() {
 
       <div className="w-full max-w-sm">
         <div className="rounded-2xl bg-card p-6 shadow-sm border border-border">
-          <GoogleSignInButton />
+          <div className="flex flex-col gap-3">
+            <GoogleSignInButton />
+            <AppleSignInButton />
+          </div>
           <div className="flex items-center gap-3 my-5">
             <Separator className="flex-1" />
             <span className="text-xs text-muted-foreground">or</span>
