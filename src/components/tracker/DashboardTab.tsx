@@ -8,8 +8,19 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import TransactionTypeFilter from './TransactionTypeFilter';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort } from '@/lib/currencies';
+
+function NudgePieChart() {
+  const { show, dismiss } = useNudge('dashboard-pie-chart');
+  return (
+    <div className="relative w-fit mx-auto">
+      <Nudge show={show} onDismiss={dismiss} message="Tap any category in the breakdown to jump to those transactions. Use Compare to see month-over-month trends." position="bottom" />
+    </div>
+  );
+}
 
 interface Props {
   trackerId: string;
@@ -383,6 +394,8 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
           }
         </div>
       </div>
+
+      <NudgePieChart />
 
       {/* Category Breakdown */}
       {(mergedBreakdownData.length > 0 || compareEnabled) && (

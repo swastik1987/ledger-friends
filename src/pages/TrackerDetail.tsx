@@ -12,7 +12,14 @@ import ExpensesTab from '@/components/tracker/ExpensesTab';
 import DashboardTab from '@/components/tracker/DashboardTab';
 import SettingsTab from '@/components/tracker/SettingsTab';
 import AddExpenseSheet from '@/components/tracker/AddExpenseSheet';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import { format } from 'date-fns';
+
+function NudgeUpload() {
+  const { show, dismiss } = useNudge('tracker-upload-statement', 2000);
+  return <Nudge show={show} onDismiss={dismiss} message="Import transactions from your bank statement — PDF, CSV, or Excel. AI will categorise them for you." position="bottom" />;
+}
 
 export default function TrackerDetail() {
   const { trackerId } = useParams<{ trackerId: string }>();
@@ -79,9 +86,12 @@ export default function TrackerDetail() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <h1 className="font-semibold text-base truncate flex-1 text-center mx-2">{tracker.name}</h1>
-          <button onClick={() => navigate(`/tracker/${trackerId}/upload`)} className="p-1 text-muted-foreground hover:text-foreground">
-            <Upload className="h-5 w-5" />
-          </button>
+          <div className="relative">
+            <button onClick={() => navigate(`/tracker/${trackerId}/upload`)} className="p-1 text-muted-foreground hover:text-foreground">
+              <Upload className="h-5 w-5" />
+            </button>
+            <NudgeUpload />
+          </div>
         </div>
       </div>
 

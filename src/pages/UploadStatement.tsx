@@ -10,6 +10,8 @@ import { useBulkCreateExpenses } from '@/hooks/useExpenses';
 import { supabase } from '@/integrations/supabase/client';
 import { DraftExpense, Category } from '@/types';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -183,6 +185,11 @@ const BULK_PROCESSING_MESSAGES = [
   '🧠 AI is generating icons for new categories...',
   '✅ Almost done...',
 ];
+
+function NudgeUploadModes() {
+  const { show, dismiss } = useNudge('upload-two-modes');
+  return <Nudge show={show} onDismiss={dismiss} message="Bank statements are parsed by AI. Structured Excel files (with Date, Category, Type, Amount columns) are imported directly — no AI needed." position="bottom" />;
+}
 
 export default function UploadStatement() {
   const { trackerId } = useParams<{ trackerId: string }>();
@@ -642,11 +649,12 @@ export default function UploadStatement() {
       <div className="max-w-lg mx-auto px-4 py-6">
         {step === 1 && (
           <div className="space-y-6 text-center">
-            <div>
+            <div className="relative">
               <h2 className="text-lg font-semibold">Upload Transactions</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 Upload a bank statement (PDF/CSV/XLSX) for AI parsing, or a structured Excel with Date, Category, Description, Type, Amount columns for direct import.
               </p>
+              <NudgeUploadModes />
             </div>
             <label className="block border-2 border-dashed border-border rounded-2xl p-8 cursor-pointer hover:border-primary/50 transition-colors">
               <input type="file" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileChange} className="hidden" />

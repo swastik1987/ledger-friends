@@ -17,6 +17,8 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import NetBalanceBanner from './NetBalanceBanner';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
 
@@ -84,6 +86,20 @@ function groupByCategory(expenses: Expense[], categories: Category[], ascending:
   return Object.entries(groups)
     .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
     .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
+}
+
+function NudgeFilterSort() {
+  const { show, dismiss } = useNudge('expenses-filter-sort');
+  return <Nudge show={show} onDismiss={dismiss} message="Sort by date or category, and filter by user or category to find transactions quickly." position="bottom" />;
+}
+
+function NudgeLongPress() {
+  const { show, dismiss } = useNudge('expenses-long-press', 3000);
+  return (
+    <div className="relative w-fit mx-auto">
+      <Nudge show={show} onDismiss={dismiss} message="Long-press any transaction to select multiple — then bulk edit category, move, or delete." position="bottom" />
+    </div>
+  );
 }
 
 interface Props {
@@ -461,6 +477,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
             </PopoverContent>
           </Popover>
           {/* Filter button */}
+          <div className="relative">
           <Popover open={filterOpen} onOpenChange={setFilterOpen}>
             <PopoverTrigger asChild>
               <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
@@ -545,6 +562,8 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
               </div>
             </PopoverContent>
           </Popover>
+          <NudgeFilterSort />
+          </div>
         </div>
       )}
 
@@ -635,6 +654,9 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
           )}
         </div>
       )}
+
+      {/* Long-press nudge — show once above the list */}
+      {!isLoading && groups.length > 0 && !isSelecting && <NudgeLongPress />}
 
       {/* Transaction groups */}
       {!isLoading && groups.map(([groupKey, items]) => {

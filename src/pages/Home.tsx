@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 
 function getGreeting() {
@@ -19,6 +21,11 @@ function getGreeting() {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+function NudgeCreateTracker() {
+  const { show, dismiss } = useNudge('home-create-tracker');
+  return <Nudge show={show} onDismiss={dismiss} message="Create trackers for different groups — home expenses, trips, projects, or shared budgets." position="left" />;
 }
 
 export default function HomePage() {
@@ -179,12 +186,15 @@ export default function HomePage() {
 
       {/* FAB */}
       {trackers && trackers.length > 0 && (
-        <button
-          onClick={() => setShowCreate(true)}
-          className="fixed bottom-24 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-shadow"
-        >
-          <Plus className="h-6 w-6" />
-        </button>
+        <div className="fixed bottom-24 right-4 z-20 relative">
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-shadow"
+          >
+            <Plus className="h-6 w-6" />
+          </button>
+          <NudgeCreateTracker />
+        </div>
       )}
 
       {/* Create Tracker Sheet */}

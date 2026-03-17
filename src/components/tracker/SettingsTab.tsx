@@ -14,6 +14,8 @@ import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown, Search
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { CURRENCIES, getCurrency } from '@/lib/currencies';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
 const PRESET_EMOJIS = ['🏷️', '🎯', '🏋️', '🎮', '🐕', '🏡', '☕', '🎵', '📸', '🧹', '🚰', '🎓', '🍕', '🚌', '🏖️', '💳', '🔧', '📺', '🧸', '🎪', '💎', '🧊', '🌿', '🎨', '🍣', '☂️', '🏪', '🎂', '📮', '🔑'];
@@ -69,6 +71,11 @@ function getClientEmojiSuggestions(name: string): string[] {
     }
   }
   return ['🏷️', '📌', '📋']; // generic fallback
+}
+
+function NudgeInviteMember() {
+  const { show, dismiss } = useNudge('settings-invite-member');
+  return <Nudge show={show} onDismiss={dismiss} message="Add people by email to collaborate on this tracker. They'll see all transactions and can add their own." position="bottom" />;
 }
 
 interface Props {
@@ -420,11 +427,14 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
         </div>
 
         {isAdmin && (
-          <div className="flex gap-2 pt-2 border-t border-border">
-            <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Email address" className="h-10 flex-1" onKeyDown={e => e.key === 'Enter' && handleInvite()} />
-            <Button size="sm" className="h-10" onClick={handleInvite} disabled={inviteMember.isPending || !inviteEmail.trim()}>
-              {inviteMember.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
-            </Button>
+          <div className="relative">
+            <div className="flex gap-2 pt-2 border-t border-border">
+              <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="Email address" className="h-10 flex-1" onKeyDown={e => e.key === 'Enter' && handleInvite()} />
+              <Button size="sm" className="h-10" onClick={handleInvite} disabled={inviteMember.isPending || !inviteEmail.trim()}>
+                {inviteMember.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+              </Button>
+            </div>
+            <NudgeInviteMember />
           </div>
         )}
 

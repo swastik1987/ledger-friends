@@ -13,12 +13,24 @@ import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, Pe
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { supabase } from '@/integrations/supabase/client';
+import Nudge from '@/components/Nudge';
+import { useNudge } from '@/hooks/useNudge';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
+
+function NudgeDebitCredit() {
+  const { show, dismiss } = useNudge('add-debit-credit');
+  return <Nudge show={show} onDismiss={dismiss} message="Toggle between Debit (money out) and Credit (money in). Categories adjust automatically." position="bottom" />;
+}
+
+function NudgeCurrency() {
+  const { show, dismiss } = useNudge('add-currency-selector', 2500);
+  return <Nudge show={show} onDismiss={dismiss} message="Spending in a different currency? Change it here — amounts are auto-converted to your tracker's currency on save." position="bottom" />;
+}
 
 interface Props {
   open: boolean;
@@ -221,52 +233,58 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   autoFocus={!isEdit}
                 />
               </div>
-              <div className="flex items-center justify-center gap-2">
-                <Select value={expenseCurrency} onValueChange={setExpenseCurrency}>
-                  <SelectTrigger className="h-8 w-auto min-w-[120px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CURRENCIES.map(c => (
-                      <SelectItem key={c.code} value={c.code}>
-                        {c.symbol} {c.code}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {expenseCurrency !== trackerCurrency && (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <RefreshCw className="h-3 w-3" />
-                    Will convert to {getCurrency(trackerCurrency).symbol} {trackerCurrency}
-                  </span>
-                )}
+              <div className="relative">
+                <div className="flex items-center justify-center gap-2">
+                  <Select value={expenseCurrency} onValueChange={setExpenseCurrency}>
+                    <SelectTrigger className="h-8 w-auto min-w-[120px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map(c => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.symbol} {c.code}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {expenseCurrency !== trackerCurrency && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <RefreshCw className="h-3 w-3" />
+                      Will convert to {getCurrency(trackerCurrency).symbol} {trackerCurrency}
+                    </span>
+                  )}
+                </div>
+                <NudgeCurrency />
               </div>
             </div>
 
             {/* Type toggle - redesigned pills */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setIsDebit(true)}
-                className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
-                  isDebit
-                    ? 'bg-red-50 border-red-400 text-red-600 dark:bg-red-950/30'
-                    : 'bg-card border-border text-muted-foreground'
-                }`}
-              >
-                <ArrowUpRight className="h-4 w-4" />
-                Debit (Money Out)
-              </button>
-              <button
-                onClick={() => setIsDebit(false)}
-                className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
-                  !isDebit
-                    ? 'bg-emerald-50 border-emerald-400 text-emerald-600 dark:bg-emerald-950/30'
-                    : 'bg-card border-border text-muted-foreground'
-                }`}
-              >
-                <ArrowDownLeft className="h-4 w-4" />
-                Credit (Money In)
-              </button>
+            <div className="relative">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setIsDebit(true)}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                    isDebit
+                      ? 'bg-red-50 border-red-400 text-red-600 dark:bg-red-950/30'
+                      : 'bg-card border-border text-muted-foreground'
+                  }`}
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Debit (Money Out)
+                </button>
+                <button
+                  onClick={() => setIsDebit(false)}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                    !isDebit
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-600 dark:bg-emerald-950/30'
+                      : 'bg-card border-border text-muted-foreground'
+                  }`}
+                >
+                  <ArrowDownLeft className="h-4 w-4" />
+                  Credit (Money In)
+                </button>
+              </div>
+              <NudgeDebitCredit />
             </div>
 
             {/* Date */}
