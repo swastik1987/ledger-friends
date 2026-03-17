@@ -23,7 +23,10 @@ export default function AuthPage() {
 
       <div className="w-full max-w-sm">
         <div className="rounded-2xl bg-card p-6 shadow-sm border border-border">
-          <GoogleSignInButton />
+          <div className="flex flex-col gap-3">
+            <GoogleSignInButton />
+            <AppleSignInButton />
+          </div>
           <div className="flex items-center gap-3 my-5">
             <Separator className="flex-1" />
             <span className="text-xs text-muted-foreground">or</span>
@@ -76,6 +79,40 @@ function GoogleSignInButton() {
         </svg>
       )}
       Continue with Google
+    </Button>
+  );
+}
+
+function AppleSignInButton() {
+  const [loading, setLoading] = useState(false);
+
+  const handleAppleSignIn = async () => {
+    setLoading(true);
+    const { error } = await lovable.auth.signInWithOAuth("apple", {
+      redirect_uri: window.location.origin,
+    });
+    setLoading(false);
+    if (error) {
+      toast.error(error.message || 'Failed to sign in with Apple');
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="w-full h-11 gap-2"
+      onClick={handleAppleSignIn}
+      disabled={loading}
+    >
+      {loading ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+        </svg>
+      )}
+      Continue with Apple
     </Button>
   );
 }
