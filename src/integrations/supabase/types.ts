@@ -101,6 +101,8 @@ export type Database = {
         Row: {
           amount: number
           category_id: string
+          conversion_note: string | null
+          conversion_rate: number | null
           created_at: string | null
           created_by_id: string
           created_by_name: string
@@ -111,6 +113,8 @@ export type Database = {
           is_debit: boolean
           merchant_name: string | null
           notes: string | null
+          original_amount: number | null
+          original_currency: string | null
           payment_method: string | null
           reference_number: string | null
           source: string
@@ -121,6 +125,8 @@ export type Database = {
         Insert: {
           amount: number
           category_id: string
+          conversion_note?: string | null
+          conversion_rate?: number | null
           created_at?: string | null
           created_by_id: string
           created_by_name: string
@@ -131,6 +137,8 @@ export type Database = {
           is_debit?: boolean
           merchant_name?: string | null
           notes?: string | null
+          original_amount?: number | null
+          original_currency?: string | null
           payment_method?: string | null
           reference_number?: string | null
           source: string
@@ -141,6 +149,8 @@ export type Database = {
         Update: {
           amount?: number
           category_id?: string
+          conversion_note?: string | null
+          conversion_rate?: number | null
           created_at?: string | null
           created_by_id?: string
           created_by_name?: string
@@ -151,6 +161,8 @@ export type Database = {
           is_debit?: boolean
           merchant_name?: string | null
           notes?: string | null
+          original_amount?: number | null
+          original_currency?: string | null
           payment_method?: string | null
           reference_number?: string | null
           source?: string
