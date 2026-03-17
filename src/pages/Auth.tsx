@@ -23,6 +23,12 @@ export default function AuthPage() {
 
       <div className="w-full max-w-sm">
         <div className="rounded-2xl bg-card p-6 shadow-sm border border-border">
+          <GoogleSignInButton />
+          <div className="flex items-center gap-3 my-5">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground">or</span>
+            <Separator className="flex-1" />
+          </div>
           <Tabs defaultValue="signin" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-6">
               <TabsTrigger value="signin">Sign In</TabsTrigger>
