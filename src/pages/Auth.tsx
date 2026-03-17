@@ -14,11 +14,9 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary-light to-background flex flex-col items-center justify-center p-4">
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary">
-          <span className="font-mono text-2xl font-bold text-primary-foreground">₹</span>
-        </div>
+        <img src="/logo-512.png" alt="ExpenseSync" className="mx-auto mb-4 h-20 w-20 rounded-2xl shadow-md" />
         <h1 className="text-2xl font-bold text-foreground">ExpenseSync</h1>
-        <p className="text-sm text-muted-foreground mt-1">Track expenses together</p>
+        <p className="text-sm text-muted-foreground mt-1">Sync. Track. Report.</p>
       </div>
 
       <div className="w-full max-w-sm">

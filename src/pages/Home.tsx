@@ -95,9 +95,7 @@ export default function HomePage() {
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
         <div className="flex items-center justify-between max-w-lg mx-auto">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <span className="font-mono text-sm font-bold text-primary-foreground">₹</span>
-            </div>
+            <img src="/logo-512.png" alt="ExpenseSync" className="h-8 w-8 rounded-lg" />
             <span className="font-semibold text-sm">ExpenseSync</span>
           </div>
           <div className="text-center flex-1">
