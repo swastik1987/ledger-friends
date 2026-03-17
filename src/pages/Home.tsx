@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTrackers, useCreateTracker, useInviteMember } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
 import { format, parseISO } from 'date-fns';
-import { ChevronRight, FolderOpen, Plus, LogOut, Loader2, UserPlus, X } from 'lucide-react';
+import { ChevronRight, FolderOpen, LogOut, Loader2, UserPlus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,8 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
-import Nudge from '@/components/Nudge';
-import { useNudge } from '@/hooks/useNudge';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 
 function getGreeting() {
@@ -21,11 +19,6 @@ function getGreeting() {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
-}
-
-function NudgeCreateTracker() {
-  const { show, dismiss } = useNudge('home-create-tracker');
-  return <Nudge show={show} onDismiss={dismiss} message="Create trackers for different groups — home expenses, trips, projects, or shared budgets." position="left" />;
 }
 
 export default function HomePage() {
@@ -42,6 +35,13 @@ export default function HomePage() {
   const createTracker = useCreateTracker();
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
+
+  // Listen for the bottom nav's "New Tracker" button event
+  const openCreateSheet = useCallback(() => setShowCreate(true), []);
+  useEffect(() => {
+    window.addEventListener('open-create-tracker', openCreateSheet);
+    return () => window.removeEventListener('open-create-tracker', openCreateSheet);
+  }, [openCreateSheet]);
 
   const addInviteEmail = () => {
     const email = inviteInput.trim().toLowerCase();
@@ -183,19 +183,6 @@ export default function HomePage() {
           </div>
         )}
       </div>
-
-      {/* FAB */}
-      {trackers && trackers.length > 0 && (
-        <div className="fixed bottom-24 right-4 z-20 relative">
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl transition-shadow"
-          >
-            <Plus className="h-6 w-6" />
-          </button>
-          <NudgeCreateTracker />
-        </div>
-      )}
 
       {/* Create Tracker Sheet */}
       <Sheet open={showCreate} onOpenChange={setShowCreate}>

@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 const navItems = [
   { icon: Home, label: 'Home', path: '/' },
   { icon: ClipboardList, label: 'Transactions', path: '/tracker/:id?tab=expenses', requiresTracker: true },
-  { icon: PlusCircle, label: 'Add', isAdd: true, requiresTracker: true },
+  { icon: PlusCircle, label: 'Add Txn', isAdd: true },
   { icon: BarChart2, label: 'Dashboard', path: '/tracker/:id?tab=dashboard', requiresTracker: true },
   { icon: User, label: 'Profile', isProfile: true },
 ];
@@ -22,20 +22,27 @@ export default function BottomNav() {
   const { profile, signOut } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
 
+  const isOnHomePage = location.pathname === '/';
+  const isInsideTracker = location.pathname.startsWith('/tracker/') && !location.pathname.includes('/upload');
+
   const handleNav = (item: typeof navItems[0]) => {
     if (item.isProfile) {
       setShowProfile(true);
       return;
     }
     if (item.isAdd) {
-      if (activeTrackerId) {
-        // Dispatch a custom event to open the add expense sheet
+      if (isOnHomePage) {
+        // On homepage: open create tracker sheet
+        window.dispatchEvent(new CustomEvent('open-create-tracker'));
+      } else if (isInsideTracker && activeTrackerId) {
+        // Inside tracker: open add expense sheet
         window.dispatchEvent(new CustomEvent('open-add-expense'));
       }
       return;
     }
-    if (item.requiresTracker && !activeTrackerId) return;
-    
+    // Transactions / Dashboard require being inside a tracker
+    if (item.requiresTracker && (!activeTrackerId || isOnHomePage)) return;
+
     let path = item.path!;
     if (item.requiresTracker && activeTrackerId) {
       path = path.replace(':id', activeTrackerId);
@@ -55,6 +62,15 @@ export default function BottomNav() {
 
   const firstName = profile?.full_name?.split(' ')[0] || 'User';
 
+  // Contextual label and state for the + button
+  const addLabel = isOnHomePage ? 'New Tracker' : 'Add Txn';
+  const addDisabled = !isOnHomePage && !isInsideTracker;
+
+  // Transactions & Dashboard disabled on homepage
+  const isTrackerTabDisabled = (item: typeof navItems[0]) => {
+    return item.requiresTracker && (isOnHomePage || !activeTrackerId);
+  };
+
   return (
     <>
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-card border-t border-border safe-bottom">
@@ -62,22 +78,24 @@ export default function BottomNav() {
           {navItems.map((item, i) => {
             const Icon = item.icon;
             const active = isActive(item);
-            const disabled = item.requiresTracker && !activeTrackerId;
 
             if (item.isAdd) {
               return (
                 <button
                   key={i}
                   onClick={() => handleNav(item)}
-                  disabled={disabled}
-                  className={`flex flex-col items-center justify-center py-1 px-3 ${disabled ? 'opacity-30' : ''}`}
+                  disabled={addDisabled}
+                  className={`flex flex-col items-center justify-center py-1 px-3 ${addDisabled ? 'opacity-30' : ''}`}
                 >
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${disabled ? 'bg-muted' : 'bg-primary'} text-primary-foreground -mt-3 shadow-md`}>
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${addDisabled ? 'bg-muted' : 'bg-primary'} text-primary-foreground -mt-3 shadow-md`}>
                     <PlusCircle className="h-6 w-6" />
                   </div>
+                  <span className="text-[10px] mt-0.5 text-muted-foreground">{addLabel}</span>
                 </button>
               );
             }
+
+            const disabled = isTrackerTabDisabled(item);
 
             return (
               <button
