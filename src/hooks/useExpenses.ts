@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Expense, Category } from '@/types';
+import { Expense, Category, Profile } from '@/types';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
 import { format, parse } from 'date-fns';
@@ -55,7 +55,7 @@ export function useExpenses(trackerId: string, month: string) {
     queryFn: async () => {
       let query = supabase
         .from('expenses')
-        .select('*, category:categories(*)')
+        .select('*, category:categories(*), created_by_profile:profiles!created_by_id(*)')
         .eq('tracker_id', trackerId);
 
       // If month is 'all', skip date filters — fetch everything for this tracker
@@ -76,6 +76,7 @@ export function useExpenses(trackerId: string, month: string) {
         ...e,
         amount: Number(e.amount),
         category: e.category as unknown as Category,
+        created_by_profile: e.created_by_profile as unknown as Profile,
       })) as Expense[];
     },
     enabled: !!trackerId && !!month,
@@ -302,7 +303,7 @@ export function useDuplicateCheck(trackerId: string) {
   return async (date: string, amount: number, description: string): Promise<Expense | null> => {
     const { data } = await supabase
       .from('expenses')
-      .select('*, category:categories(*)')
+      .select('*, category:categories(*), created_by_profile:profiles!created_by_id(*)')
       .eq('tracker_id', trackerId)
       .eq('date', date)
       .eq('amount', amount)
@@ -315,7 +316,7 @@ export function useDuplicateCheck(trackerId: string) {
       const expDesc = expense.description.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (normalizedDesc.includes(expDesc) || expDesc.includes(normalizedDesc) || 
           similarity(normalizedDesc, expDesc) > 0.8) {
-        return { ...expense, amount: Number(expense.amount), category: expense.category as unknown as Category } as Expense;
+        return { ...expense, amount: Number(expense.amount), category: expense.category as unknown as Category, created_by_profile: expense.created_by_profile as unknown as Profile } as Expense;
       }
     }
     return null;

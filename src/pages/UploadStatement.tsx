@@ -559,7 +559,6 @@ export default function UploadStatement() {
       return {
         tracker_id: trackerId,
         created_by_id: user.id,
-        created_by_name: profile.full_name,
         category_id: d.suggested_category_id,
         amount: conv ? conv.converted_amount : d.amount,
         currency: trackerCurrency,

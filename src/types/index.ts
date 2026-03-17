@@ -42,7 +42,6 @@ export interface Expense {
   id: string;
   tracker_id: string;
   created_by_id: string;
-  created_by_name: string;
   category_id: string;
   amount: number;
   currency: string;
@@ -62,6 +61,7 @@ export interface Expense {
   created_at: string;
   updated_at: string;
   category?: Category;
+  created_by_profile?: Profile;  // joined from profiles table
 }
 
 export interface DraftExpense {

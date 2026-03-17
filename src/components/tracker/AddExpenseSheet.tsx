@@ -144,7 +144,6 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
     const expenseData = {
       tracker_id: trackerId,
       created_by_id: user.id,
-      created_by_name: profile.full_name,
       category_id: categoryId,
       amount: finalAmount,
       currency: trackerCurrency,
