@@ -62,7 +62,8 @@ export function useExpenses(trackerId: string, month: string) {
       if (month && month !== 'all') {
         const [year, mon] = month.split('-').map(Number);
         const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-        const endDate = new Date(year, mon, 0).toISOString().split('T')[0];
+        const lastDay = new Date(year, mon, 0).getDate();
+        const endDate = `${year}-${String(mon).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
         query = query.gte('date', startDate).lte('date', endDate);
       }
 
