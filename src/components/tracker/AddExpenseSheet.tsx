@@ -11,7 +11,7 @@ import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck
 import { format } from 'date-fns';
 import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check, RefreshCw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CURRENCIES, getCurrency } from '@/lib/currencies';
+import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { supabase } from '@/integrations/supabase/client';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
