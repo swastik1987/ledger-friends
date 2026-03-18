@@ -850,7 +850,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
       {/* Bulk Category Picker Sheet */}
       <Sheet open={showBulkCategoryPicker} onOpenChange={setShowBulkCategoryPicker}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[70vh] overflow-y-auto">
+        <SheetContent side="bottom" className="rounded-t-2xl h-[70dvh]">
           <SheetHeader>
             <SheetTitle>Change Category ({selectedIds.size} transactions)</SheetTitle>
           </SheetHeader>

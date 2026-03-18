@@ -5,6 +5,33 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Scroll the focused input into view when the mobile keyboard opens.
+ * Uses visualViewport to detect keyboard presence and scrolls the
+ * nearest scrollable parent so the input is visible above the keyboard.
+ */
+function useScrollInputIntoView(containerRef: React.RefObject<HTMLElement | null>) {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleFocus = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target || !('tagName' in target)) return;
+      const tag = target.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+
+      // Delay to allow keyboard to finish animating
+      setTimeout(() => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+    };
+
+    container.addEventListener('focusin', handleFocus);
+    return () => container.removeEventListener('focusin', handleFocus);
+  }, [containerRef]);
+}
+
 const Sheet = SheetPrimitive.Root;
 
 const SheetTrigger = SheetPrimitive.Trigger;
@@ -52,18 +79,36 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {}
 
 const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
-  ({ side = "right", className, children, ...props }, ref) => (
-    <SheetPortal>
-      <SheetOverlay />
-      <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-        {children}
-        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
-      </SheetPrimitive.Content>
-    </SheetPortal>
-  ),
+  ({ side = "right", className, children, ...props }, ref) => {
+    const innerRef = React.useRef<HTMLDivElement | null>(null);
+    useScrollInputIntoView(innerRef);
+
+    return (
+      <SheetPortal>
+        <SheetOverlay />
+        <SheetPrimitive.Content
+          ref={(node) => {
+            innerRef.current = node;
+            if (typeof ref === 'function') ref(node);
+            else if (ref) ref.current = node;
+          }}
+          className={cn(
+            sheetVariants({ side }),
+            // On mobile, bottom sheets use 100dvh so the keyboard shrinks viewport
+            side === "bottom" && "max-h-[100dvh] overflow-y-auto overscroll-contain",
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    );
+  },
 );
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 

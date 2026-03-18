@@ -168,7 +168,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   return (
     <>
       <Sheet open={open && !showCategoryPicker} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[90vh] overflow-y-auto">
+        <SheetContent side="bottom" className="rounded-t-2xl h-[85dvh]">
           <SheetHeader>
             <div className="flex items-center justify-between">
               <SheetTitle>{isEdit ? 'Edit Transaction' : 'Add Transaction'}</SheetTitle>
@@ -375,7 +375,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
 
       {/* Category Picker */}
       <Sheet open={showCategoryPicker} onOpenChange={setShowCategoryPicker}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[80vh] overflow-y-auto">
+        <SheetContent side="bottom" className="rounded-t-2xl h-[80dvh]">
           <SheetHeader>
             <SheetTitle>Select Category</SheetTitle>
           </SheetHeader>

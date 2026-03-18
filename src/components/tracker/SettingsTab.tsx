@@ -526,7 +526,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
       {/* ─── Delete Category Flow ─── */}
       <Sheet open={!!deletingCategory} onOpenChange={(open) => { if (!open) setDeletingCategory(null); }}>
-        <SheetContent side="bottom" className="rounded-t-2xl max-h-[80vh] overflow-y-auto">
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[80dvh]">
           <SheetHeader>
             <SheetTitle>Delete "{deletingCategory?.name}"</SheetTitle>
           </SheetHeader>
@@ -675,7 +675,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
       {/* ─── Add / Edit Category Sheet ─── */}
       <Sheet open={showCategorySheet} onOpenChange={setShowCategorySheet}>
-        <SheetContent side="bottom" className="rounded-t-2xl max-h-[85vh] overflow-y-auto">
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[85dvh]">
           <SheetHeader>
             <SheetTitle>
               {editingCategory ? (editingCategory.is_system ? 'Customise System Category' : 'Edit Category') : 'Add Category'}
