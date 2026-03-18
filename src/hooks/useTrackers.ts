@@ -11,65 +11,30 @@ export function useTrackers() {
     queryKey: ['trackers', user?.id],
     queryFn: async (): Promise<TrackerWithStats[]> => {
       if (!user) return [];
-      
-      const { data: memberships, error: memErr } = await supabase
-        .from('tracker_members')
-        .select('tracker_id')
-        .eq('user_id', user.id);
 
-      if (memErr) throw memErr;
-      if (!memberships?.length) return [];
-
-      const trackerIds = memberships.map(m => m.tracker_id);
-      const { data: trackers, error } = await supabase
-        .from('trackers')
-        .select('*')
-        .in('id', trackerIds);
+      const { data, error } = await supabase.rpc('get_tracker_stats', {
+        p_user_id: user.id,
+      });
 
       if (error) throw error;
+      if (!data?.length) return [];
 
-      const results: TrackerWithStats[] = [];
-      for (const tracker of trackers || []) {
-        const { count: memberCount } = await supabase
-          .from('tracker_members')
-          .select('*', { count: 'exact', head: true })
-          .eq('tracker_id', tracker.id);
-
-        // Sum ALL debit expenses across all months
-        const { data: expenses } = await supabase
-          .from('expenses')
-          .select('amount')
-          .eq('tracker_id', tracker.id)
-          .eq('is_debit', true);
-
-        const monthlyTotal = expenses?.reduce((sum, e) => sum + Number(e.amount), 0) ?? 0;
-
-        // Get earliest and latest expense dates
-        const { data: minRow } = await supabase
-          .from('expenses')
-          .select('date')
-          .eq('tracker_id', tracker.id)
-          .order('date', { ascending: true })
-          .limit(1)
-          .single();
-        const { data: maxRow } = await supabase
-          .from('expenses')
-          .select('date')
-          .eq('tracker_id', tracker.id)
-          .order('date', { ascending: false })
-          .limit(1)
-          .single();
-
-        results.push({
-          ...tracker,
-          member_count: memberCount ?? 0,
-          monthly_total: monthlyTotal,
-          date_range: minRow && maxRow ? { min: minRow.date, max: maxRow.date } : undefined,
-        } as TrackerWithStats);
-      }
-      return results;
+      return data.map((row: any) => ({
+        id: row.tracker_id,
+        name: row.tracker_name,
+        currency: row.tracker_currency,
+        admin_id: row.admin_id,
+        created_at: row.tracker_created_at,
+        updated_at: row.tracker_updated_at,
+        member_count: Number(row.member_count),
+        monthly_total: Number(row.total_debit),
+        date_range: row.min_date && row.max_date
+          ? { min: row.min_date, max: row.max_date }
+          : undefined,
+      })) as TrackerWithStats[];
     },
     enabled: !!user,
+    staleTime: 30_000, // 30 seconds
   });
 }
 
@@ -117,6 +82,7 @@ export function useTracker(trackerId: string) {
       return data as Tracker;
     },
     enabled: !!trackerId,
+    staleTime: 60_000, // 1 minute — tracker metadata rarely changes
   });
 }
 
@@ -135,6 +101,7 @@ export function useTrackerMembers(trackerId: string) {
       })) as TrackerMember[];
     },
     enabled: !!trackerId,
+    staleTime: 2 * 60_000, // 2 minutes — members change infrequently
   });
 }
 
@@ -152,6 +119,7 @@ export function useCategories(trackerId?: string) {
       if (error) throw error;
       return data as Category[];
     },
+    staleTime: 5 * 60_000, // 5 minutes — categories rarely change
   });
 }
 

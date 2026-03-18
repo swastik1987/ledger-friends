@@ -46,6 +46,7 @@ export function useExpenseMonths(trackerId: string) {
       return months;
     },
     enabled: !!trackerId,
+    staleTime: 60_000, // 1 minute — month list doesn't change often
   });
 }
 
@@ -80,6 +81,7 @@ export function useExpenses(trackerId: string, month: string) {
       })) as Expense[];
     },
     enabled: !!trackerId && !!month,
+    staleTime: 30_000, // 30 seconds — realtime subscription handles live updates
   });
 }
 
