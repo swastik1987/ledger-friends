@@ -12,7 +12,7 @@ export function useTrackers() {
     queryFn: async (): Promise<TrackerWithStats[]> => {
       if (!user) return [];
 
-      const { data, error } = await supabase.rpc('get_tracker_stats', {
+      const { data, error } = await (supabase.rpc as any)('get_tracker_stats', {
         p_user_id: user.id,
       });
 
