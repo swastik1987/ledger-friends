@@ -10,6 +10,7 @@ import { useBulkCreateExpenses } from '@/hooks/useExpenses';
 import { supabase } from '@/integrations/supabase/client';
 import { DraftExpense, Category } from '@/types';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
+import { fetchLearnedMappings, findLearnedCategory, recordCategoryLearning } from '@/lib/categoryLearning';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
@@ -492,10 +493,18 @@ export default function UploadStatement() {
       if (textChunks.length === 0) throw new EmptyFileError();
       setProgress(15);
 
-      // ── Stage 2: AI parsing (15% → 80%) ──
+      // ── Stage 2: AI parsing with learned context (15% → 80%) ──
       setProgressMessage('🧠 AI is categorising your transactions...');
       const allTransactions: any[] = [];
       const chunkProgressRange = 65; // 15% to 80%
+
+      // Fetch learned mappings to pass as context hints to Gemini
+      const learnedForAI = await fetchLearnedMappings(2);
+      const learnedMappingsForPrompt = learnedForAI.map(m => ({
+        description: m.normalized_description,
+        category: categories?.find(c => c.id === m.category_id)?.name || 'Unknown',
+        count: m.applied_count,
+      })).filter(m => m.category !== 'Unknown');
 
       for (let ci = 0; ci < textChunks.length; ci++) {
         const chunk = textChunks[ci];
@@ -503,7 +512,11 @@ export default function UploadStatement() {
         let error: any;
         try {
           const result = await supabase.functions.invoke('parse-statement', {
-            body: { extractedText: chunk, formatHint },
+            body: {
+              extractedText: chunk,
+              formatHint,
+              learnedMappings: learnedMappingsForPrompt.length > 0 ? learnedMappingsForPrompt : undefined,
+            },
           });
           data = result.data;
           error = result.error;
@@ -518,15 +531,21 @@ export default function UploadStatement() {
 
       if (allTransactions.length === 0) throw new NoTransactionsError();
 
-      // ── Stage 3: Build drafts (80% → 95%) ──
+      // ── Stage 3: Build drafts with learned category pre-check (80% → 95%) ──
       setProgress(80);
-      setProgressMessage('🔍 Checking for duplicates...');
+      setProgressMessage('🧠 Applying learned preferences...');
 
       const transactions = allTransactions;
       const miscCategory = categories?.find(c => c.name === 'Miscellaneous');
 
+      // Fetch learned category mappings to override/boost AI suggestions
+      const learnedMappings = await fetchLearnedMappings(1);
+
+      setProgress(85);
+      setProgressMessage('🔍 Checking for duplicates...');
+
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
-        const matchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
+        const aiMatchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
 
         let isDebit = true;
         let debitUncertain = false;
@@ -539,8 +558,31 @@ export default function UploadStatement() {
           debitUncertain = true;
         }
 
-        const confidence = t.confidence || 0.5;
-        const needsReview = confidence < 0.75 || debitUncertain;
+        // Check learned mappings — these override AI suggestions when found
+        const learned = findLearnedCategory(
+          t.description || '',
+          t.merchant_name,
+          learnedMappings,
+        );
+
+        let finalCategoryId: string;
+        let finalCategoryName: string;
+        let finalConfidence: number;
+
+        if (learned) {
+          // Learned mapping found — use it with boosted confidence
+          const learnedCat = categories?.find(c => c.id === learned.categoryId);
+          finalCategoryId = learned.categoryId;
+          finalCategoryName = learnedCat?.name || aiMatchedCat?.name || 'Miscellaneous';
+          finalConfidence = learned.confidence;
+        } else {
+          // Fall back to AI suggestion
+          finalCategoryId = aiMatchedCat?.id || miscCategory?.id || '';
+          finalCategoryName = aiMatchedCat?.name || 'Miscellaneous';
+          finalConfidence = t.confidence || 0.5;
+        }
+
+        const needsReview = finalConfidence < 0.75 || debitUncertain;
 
         const rawDesc = t.raw_description || t.description || 'Unknown';
         const shortDesc = (t.description || 'Unknown').length > 25
@@ -554,9 +596,9 @@ export default function UploadStatement() {
           merchant_name: t.merchant_name,
           amount: Math.round(Math.abs(Number(t.amount) || 0)),
           is_debit: isDebit,
-          suggested_category_id: matchedCat?.id || miscCategory?.id || '',
-          suggested_category_name: matchedCat?.name || 'Miscellaneous',
-          confidence,
+          suggested_category_id: finalCategoryId,
+          suggested_category_name: finalCategoryName,
+          confidence: finalConfidence,
           reference_number: t.reference_number,
           notes: rawDesc !== shortDesc ? rawDesc : null,
           needs_review: needsReview,
@@ -657,31 +699,11 @@ export default function UploadStatement() {
 
     await bulkCreate.mutateAsync(expenses);
 
-    // Record category corrections for learning
+    // Record category corrections for learning (using shared utility)
     const corrections = approvedDrafts.filter(d => d.category_changed);
     if (corrections.length > 0) {
       for (const d of corrections) {
-        const normalized = d.description.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-        const { data: existing } = await supabase
-          .from('category_learning')
-          .select('id, applied_count')
-          .eq('normalized_description', normalized)
-          .eq('category_id', d.suggested_category_id)
-          .maybeSingle();
-
-        if (existing) {
-          await supabase
-            .from('category_learning')
-            .update({ applied_count: existing.applied_count + 1, updated_at: new Date().toISOString() })
-            .eq('id', existing.id);
-        } else {
-          await supabase.from('category_learning').insert({
-            normalized_description: normalized,
-            merchant_name: d.merchant_name || null,
-            category_id: d.suggested_category_id,
-            applied_count: 1,
-          });
-        }
+        await recordCategoryLearning(d.description, d.suggested_category_id, d.merchant_name);
       }
     }
 

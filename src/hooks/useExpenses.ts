@@ -4,6 +4,7 @@ import { Expense, Category, Profile } from '@/types';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
 import { format, parse } from 'date-fns';
+import { recordCategoryLearning } from '@/lib/categoryLearning';
 
 /**
  * Fetches the distinct months that have transactions for a tracker.
@@ -91,6 +92,10 @@ export function useCreateExpense() {
     mutationFn: async (expense: Omit<Expense, 'id' | 'created_at' | 'updated_at' | 'category'>) => {
       const { error } = await supabase.from('expenses').insert(expense as any);
       if (error) throw error;
+      // Record category learning from manual entries (best-effort, non-blocking)
+      if (expense.source === 'manual' && expense.description && expense.category_id) {
+        recordCategoryLearning(expense.description, expense.category_id, (expense as any).merchant_name);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
@@ -108,6 +113,10 @@ export function useUpdateExpense() {
       const { category, created_by_profile, ...rest } = updates;
       const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
       if (error) throw error;
+      // Record category learning when category is changed on an existing transaction
+      if (rest.category_id && rest.description) {
+        recordCategoryLearning(rest.description, rest.category_id, (rest as any).merchant_name);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });

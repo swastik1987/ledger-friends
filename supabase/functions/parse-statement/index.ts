@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -77,14 +77,26 @@ serve(async (req) => {
     }
 
     // Default mode: parse statement
-    const { extractedText, formatHint } = body;
+    const { extractedText, formatHint, learnedMappings } = body;
     if (!extractedText || typeof extractedText !== 'string') {
       return new Response(JSON.stringify({ error: 'extractedText is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // Build learned context hint for Gemini if mappings are provided
+    let learnedHint = '';
+    if (Array.isArray(learnedMappings) && learnedMappings.length > 0) {
+      const examples = learnedMappings
+        .slice(0, 50) // Limit to top 50 to avoid token bloat
+        .map((m: { description: string; category: string; count: number }) =>
+          `"${m.description}" → ${m.category} (used ${m.count}x)`
+        )
+        .join('\n');
+      learnedHint = `\n\nUSER CATEGORY PREFERENCES (from past corrections — prioritise these over your own judgement when the description matches or is very similar):\n${examples}\n`;
+    }
+
     const geminiBody = {
       system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-      contents: [{ parts: [{ text: `${formatHint ? `FORMAT_HINT: ${formatHint}\n\n` : ''}Parse this statement:\n\n${extractedText}` }] }],
+      contents: [{ parts: [{ text: `${formatHint ? `FORMAT_HINT: ${formatHint}\n\n` : ''}${learnedHint}Parse this statement:\n\n${extractedText}` }] }],
       generationConfig: {
         temperature: 0.1,
         responseMimeType: 'application/json',
