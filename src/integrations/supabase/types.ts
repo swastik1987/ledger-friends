@@ -294,6 +294,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_tracker_stats: {
+        Args: { p_user_id: string }
+        Returns: {
+          admin_id: string
+          max_date: string
+          member_count: number
+          min_date: string
+          total_debit: number
+          tracker_created_at: string
+          tracker_currency: string
+          tracker_id: string
+          tracker_name: string
+          tracker_updated_at: string
+        }[]
+      }
       is_tracker_admin: {
         Args: { _tracker_id: string; _user_id: string }
         Returns: boolean
