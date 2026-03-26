@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppProvider } from "@/contexts/AppContext";
 import AuthPage from "./pages/Auth";
 import Home from "./pages/Home";
+import LandingPage from "./pages/Landing";
 import TrackerDetail from "./pages/TrackerDetail";
 import UploadStatement from "./pages/UploadStatement";
 import NotFound from "./pages/NotFound";
@@ -18,6 +19,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-pulse text-muted-foreground">Loading...</div></div>;
   if (!user) return <Navigate to="/auth" replace />;
   return <>{children}</>;
+}
+
+function HomeOrLanding() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><div className="animate-pulse text-muted-foreground">Loading...</div></div>;
+  return user ? <Home /> : <LandingPage />;
 }
 
 function AuthRoute({ children }: { children: React.ReactNode }) {
@@ -37,7 +44,7 @@ const App = () => (
           <AppProvider>
             <Routes>
               <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
-              <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+              <Route path="/" element={<HomeOrLanding />} />
               <Route path="/tracker/:trackerId" element={<ProtectedRoute><TrackerDetail /></ProtectedRoute>} />
               <Route path="/tracker/:trackerId/upload" element={<ProtectedRoute><UploadStatement /></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
