@@ -16,8 +16,9 @@ Different banks use different formats to indicate debit (money out) and credit (
 - Dr/Cr suffix or column: Amount followed by "Dr" or "DR" = debit (money out). Amount followed by "Cr" or "CR" = credit (money in). A separate "Dr/Cr" column may indicate direction.
 - Sign-based: Negative amounts (-) or amounts with a minus sign = debit (money out). Positive amounts (+) = credit (money in). Some banks reverse this — use context clues like column headers.
 - Single amount column with type indicator: A "Transaction Type" or "Type" column with values like "Debit"/"Credit", "DR"/"CR", "D"/"C", "Purchase"/"Refund", "Payment"/"Receipt".
-- Credit card statements: "Payment" or "Credit" entries are money in (is_debit=false). Purchases and fees are money out (is_debit=true).
+- Credit card statements: ALL purchases, fees, charges, and EMIs are DEBIT (is_debit=true, money spent). Only entries explicitly marked as "Payment", "Refund", "Reversal", "Cashback", "AUTOPAY", or prefixed with "+" are CREDIT (is_debit=false, money returned/paid to card). On HDFC and similar Indian bank credit card statements, "C" before an amount is a CURRENCY MARKER (like ₹), NOT a credit indicator. "C 3,130.00" = purchase (debit). "+ C 299.00" = refund/credit. The "+" sign is the ONLY reliable credit indicator.
 - Balance column clues: If a running balance column exists, compare consecutive balances — if balance decreased, the transaction is debit; if increased, it is credit.
+- REWARDS column: Some credit card statements have a REWARDS/POINTS column with +/- numbers. These are reward points, NOT amounts. Do NOT use the rewards column to determine debit/credit direction. Only use the AMOUNT column.
 If the format includes a hint from the client (e.g. "FORMAT_HINT: ..."), use it to confirm your interpretation.
 
 Rules:

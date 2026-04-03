@@ -188,34 +188,54 @@ function detectPdfFormatHint(pdfText: string): string | null {
   const text = pdfText.toLowerCase();
   const hints: string[] = [];
 
-  // Separate debit/credit columns
+  // ── Credit card statement detection (must be first — changes interpretation of everything else) ──
+  const isCreditCard = /credit card|card statement|card number|card no|billing period|statement date.*billing/i.test(pdfText);
+
+  if (isCreditCard) {
+    hints.push('IMPORTANT: This is a CREDIT CARD statement. On credit card statements, the default interpretation is REVERSED from bank statements:');
+    hints.push('- Regular transaction amounts (purchases, fees, charges) WITHOUT a "+" prefix = DEBIT (is_debit=true, money spent/charged to card)');
+    hints.push('- Amounts with a "+" prefix or labeled as "Payment", "Refund", "Reversal", "Cashback", "AUTOPAY" = CREDIT (is_debit=false, money paid back or refunded to card)');
+  }
+
+  // ── HDFC-style "C amount" format (C is currency marker, NOT credit indicator) ──
+  // Pattern: "C 3,130.00" for purchases, "+ C 299.00" for refunds/payments
+  if (/[C₹]\s*[\d,]+\.\d{2}/.test(pdfText) && /\+\s*C\s*[\d,]+\.\d{2}/.test(pdfText)) {
+    hints.push('This statement uses "C" as a currency prefix (like ₹), NOT as a credit indicator. "C 3,130.00" = a charge amount. "+ C 299.00" means credit/refund. The "+" sign before "C" indicates credit (money in), absence of "+" means debit (money out/purchase).');
+  }
+
+  // ── Separate debit/credit columns ──
   if ((text.includes('withdrawal') && text.includes('deposit')) ||
       (text.includes('withdrawal amount') && text.includes('deposit amount'))) {
-    hints.push('This PDF statement has separate "Withdrawal" and "Deposit" columns. Withdrawal = debit (money out), Deposit = credit (money in).');
+    hints.push('This statement has separate "Withdrawal" and "Deposit" columns. Withdrawal = debit (money out), Deposit = credit (money in).');
   }
   if ((/debit[_ ]?(amount|amt)?/.test(text) && /credit[_ ]?(amount|amt)?/.test(text)) ||
       (/dr[_ ]?(amount|amt)/.test(text) && /cr[_ ]?(amount|amt)/.test(text))) {
     hints.push('This PDF has separate Debit and Credit amount columns. Amount in Debit/Dr column = money out, Credit/Cr column = money in.');
   }
 
-  // Dr/Cr markers in transaction rows
-  if (/\b(dr|dr\.|debit)\b/.test(text) && /\b(cr|cr\.|credit)\b/.test(text)) {
+  // ── Dr/Cr markers in transaction rows (skip if credit card — different meaning) ──
+  if (!isCreditCard && /\b(dr|dr\.|debit)\b/.test(text) && /\b(cr|cr\.|credit)\b/.test(text)) {
     hints.push('This PDF contains "Dr"/"Cr" markers next to transactions. "Dr" = debit (money out), "Cr" = credit (money in).');
   }
 
-  // Signed amounts
-  if (/[+-]\s*[₹$€£¥]?\s*\d{1,3}[,.]?\d{2,}/.test(pdfText)) {
-    hints.push('This PDF contains signed amounts (+ or -). Positive/+ = credit (money in), Negative/- = debit (money out).');
+  // ── Signed amounts ──
+  // Be careful: on credit card statements, the REWARDS column may have +/- for reward points, not amounts
+  if (/[+-]\s*[₹$€£¥C]?\s*\d{1,3}[,.]?\d{2,}/.test(pdfText)) {
+    if (isCreditCard) {
+      hints.push('Amounts prefixed with "+" (e.g., "+ C 60,555.00") are credits (payments/refunds to the card, is_debit=false). Amounts without "+" are purchases/charges (is_debit=true). IMPORTANT: The REWARDS column also has +/- numbers — these are reward POINTS, not transaction amounts. Ignore the rewards column for debit/credit detection.');
+    } else {
+      hints.push('This PDF contains signed amounts. "+" prefix = credit (money in), "-" prefix or no sign = debit (money out).');
+    }
   }
 
-  // Balance column
-  if (/\b(closing balance|running balance|available balance|balance)\b/.test(text)) {
+  // ── Balance column ──
+  if (/\b(closing balance|running balance|available balance)\b/.test(text) && !isCreditCard) {
     hints.push('A balance column is present. Use balance changes to verify: decrease = debit, increase = credit.');
   }
 
-  // Credit card statement detection
-  if (/credit card|card statement|card number|card no/i.test(text)) {
-    hints.push('This appears to be a credit card statement. Purchases and fees = debit (money out). Payments and refunds = credit (money in).');
+  // ── EMI indicators ──
+  if (/\bemi\b/i.test(pdfText)) {
+    hints.push('Some transactions are marked "EMI" — these are installment purchases and should be categorized as debit (is_debit=true) unless they have a "+" prefix indicating a refund.');
   }
 
   return hints.length > 0 ? hints.join(' ') : null;
@@ -625,21 +645,37 @@ export default function UploadStatement() {
         }
 
         // ── Amount-sign cross-validation ──
-        // If original amount has a sign, use it to validate/override AI's is_debit
+        // If original amount has a sign, use it to validate/override AI's is_debit.
+        // Handles formats: -500, +500, "+ C 299.00", "- ₹500", negative numbers
         const rawAmount = t.amount;
+        const rawAmountStr = String(rawAmount ?? '').trim();
+        // Also check raw_description for "+" prefix before amount (HDFC credit card style)
+        const rawDesc = String(t.raw_description || '').trim();
+
         if (typeof rawAmount === 'number' && rawAmount < 0) {
-          // Negative amount = debit (money out)
           isDebit = true;
           debitUncertain = false;
-        } else if (typeof rawAmount === 'string') {
-          const trimmed = String(rawAmount).trim();
-          if (trimmed.startsWith('+') || trimmed.startsWith('+ ')) {
-            isDebit = false;
-            debitUncertain = false;
-          } else if (trimmed.startsWith('-') || trimmed.startsWith('- ')) {
-            isDebit = true;
-            debitUncertain = false;
-          }
+        } else if (/^\+\s*[C₹$€£¥]?\s*[\d,]/.test(rawAmountStr)) {
+          // Amount string starts with + (possibly with currency marker): credit
+          isDebit = false;
+          debitUncertain = false;
+        } else if (/^-\s*[C₹$€£¥]?\s*[\d,]/.test(rawAmountStr)) {
+          // Amount string starts with - (possibly with currency marker): debit
+          isDebit = true;
+          debitUncertain = false;
+        }
+
+        // Additional check: if raw_description contains "+  C amount" pattern (HDFC style)
+        if (/\+\s+C\s*[\d,]+\.\d{2}/.test(rawDesc)) {
+          isDebit = false;
+          debitUncertain = false;
+        }
+
+        // Credit card payment keywords override
+        const descLower = (t.description || '').toLowerCase();
+        if (/\b(autopay|payment.*thank|refund|reversal|cashback)\b/i.test(descLower) && debitUncertain) {
+          isDebit = false;
+          debitUncertain = false;
         }
 
         // Check learned mappings — these override AI suggestions when found
