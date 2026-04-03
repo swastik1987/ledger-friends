@@ -84,9 +84,10 @@ function detectBulkUploadColumns(headers: string[]): BulkColumnMap | null {
 }
 
 function parseTypeValue(val: string): boolean | null {
-  const v = (val || '').toLowerCase().trim();
-  if (['debit', 'dr', 'd', 'expense', 'withdrawal', 'out', 'purchase'].includes(v)) return true;
-  if (['credit', 'cr', 'c', 'income', 'deposit', 'in', 'refund', 'receipt'].includes(v)) return false;
+  // Strip periods, extra spaces, and lowercase for flexible matching
+  const v = (val || '').toLowerCase().replace(/[.\s]/g, '').trim();
+  if (['debit', 'dr', 'd', 'db', 'expense', 'withdrawal', 'out', 'purchase', 'payment', 'paid', 'spent'].includes(v)) return true;
+  if (['credit', 'cr', 'c', 'cd', 'income', 'deposit', 'in', 'refund', 'receipt', 'received', 'cashback', 'reversal'].includes(v)) return false;
   return null; // unknown — needs review
 }
 
@@ -159,13 +160,62 @@ function detectFormatHint(csvText: string): string | null {
     hints.push('This statement has a transaction type column. Values like "Dr", "DR", "D", "Debit", "Purchase" = debit (money out). Values like "Cr", "CR", "C", "Credit", "Refund", "Receipt" = credit (money in).');
   }
   const dataRows = lines.slice(1, Math.min(6, lines.length));
-  const hasNegativeAmounts = dataRows.some(row => /,-\d|,"-?\d/.test(row));
-  const hasPositiveSignAmounts = dataRows.some(row => /,\+\d/.test(row));
+  // Detect signed amounts: handles -500, +500, - 500, + 500, "-500", +₹500, -$12.50 etc.
+  const signedAmountPattern = /[,\s"]([-+])\s*[₹$€£¥]?\s*\d/;
+  const hasNegativeAmounts = dataRows.some(row => /[,\s"]-\s*[₹$€£¥]?\s*\d/.test(row));
+  const hasPositiveSignAmounts = dataRows.some(row => /[,\s"]\+\s*[₹$€£¥]?\s*\d/.test(row));
   if (hasNegativeAmounts || hasPositiveSignAmounts) {
-    hints.push('This statement uses signed amounts. Negative (-) values = debit (money out). Positive (+) values = credit (money in).');
+    hints.push('This statement uses signed amounts. Negative (-) values = debit (money out). Positive (+) values or amounts prefixed with "+" = credit (money in). The sign may appear before or after the currency symbol, with or without spaces.');
+  }
+  // Detect Dr/Cr markers within data rows (not just headers)
+  const hasDrCrInData = dataRows.some(row => /\b(DR|Dr|CR|Cr)\b/.test(row));
+  if (hasDrCrInData && !hints.some(h => h.includes('Dr/Cr'))) {
+    hints.push('Data rows contain "Dr"/"CR" markers. "Dr" or "DR" = debit (money out). "Cr" or "CR" = credit (money in).');
   }
   if (/balance|closing|running/.test(headerLine)) {
     hints.push('A running/closing balance column is present. Use it to verify: if balance decreased from previous row, the transaction is debit; if balance increased, it is credit.');
+  }
+
+  return hints.length > 0 ? hints.join(' ') : null;
+}
+
+/**
+ * Detect format hints from raw PDF text by scanning for common column headers
+ * and debit/credit indicator patterns. PDF text extraction is messier than CSV,
+ * so we look for patterns across the joined text.
+ */
+function detectPdfFormatHint(pdfText: string): string | null {
+  const text = pdfText.toLowerCase();
+  const hints: string[] = [];
+
+  // Separate debit/credit columns
+  if ((text.includes('withdrawal') && text.includes('deposit')) ||
+      (text.includes('withdrawal amount') && text.includes('deposit amount'))) {
+    hints.push('This PDF statement has separate "Withdrawal" and "Deposit" columns. Withdrawal = debit (money out), Deposit = credit (money in).');
+  }
+  if ((/debit[_ ]?(amount|amt)?/.test(text) && /credit[_ ]?(amount|amt)?/.test(text)) ||
+      (/dr[_ ]?(amount|amt)/.test(text) && /cr[_ ]?(amount|amt)/.test(text))) {
+    hints.push('This PDF has separate Debit and Credit amount columns. Amount in Debit/Dr column = money out, Credit/Cr column = money in.');
+  }
+
+  // Dr/Cr markers in transaction rows
+  if (/\b(dr|dr\.|debit)\b/.test(text) && /\b(cr|cr\.|credit)\b/.test(text)) {
+    hints.push('This PDF contains "Dr"/"Cr" markers next to transactions. "Dr" = debit (money out), "Cr" = credit (money in).');
+  }
+
+  // Signed amounts
+  if (/[+-]\s*[₹$€£¥]?\s*\d{1,3}[,.]?\d{2,}/.test(pdfText)) {
+    hints.push('This PDF contains signed amounts (+ or -). Positive/+ = credit (money in), Negative/- = debit (money out).');
+  }
+
+  // Balance column
+  if (/\b(closing balance|running balance|available balance|balance)\b/.test(text)) {
+    hints.push('A balance column is present. Use balance changes to verify: decrease = debit, increase = credit.');
+  }
+
+  // Credit card statement detection
+  if (/credit card|card statement|card number|card no/i.test(text)) {
+    hints.push('This appears to be a credit card statement. Purchases and fees = debit (money out). Payments and refunds = credit (money in).');
   }
 
   return hints.length > 0 ? hints.join(' ') : null;
@@ -485,6 +535,9 @@ export default function UploadStatement() {
         const allText = pages.join(' ').trim();
         if (!allText) throw new EmptyFileError('This PDF has no extractable text. It may be a scanned image. Try a CSV or Excel file instead.');
 
+        // Extract format hints from PDF text (Fix 4: was missing for PDFs)
+        formatHint = detectPdfFormatHint(allText);
+
         for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
           textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
         }
@@ -547,15 +600,46 @@ export default function UploadStatement() {
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
         const aiMatchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
 
+        // ── Robust is_debit parsing ──
         let isDebit = true;
         let debitUncertain = false;
-        if (t.is_debit === true || t.is_debit === 'true') {
+        const rawIsDebit = t.is_debit;
+
+        if (rawIsDebit === true || rawIsDebit === 'true' || rawIsDebit === 1 || rawIsDebit === '1') {
           isDebit = true;
-        } else if (t.is_debit === false || t.is_debit === 'false') {
+        } else if (rawIsDebit === false || rawIsDebit === 'false' || rawIsDebit === 0 || rawIsDebit === '0') {
           isDebit = false;
-        } else if (t.is_debit === undefined || t.is_debit === null) {
+        } else if (typeof rawIsDebit === 'string') {
+          const v = rawIsDebit.toLowerCase().replace(/[.\s]/g, '').trim();
+          if (['yes', 'debit', 'dr', 'withdrawal', 'expense', 'purchase', 'out', 'd'].includes(v)) {
+            isDebit = true;
+          } else if (['no', 'credit', 'cr', 'deposit', 'income', 'refund', 'receipt', 'in', 'c'].includes(v)) {
+            isDebit = false;
+          } else {
+            isDebit = true;
+            debitUncertain = true;
+          }
+        } else {
           isDebit = true;
           debitUncertain = true;
+        }
+
+        // ── Amount-sign cross-validation ──
+        // If original amount has a sign, use it to validate/override AI's is_debit
+        const rawAmount = t.amount;
+        if (typeof rawAmount === 'number' && rawAmount < 0) {
+          // Negative amount = debit (money out)
+          isDebit = true;
+          debitUncertain = false;
+        } else if (typeof rawAmount === 'string') {
+          const trimmed = String(rawAmount).trim();
+          if (trimmed.startsWith('+') || trimmed.startsWith('+ ')) {
+            isDebit = false;
+            debitUncertain = false;
+          } else if (trimmed.startsWith('-') || trimmed.startsWith('- ')) {
+            isDebit = true;
+            debitUncertain = false;
+          }
         }
 
         // Check learned mappings — these override AI suggestions when found
