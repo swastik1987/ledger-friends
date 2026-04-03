@@ -720,7 +720,7 @@ export default function UploadStatement() {
           suggested_category_name: finalCategoryName,
           confidence: finalConfidence,
           reference_number: t.reference_number,
-          notes: rawDesc !== shortDesc ? rawDesc : null,
+          notes: fullDesc !== shortDesc ? fullDesc : null,
           needs_review: needsReview,
           review_status: 'pending' as const,
           detected_currency: t.currency || undefined,
