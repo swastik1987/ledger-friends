@@ -704,7 +704,7 @@ export default function UploadStatement() {
 
         const needsReview = finalConfidence < 0.75 || debitUncertain;
 
-        const rawDesc = t.raw_description || t.description || 'Unknown';
+        const fullDesc = t.raw_description || t.description || 'Unknown';
         const shortDesc = (t.description || 'Unknown').length > 25
           ? (t.description || 'Unknown').slice(0, 25).trim() + '...'
           : (t.description || 'Unknown');
@@ -720,7 +720,7 @@ export default function UploadStatement() {
           suggested_category_name: finalCategoryName,
           confidence: finalConfidence,
           reference_number: t.reference_number,
-          notes: rawDesc !== shortDesc ? rawDesc : null,
+          notes: fullDesc !== shortDesc ? fullDesc : null,
           needs_review: needsReview,
           review_status: 'pending' as const,
           detected_currency: t.currency || undefined,
