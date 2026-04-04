@@ -737,14 +737,14 @@ export default function UploadStatement() {
     } catch (err: any) {
       if (err instanceof PasswordRequiredError || err instanceof WrongPasswordError) {
         toast.error(err.message);
-        setStep(2); // Go back to password step
+        setStep(2); // Go back to password step — keep file so user can retry
       } else {
         toast.error(err?.message || 'Failed to process file');
         setStep(1);
+        setFile(null); // Only clear file when going back to file selection
       }
     } finally {
       setProcessing(false);
-      setFile(null);
     }
   };
 
