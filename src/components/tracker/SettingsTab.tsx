@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tracker, TrackerMember, Category } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import { useUpdateTracker, useDeleteTracker, useRemoveMember, useUpdateMemberRole, useInviteMember, useCreateCategory, useUpdateCategory, useDeleteCategory, useConvertTrackerCurrency } from '@/hooks/useTrackers';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -90,6 +91,7 @@ interface Props {
 export default function SettingsTab({ trackerId, tracker, members, categories, isAdmin, userId }: Props) {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { setActiveTrackerId } = useApp();
   const updateTracker = useUpdateTracker();
   const deleteTracker = useDeleteTracker();
   const removeMember = useRemoveMember(trackerId);
@@ -250,6 +252,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
   const handleDeleteTracker = async () => {
     await deleteTracker.mutateAsync(trackerId);
+    setActiveTrackerId(null);
     navigate('/');
   };
 
@@ -261,6 +264,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
     const myMembership = members.find(m => m.user_id === userId);
     if (myMembership) {
       await removeMember.mutateAsync(myMembership.id);
+      setActiveTrackerId(null);
       navigate('/');
     }
   };

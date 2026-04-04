@@ -176,7 +176,7 @@ function SignUpForm() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
@@ -184,9 +184,12 @@ function SignUpForm() {
     setLoading(false);
     if (error) {
       toast.error(error.message);
-    } else {
-      toast.success('Account created! Check your email to confirm.');
+    } else if (data.session) {
+      // User is immediately authenticated (email confirmation disabled)
       navigate('/');
+    } else {
+      // Email confirmation required — stay on auth page
+      toast.success('Account created! Check your email to confirm, then sign in.');
     }
   };
 

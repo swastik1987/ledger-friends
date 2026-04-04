@@ -1,8 +1,12 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload as UploadIcon, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, Upload as UploadIcon, FileText, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCategories, useTracker } from '@/hooks/useTrackers';
@@ -283,11 +287,46 @@ export default function UploadStatement() {
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
   const [drafts, setDrafts] = useState<DraftExpense[]>([]);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
+  // AbortController to cancel in-flight API calls when user cancels or navigates away
+  const abortRef = useRef<AbortController | null>(null);
 
   // Combined categories: existing + newly created
   const allCategories = [...(categories || []), ...newCategoriesRef.current];
+
+  // Cancel processing and abort in-flight API calls
+  const cancelProcessing = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setProcessing(false);
+    setProgress(0);
+    setProgressMessage('');
+    setStep(1);
+    setFile(null);
+  }, []);
+
+  // Smart back navigation with guards for each step
+  const handleBack = useCallback(() => {
+    if (step === 1) {
+      navigate(`/tracker/${trackerId}`);
+    } else if (step === 2) {
+      setStep(1);
+    } else if (step === 3) {
+      // During processing — cancel and go back to Step 1
+      cancelProcessing();
+    } else if (step === 4) {
+      // Review step — confirm if there are drafts
+      if (drafts.length > 0) {
+        setShowLeaveConfirm(true);
+      } else {
+        navigate(`/tracker/${trackerId}`);
+      }
+    }
+  }, [step, drafts.length, trackerId, navigate, cancelProcessing]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -484,6 +523,10 @@ export default function UploadStatement() {
   // ──────────────────────────────────────────────────────────────────
   const processFile = async () => {
     if (!file) return;
+    // Create new AbortController for this processing run
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+
     setStep(3);
     setProcessing(true);
     setProgress(0);
@@ -580,6 +623,9 @@ export default function UploadStatement() {
       })).filter(m => m.category !== 'Unknown');
 
       for (let ci = 0; ci < textChunks.length; ci++) {
+        // Check if user cancelled before each API call
+        if (signal.aborted) return;
+
         const chunk = textChunks[ci];
         let data: any;
         let error: any;
@@ -594,8 +640,10 @@ export default function UploadStatement() {
           data = result.data;
           error = result.error;
         } catch {
+          if (signal.aborted) return;
           throw new ParseServiceError();
         }
+        if (signal.aborted) return;
         if (error) throw new ParseServiceError();
         const txns = data?.transactions || [];
         allTransactions.push(...txns);
@@ -745,6 +793,7 @@ export default function UploadStatement() {
       }
     } finally {
       setProcessing(false);
+      abortRef.current = null;
     }
   };
 
@@ -856,13 +905,41 @@ export default function UploadStatement() {
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-lg mx-auto">
-          <button onClick={() => step > 1 && step < 3 ? setStep(step - 1) : navigate(`/tracker/${trackerId}`)} className="p-1">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
+          {step === 3 ? (
+            /* During processing: show Cancel button instead of back arrow */
+            <button onClick={cancelProcessing} className="p-1 text-destructive hover:text-destructive/80 flex items-center gap-1 text-sm font-medium">
+              <X className="h-4 w-4" /> Cancel
+            </button>
+          ) : (
+            <button onClick={handleBack} className="p-1">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+          )}
           <h1 className="font-semibold text-base">Upload Statement</h1>
           <span className="ml-auto text-xs text-muted-foreground">Step {step} of 4</span>
         </div>
       </div>
+
+      {/* Leave confirmation dialog for Step 4 */}
+      <AlertDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard reviewed transactions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have {approvedDrafts.length} transaction{approvedDrafts.length !== 1 ? 's' : ''} ready to save. Going back will discard all your review changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Reviewing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setShowLeaveConfirm(false); setDrafts([]); navigate(`/tracker/${trackerId}`); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard & Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="max-w-lg mx-auto px-4 py-6">
         {step === 1 && (

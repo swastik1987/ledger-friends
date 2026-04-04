@@ -87,6 +87,11 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setDuplicate(null);
       setShowManualForm(false);
     }
+    // Reset category picker when sheet closes to prevent stale state
+    if (!open) {
+      setShowCategoryPicker(false);
+      setCategorySearch('');
+    }
   }, [open, editExpense, trackerCurrency]);
 
   const handleDescriptionBlur = useCallback(async () => {

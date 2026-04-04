@@ -15,6 +15,7 @@ import AddExpenseSheet from '@/components/tracker/AddExpenseSheet';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 function NudgeUpload() {
   const { show, dismiss } = useNudge('tracker-upload-statement', 2000);
@@ -30,8 +31,8 @@ export default function TrackerDetail() {
 
   const tab = searchParams.get('tab') || 'expenses';
 
-  const { data: tracker } = useTracker(trackerId!);
-  const { data: members } = useTrackerMembers(trackerId!);
+  const { data: tracker, isError: trackerError } = useTracker(trackerId!);
+  const { data: members, isFetched: membersFetched } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
   const { data: availableMonths } = useExpenseMonths(trackerId!);
 
@@ -70,6 +71,17 @@ export default function TrackerDetail() {
     params.set('month', m);
     setSearchParams(params);
   };
+
+  // Redirect if tracker doesn't exist or user is not a member
+  useEffect(() => {
+    if (trackerError) {
+      toast.error('Tracker not found');
+      navigate('/');
+    } else if (membersFetched && members && user && !members.some(m => m.user_id === user.id)) {
+      toast.error("You don't have access to this tracker");
+      navigate('/');
+    }
+  }, [trackerError, membersFetched, members, user, navigate]);
 
   if (!tracker) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
