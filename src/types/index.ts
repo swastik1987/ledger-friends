@@ -41,7 +41,8 @@ export interface Category {
 export interface Expense {
   id: string;
   tracker_id: string;
-  created_by_id: string;
+  created_by_id: string | null;  // null when user has deleted their account
+  created_by_name?: string;       // denormalized — preserved after account deletion
   category_id: string;
   amount: number;
   currency: string;

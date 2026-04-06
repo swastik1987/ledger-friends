@@ -104,7 +104,8 @@ export type Database = {
           conversion_note: string | null
           conversion_rate: number | null
           created_at: string | null
-          created_by_id: string
+          created_by_id: string | null
+          created_by_name: string | null
           currency: string
           date: string
           description: string
@@ -127,7 +128,8 @@ export type Database = {
           conversion_note?: string | null
           conversion_rate?: number | null
           created_at?: string | null
-          created_by_id: string
+          created_by_id?: string | null
+          created_by_name?: string | null
           currency?: string
           date: string
           description: string
@@ -150,7 +152,8 @@ export type Database = {
           conversion_note?: string | null
           conversion_rate?: number | null
           created_at?: string | null
-          created_by_id?: string
+          created_by_id?: string | null
+          created_by_name?: string | null
           currency?: string
           date?: string
           description?: string

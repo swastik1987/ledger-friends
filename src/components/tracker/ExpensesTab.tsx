@@ -183,8 +183,10 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const uniqueUsers = useMemo(() => {
     const map = new Map<string, string>(); // id -> name
     expenses.forEach(e => {
-      if (e.created_by_id && e.created_by_profile?.full_name) {
-        map.set(e.created_by_id, e.created_by_profile.full_name);
+      const key = e.created_by_id || `deleted-${e.created_by_name}`;
+      const name = e.created_by_profile?.full_name || e.created_by_name || 'Deleted User';
+      if (key && !map.has(key)) {
+        map.set(key, name);
       }
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
@@ -214,7 +216,10 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
     // User filter
     if (filterUsers.size > 0) {
-      result = result.filter(e => filterUsers.has(e.created_by_id));
+      result = result.filter(e => {
+        const key = e.created_by_id || `deleted-${e.created_by_name}`;
+        return filterUsers.has(key);
+      });
     }
 
     // Category filter
@@ -374,7 +379,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       'Payment Method': e.payment_method || '',
       Notes: e.notes || '',
       Tags: e.tags?.join(', ') || '',
-      'Added By': e.created_by_profile?.full_name || 'Unknown',
+      'Added By': e.created_by_profile?.full_name || e.created_by_name || 'Deleted User',
       'Reference No.': e.reference_number || '',
     }));
 
@@ -741,7 +746,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
-                          <p className="text-[11px] text-muted-foreground">by {expense.created_by_profile?.full_name?.split(' ')[0] || 'Unknown'}</p>
+                          <p className="text-[11px] text-muted-foreground">by {expense.created_by_profile?.full_name?.split(' ')[0] || expense.created_by_name?.split(' ')[0] || 'Deleted User'}</p>
                         </div>
                         <div className="text-right shrink-0">
                           <div className="flex items-center justify-end gap-1">
