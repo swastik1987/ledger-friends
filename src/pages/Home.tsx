@@ -4,12 +4,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTrackers, useCreateTracker, useInviteMember } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
 import { format, parseISO } from 'date-fns';
-import { ChevronRight, FolderOpen, LogOut, Loader2, UserPlus, X } from 'lucide-react';
+import { ChevronRight, FolderOpen, Loader2, UserPlus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
@@ -22,12 +22,11 @@ function getGreeting() {
 }
 
 export default function HomePage() {
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
   const { data: trackers, isLoading } = useTrackers();
   const { setActiveTrackerId } = useApp();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [newName, setNewName] = useState('');
   const [newCurrency, setNewCurrency] = useState('INR');
   const [inviteEmails, setInviteEmails] = useState<string[]>([]);
@@ -101,32 +100,12 @@ export default function HomePage() {
           <div className="text-center flex-1">
             <p className="text-sm font-medium">{getGreeting()}, {firstName} 👋</p>
           </div>
-          <Sheet open={showProfile} onOpenChange={setShowProfile}>
-            <SheetTrigger asChild>
-              <button className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-sm">
-                {firstName[0]?.toUpperCase()}
-              </button>
-            </SheetTrigger>
-            <SheetContent side="bottom" className="rounded-t-2xl">
-              <SheetHeader>
-                <SheetTitle>Profile</SheetTitle>
-              </SheetHeader>
-              <div className="py-6 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-lg">
-                    {firstName[0]?.toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-semibold">{profile?.full_name}</p>
-                    <p className="text-sm text-muted-foreground">Member since {profile?.created_at ? format(new Date(profile.created_at), 'MMM yyyy') : ''}</p>
-                  </div>
-                </div>
-                <Button variant="destructive" className="w-full h-11" onClick={() => { signOut(); navigate('/auth'); }}>
-                  <LogOut className="h-4 w-4 mr-2" /> Sign Out
-                </Button>
-              </div>
-            </SheetContent>
-          </Sheet>
+          <button
+            onClick={() => navigate('/profile')}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-sm"
+          >
+            {firstName[0]?.toUpperCase()}
+          </button>
         </div>
       </div>
 

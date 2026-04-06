@@ -10,6 +10,7 @@ import Home from "./pages/Home";
 import LandingPage from "./pages/Landing";
 import TrackerDetail from "./pages/TrackerDetail";
 import UploadStatement from "./pages/UploadStatement";
+import ProfilePage from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -47,6 +48,7 @@ const App = () => (
               <Route path="/" element={<HomeOrLanding />} />
               <Route path="/tracker/:trackerId" element={<ProtectedRoute><TrackerDetail /></ProtectedRoute>} />
               <Route path="/tracker/:trackerId/upload" element={<ProtectedRoute><UploadStatement /></ProtectedRoute>} />
+              <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AppProvider>
