@@ -1,7 +1,7 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight } from 'lucide-react';
+import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -204,10 +204,11 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
   const activeFilterCount = filterUsers.size + filterCategories.size;
 
-  // Clear selection when month or type filter changes
+  // Clear selection and transfer scan when month or type filter changes
   useEffect(() => {
     setSelectedIds(new Set());
     setIsSelecting(false);
+    setShowTransferScan(false);
   }, [month, typeFilter]);
 
   // Apply all filters: type + user + category
@@ -401,10 +402,28 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
   const [markingTransfer, setMarkingTransfer] = useState(false);
 
-  // Cross-match detection: find potential internal transfers (opposite direction, same amount ±1, date within ±2 days)
-  const [dismissedMatches, setDismissedMatches] = useState<Set<string>>(new Set());
+  // ── Cross-match transfer detection (on-demand, persistent dismissals) ──
+  const DISMISSED_KEY = `expensesync-dismissed-transfers-${trackerId}`;
+  const [showTransferScan, setShowTransferScan] = useState(false);
+
+  // Load dismissed match keys from localStorage
+  const [dismissedMatches, setDismissedMatches] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(DISMISSED_KEY);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  // Persist dismissals to localStorage whenever they change
+  const persistDismissals = useCallback((next: Set<string>) => {
+    setDismissedMatches(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
+    } catch { /* ignore */ }
+  }, [DISMISSED_KEY]);
 
   const crossMatches = useMemo(() => {
+    if (!showTransferScan) return [];
     const matches: { debit: Expense; credit: Expense; key: string }[] = [];
     const debits = expenses.filter(e => e.is_debit && !e.is_transfer);
     const credits = expenses.filter(e => !e.is_debit && !e.is_transfer);
@@ -423,7 +442,11 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       }
     }
     return matches;
-  }, [expenses, dismissedMatches]);
+  }, [expenses, dismissedMatches, showTransferScan]);
+
+  const handleFindTransfers = () => {
+    setShowTransferScan(true);
+  };
 
   const handleMarkAsTransfer = async (expenseIds: string[], matchKey: string) => {
     setMarkingTransfer(true);
@@ -432,13 +455,27 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         await supabase.from('expenses').update({ is_transfer: true }).eq('id', id);
       }
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      setDismissedMatches(prev => new Set(prev).add(matchKey));
+      const next = new Set(dismissedMatches);
+      next.add(matchKey);
+      persistDismissals(next);
       toast.success('Marked as internal transfer');
     } catch {
       toast.error('Failed to update');
     } finally {
       setMarkingTransfer(false);
     }
+  };
+
+  const handleDismissMatch = (matchKey: string) => {
+    const next = new Set(dismissedMatches);
+    next.add(matchKey);
+    persistDismissals(next);
+  };
+
+  const handleDismissAll = () => {
+    const next = new Set(dismissedMatches);
+    crossMatches.forEach(m => next.add(m.key));
+    persistDismissals(next);
   };
 
   const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
@@ -706,23 +743,32 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         </div>
       )}
 
-      {/* Cross-match transfer detection banner */}
-      {!isLoading && !isSelecting && crossMatches.length > 0 && (
+      {/* Find Transfers button — on-demand scan trigger */}
+      {!isLoading && !isSelecting && !showTransferScan && expenses.length > 0 && (
+        <button
+          onClick={handleFindTransfers}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-amber-200 bg-amber-50/50 text-amber-700 text-sm font-medium hover:bg-amber-100 transition-colors dark:bg-amber-950/10 dark:border-amber-800 dark:text-amber-400"
+        >
+          <Repeat className="h-4 w-4" />
+          Find Potential Transfers
+        </button>
+      )}
+
+      {/* Cross-match transfer detection results */}
+      {!isLoading && !isSelecting && showTransferScan && crossMatches.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
               ↔ Possible Internal Transfers ({crossMatches.length})
             </p>
-            <button
-              onClick={() => setDismissedMatches(prev => {
-                const next = new Set(prev);
-                crossMatches.forEach(m => next.add(m.key));
-                return next;
-              })}
-              className="text-xs text-amber-600 hover:underline"
-            >
-              Dismiss all
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={handleDismissAll} className="text-xs text-amber-600 hover:underline">
+                Dismiss all
+              </button>
+              <button onClick={() => setShowTransferScan(false)} className="p-0.5 text-amber-500 hover:text-amber-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           <p className="text-xs text-amber-600 dark:text-amber-500">
             These debit-credit pairs have matching amounts and dates — they may be money moving between your own accounts.
@@ -753,7 +799,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-muted-foreground"
-                  onClick={() => setDismissedMatches(prev => new Set(prev).add(match.key))}
+                  onClick={() => handleDismissMatch(match.key)}
                 >
                   Dismiss
                 </Button>
@@ -763,6 +809,18 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
           {crossMatches.length > 5 && (
             <p className="text-xs text-amber-600 text-center">+{crossMatches.length - 5} more potential matches</p>
           )}
+        </div>
+      )}
+
+      {/* No matches found after scan */}
+      {!isLoading && !isSelecting && showTransferScan && crossMatches.length === 0 && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-3 flex items-center justify-between">
+          <p className="text-sm text-emerald-700 dark:text-emerald-400">
+            No potential transfers found
+          </p>
+          <button onClick={() => setShowTransferScan(false)} className="p-0.5 text-emerald-500 hover:text-emerald-700">
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
