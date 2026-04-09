@@ -167,7 +167,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       notes: notes || null,
       is_debit: isDebit,
       is_transfer: isTransfer,
-      payment_method: paymentMethod || null,
+      payment_method: (paymentMethod || null) as PaymentMethod | undefined,
       bank_name: bankName || null,
       source: 'manual' as const,
       ...conversionFields,
