@@ -28,7 +28,8 @@ Rules:
 4. For CREDIT transactions (is_debit=false), assign the best category from: Salary / Income, Refund, Reimbursement, Cashback / Reward, Interest Earned, Other Income. If none of these fit, you may use a debit category.
 5. Set confidence (0.0 to 1.0) for your category choice. Only use >0.85 when you are very certain.
 6. Detect the currency used in the statement. Look for currency symbols (₹, $, €, £, د.إ, S$, A$, C$, ¥, ﷼), ISO codes (INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY, SAR), or bank country context. Include a "currency" field (ISO 3-letter code) on each transaction. If you cannot determine the currency, omit the field.
-7. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
+7. Flag internal transfers: set "is_likely_transfer" to true for transactions that appear to be internal money movements between the user's own accounts. This includes: NEFT/IMPS/UPI transfers to/from self, credit card bill payments (AUTOPAY, CC BILL PAY), fixed/recurring deposit transfers, wallet top-ups (Paytm, PhonePe, Amazon Pay), loan EMI debits, mutual fund SIP purchases, and payment-received entries on credit card statements. When unsure, set to false.
+8. Return a raw JSON array only. No markdown fences, no explanation. Response must start with [ and end with ].`;
 
 const EMOJI_INSTRUCTION = `You are an emoji expert. For each category name provided, suggest the single best emoji that visually represents that category. Return a JSON object where each key is the category name and the value is a single emoji character. No markdown, no explanation. Response must start with { and end with }.`;
 

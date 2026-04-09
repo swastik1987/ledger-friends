@@ -66,14 +66,16 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
     setCompareMonth(newPrev);
   }, [month]);
 
-  const debitExpenses = useMemo(() => expenses.filter(e => e.is_debit), [expenses]);
-  const creditExpenses = useMemo(() => expenses.filter(e => !e.is_debit), [expenses]);
+  // Exclude transfers from all dashboard calculations to avoid double-counting
+  const nonTransferExpenses = useMemo(() => expenses.filter(e => !e.is_transfer), [expenses]);
+  const debitExpenses = useMemo(() => nonTransferExpenses.filter(e => e.is_debit), [nonTransferExpenses]);
+  const creditExpenses = useMemo(() => nonTransferExpenses.filter(e => !e.is_debit), [nonTransferExpenses]);
   const totalDebits = debitExpenses.reduce((s, e) => s + e.amount, 0);
   const totalCredits = creditExpenses.reduce((s, e) => s + e.amount, 0);
 
   // Previous month totals
-  const prevDebitTotal = useMemo(() => (prevExpenses || []).filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
-  const prevCreditTotal = useMemo(() => (prevExpenses || []).filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
+  const prevDebitTotal = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer && e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
+  const prevCreditTotal = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer && !e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
 
   // MoM percentage change
   const getMoMTrend = (current: number, previous: number) => {
@@ -109,10 +111,10 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
   const debitCategoryData = useMemo(() => buildCategoryData(debitExpenses), [debitExpenses, categories]);
   const creditCategoryData = useMemo(() => buildCategoryData(creditExpenses), [creditExpenses, categories]);
 
-  // Net category breakdown for "All" mode
+  // Net category breakdown for "All" mode (excluding transfers)
   const netCategoryData = useMemo(() => {
     const map: Record<string, { category: Category; debitTotal: number; creditTotal: number; count: number }> = {};
-    expenses.forEach(e => {
+    nonTransferExpenses.forEach(e => {
       if (!map[e.category_id]) {
         map[e.category_id] = { category: e.category || categories.find(c => c.id === e.category_id)!, debitTotal: 0, creditTotal: 0, count: 0 };
       }
@@ -130,7 +132,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
         creditTotal: d.creditTotal,
       }))
       .sort((a, b) => b.total - a.total);
-  }, [expenses, categories]);
+  }, [nonTransferExpenses, categories]);
 
   // Summary cards with MoM trend
   type SummaryCard = { label: string; value: string; color?: string; trend?: { pct: number; direction: 'up' | 'down' | 'flat' } | null; trendContext?: 'spending' | 'income' };
@@ -175,11 +177,12 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
   const compareCategoryMap = useMemo(() => {
     if (!compareEnabled || !compareExpenses) return new Map<string, number>();
     const map = new Map<string, number>();
+    const nonTransferCompare = compareExpenses.filter(e => !e.is_transfer);
     const filtered = typeFilter === 'debit'
-      ? compareExpenses.filter(e => e.is_debit)
+      ? nonTransferCompare.filter(e => e.is_debit)
       : typeFilter === 'credit'
-        ? compareExpenses.filter(e => !e.is_debit)
-        : compareExpenses;
+        ? nonTransferCompare.filter(e => !e.is_debit)
+        : nonTransferCompare;
     filtered.forEach(e => {
       map.set(e.category_id, (map.get(e.category_id) || 0) + e.amount);
     });

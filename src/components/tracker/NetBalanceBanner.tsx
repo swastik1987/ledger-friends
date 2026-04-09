@@ -11,8 +11,10 @@ interface Props {
 }
 
 export default function NetBalanceBanner({ expenses, monthLabel, activeFilter, currencyCode }: Props) {
-  const debits = expenses.filter(e => e.is_debit);
-  const credits = expenses.filter(e => !e.is_debit);
+  // Exclude transfers from totals to avoid double-counting
+  const nonTransfers = expenses.filter(e => !e.is_transfer);
+  const debits = nonTransfers.filter(e => e.is_debit);
+  const credits = nonTransfers.filter(e => !e.is_debit);
   const totalOut = debits.reduce((s, e) => s + e.amount, 0);
   const totalIn = credits.reduce((s, e) => s + e.amount, 0);
   const net = totalOut - totalIn;

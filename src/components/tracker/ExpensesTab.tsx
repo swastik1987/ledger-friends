@@ -21,6 +21,9 @@ import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
+import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -119,6 +122,7 @@ interface Props {
 }
 
 export default function ExpensesTab({ trackerId, trackerCurrency, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange }: Props) {
+  const queryClient = useQueryClient();
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
@@ -371,7 +375,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const handleExport = () => {
     const rows = expenses.map(e => ({
       Date: e.date,
-      Type: e.is_debit ? 'Debit' : 'Credit',
+      Type: e.is_transfer ? 'Transfer' : e.is_debit ? 'Debit' : 'Credit',
       Description: e.description,
       Merchant: e.merchant_name || '',
       Category: e.category?.name || '',
@@ -393,6 +397,48 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
     const safeName = trackerId.slice(0, 8);
     XLSX.writeFile(wb, `ExpenseSync_${safeName}_${month}.xlsx`);
     setShowExport(false);
+  };
+
+  const [markingTransfer, setMarkingTransfer] = useState(false);
+
+  // Cross-match detection: find potential internal transfers (opposite direction, same amount ±1, date within ±2 days)
+  const [dismissedMatches, setDismissedMatches] = useState<Set<string>>(new Set());
+
+  const crossMatches = useMemo(() => {
+    const matches: { debit: Expense; credit: Expense; key: string }[] = [];
+    const debits = expenses.filter(e => e.is_debit && !e.is_transfer);
+    const credits = expenses.filter(e => !e.is_debit && !e.is_transfer);
+
+    for (const debit of debits) {
+      const debitDate = new Date(debit.date + 'T00:00:00');
+      for (const credit of credits) {
+        if (Math.abs(debit.amount - credit.amount) > 1) continue;
+        const creditDate = new Date(credit.date + 'T00:00:00');
+        const dayDiff = Math.abs((debitDate.getTime() - creditDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (dayDiff > 2) continue;
+        const key = [debit.id, credit.id].sort().join('-');
+        if (!dismissedMatches.has(key)) {
+          matches.push({ debit, credit, key });
+        }
+      }
+    }
+    return matches;
+  }, [expenses, dismissedMatches]);
+
+  const handleMarkAsTransfer = async (expenseIds: string[], matchKey: string) => {
+    setMarkingTransfer(true);
+    try {
+      for (const id of expenseIds) {
+        await supabase.from('expenses').update({ is_transfer: true }).eq('id', id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      setDismissedMatches(prev => new Set(prev).add(matchKey));
+      toast.success('Marked as internal transfer');
+    } catch {
+      toast.error('Failed to update');
+    } finally {
+      setMarkingTransfer(false);
+    }
   };
 
   const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
@@ -660,6 +706,66 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         </div>
       )}
 
+      {/* Cross-match transfer detection banner */}
+      {!isLoading && !isSelecting && crossMatches.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+              ↔ Possible Internal Transfers ({crossMatches.length})
+            </p>
+            <button
+              onClick={() => setDismissedMatches(prev => {
+                const next = new Set(prev);
+                crossMatches.forEach(m => next.add(m.key));
+                return next;
+              })}
+              className="text-xs text-amber-600 hover:underline"
+            >
+              Dismiss all
+            </button>
+          </div>
+          <p className="text-xs text-amber-600 dark:text-amber-500">
+            These debit-credit pairs have matching amounts and dates — they may be money moving between your own accounts.
+          </p>
+          {crossMatches.slice(0, 5).map(match => (
+            <div key={match.key} className="rounded-xl bg-card border border-border p-2.5 space-y-2">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-red-500 font-medium">↑ {formatAmountShort(match.debit.amount, trackerCurrency)}</span>
+                <span className="text-muted-foreground truncate flex-1">{match.debit.description}</span>
+                <span className="text-muted-foreground">{format(new Date(match.debit.date + 'T00:00:00'), 'd MMM')}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-emerald-500 font-medium">↓ {formatAmountShort(match.credit.amount, trackerCurrency)}</span>
+                <span className="text-muted-foreground truncate flex-1">{match.credit.description}</span>
+                <span className="text-muted-foreground">{format(new Date(match.credit.date + 'T00:00:00'), 'd MMM')}</span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs flex-1 border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400"
+                  onClick={() => handleMarkAsTransfer([match.debit.id, match.credit.id], match.key)}
+                  disabled={markingTransfer}
+                >
+                  {markingTransfer ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Mark Both as Transfer'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => setDismissedMatches(prev => new Set(prev).add(match.key))}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ))}
+          {crossMatches.length > 5 && (
+            <p className="text-xs text-amber-600 text-center">+{crossMatches.length - 5} more potential matches</p>
+          )}
+        </div>
+      )}
+
       {/* Long-press nudge — show once above the list */}
       {!isLoading && groups.length > 0 && !isSelecting && <NudgeLongPress />}
 
@@ -709,7 +815,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                   <div
                     key={expense.id}
                     className={`rounded-2xl bg-card border p-3 shadow-sm transition-colors ${
-                      isSelected ? 'border-primary bg-primary/5' : 'border-border'
+                      isSelected ? 'border-primary bg-primary/5' : expense.is_transfer ? 'border-amber-200 dark:border-amber-800 opacity-60' : 'border-border'
                     }`}
                     onPointerDown={() => handlePointerDown(expense.id)}
                     onPointerUp={handlePointerUp}
@@ -761,7 +867,14 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                       {!isSelecting && (
                         <div className="mt-2 pl-[52px] flex items-start gap-2">
                           <div className="flex-1 min-w-0 space-y-0.5">
-                            <p className="text-sm text-foreground text-left">{expense.description}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm text-foreground text-left truncate">{expense.description}</p>
+                              {expense.is_transfer && (
+                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-medium dark:bg-amber-900/30 dark:text-amber-400">
+                                  ↔ Transfer
+                                </span>
+                              )}
+                            </div>
                             {expense.conversion_note && (
                               <p className="text-[11px] text-muted-foreground text-left italic">{expense.conversion_note}</p>
                             )}

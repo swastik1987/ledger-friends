@@ -55,6 +55,7 @@ export interface Expense {
   reference_number?: string;
   is_debit: boolean;
   source: ExpenseSource;
+  is_transfer: boolean;
   original_amount?: number;
   original_currency?: string;
   conversion_rate?: number;
@@ -82,6 +83,7 @@ export interface DraftExpense {
   review_status: ReviewStatus;
   category_changed?: boolean;
   detected_currency?: string; // currency detected from statement (ISO code)
+  is_transfer?: boolean; // flagged as internal transfer (keyword or AI detection)
 }
 
 export interface TrackerWithStats extends Tracker {

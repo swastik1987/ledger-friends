@@ -15,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { DraftExpense, Category } from '@/types';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
 import { fetchLearnedMappings, findLearnedCategory, recordCategoryLearning } from '@/lib/categoryLearning';
+import { detectTransferByKeyword } from '@/lib/transferDetector';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
@@ -757,6 +758,11 @@ export default function UploadStatement() {
           ? (t.description || 'Unknown').slice(0, 25).trim() + '...'
           : (t.description || 'Unknown');
 
+        // Transfer detection: keyword match on description/raw_description, or AI flag
+        const transferKeyword = detectTransferByKeyword(fullDesc) || detectTransferByKeyword(shortDesc);
+        const aiTransferFlag = t.is_likely_transfer === true;
+        const isTransfer = !!(transferKeyword || aiTransferFlag);
+
         return {
           temp_id: `draft-${i}`,
           date: t.date || new Date().toISOString().split('T')[0],
@@ -772,6 +778,7 @@ export default function UploadStatement() {
           needs_review: needsReview,
           review_status: 'pending' as const,
           detected_currency: t.currency || undefined,
+          is_transfer: isTransfer,
         };
       });
 
@@ -801,6 +808,7 @@ export default function UploadStatement() {
   const debitCount = approvedDrafts.filter(d => d.is_debit).length;
   const creditCount = approvedDrafts.filter(d => !d.is_debit).length;
   const needsReviewCount = drafts.filter(d => d.needs_review && d.review_status === 'pending').length;
+  const transferCount = approvedDrafts.filter(d => d.is_transfer).length;
 
   const handleSaveAll = async () => {
     if (!user || !profile || !trackerId) return;
@@ -856,6 +864,7 @@ export default function UploadStatement() {
         merchant_name: d.merchant_name || null,
         is_debit: d.is_debit,
         source: 'statement_upload' as const,
+        is_transfer: d.is_transfer || false,
         reference_number: d.reference_number || null,
         notes: d.notes || null,
         ...(conv ? {
@@ -899,6 +908,13 @@ export default function UploadStatement() {
     setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
       ...d,
       is_debit: !d.is_debit,
+    } : d));
+  };
+
+  const toggleTransfer = (tempId: string) => {
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      is_transfer: !d.is_transfer,
     } : d));
   };
 
@@ -1006,7 +1022,7 @@ export default function UploadStatement() {
             <div>
               <h2 className="text-lg font-semibold">Review Transactions</h2>
               <p className="text-sm text-muted-foreground">
-                {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''}{needsReviewCount > 0 ? ` · ${needsReviewCount} need review` : ''}
+                {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''}{transferCount > 0 ? ` · ${transferCount} transfer${transferCount !== 1 ? 's' : ''}` : ''}{needsReviewCount > 0 ? ` · ${needsReviewCount} need review` : ''}
               </p>
             </div>
 
@@ -1052,7 +1068,18 @@ export default function UploadStatement() {
                     </div>
                   </div>
                   <div className="mt-2 pl-7 space-y-0.5">
-                    <p className="text-sm text-foreground text-left">{draft.description}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm text-foreground text-left">{draft.description}</p>
+                      {draft.is_transfer && (
+                        <button
+                          onClick={() => toggleTransfer(draft.temp_id)}
+                          className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-medium hover:bg-amber-200 transition-colors dark:bg-amber-900/30 dark:text-amber-400"
+                          title="Flagged as internal transfer — tap to unflag"
+                        >
+                          ↔ Transfer
+                        </button>
+                      )}
+                    </div>
                     {draft.notes && (
                       <p className="text-xs text-muted-foreground text-left line-clamp-2">{draft.notes}</p>
                     )}

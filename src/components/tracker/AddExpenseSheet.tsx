@@ -64,6 +64,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   const [isConverting, setIsConverting] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
+  const [isTransfer, setIsTransfer] = useState(false);
   const [duplicate, setDuplicate] = useState<Expense | null>(null);
 
   useEffect(() => {
@@ -75,6 +76,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setCategoryId(editExpense.category_id);
       setNotes(editExpense.notes || '');
       setExpenseCurrency(editExpense.currency || trackerCurrency);
+      setIsTransfer(editExpense.is_transfer || false);
       setShowManualForm(true);
     } else if (open && !editExpense) {
       setAmount('');
@@ -84,6 +86,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setCategoryId('');
       setNotes('');
       setExpenseCurrency(trackerCurrency);
+      setIsTransfer(false);
       setDuplicate(null);
       setShowManualForm(false);
     }
@@ -157,6 +160,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       description,
       notes: notes || null,
       is_debit: isDebit,
+      is_transfer: isTransfer,
       source: 'manual' as const,
       ...conversionFields,
     };
@@ -335,6 +339,33 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
               <Label>Notes</Label>
               <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Merchant, payment method, reference no., or any other details" rows={3} />
             </div>
+
+            {/* Transfer toggle */}
+            <button
+              type="button"
+              onClick={() => setIsTransfer(!isTransfer)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
+                isTransfer
+                  ? 'bg-amber-50 border-amber-300 dark:bg-amber-950/20 dark:border-amber-700'
+                  : 'border-border hover:bg-muted/50'
+              }`}
+            >
+              <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                isTransfer ? 'bg-amber-500 border-amber-500' : 'border-muted-foreground/40'
+              }`}>
+                {isTransfer && (
+                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
+              <div className="text-left">
+                <p className={`text-sm font-medium ${isTransfer ? 'text-amber-700 dark:text-amber-400' : 'text-foreground'}`}>
+                  ↔ Internal Transfer
+                </p>
+                <p className="text-[11px] text-muted-foreground">Exclude from spending/income totals</p>
+              </div>
+            </button>
 
             {/* Duplicate warning */}
             {duplicate && (
