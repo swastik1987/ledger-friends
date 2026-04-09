@@ -90,9 +90,9 @@ export default function TrackerDetail() {
   );
 
   return (
-    <div className="flex flex-col min-h-screen bg-background pb-20">
+    <div className="flex flex-col min-h-screen bg-page-gradient pb-20">
       {/* Top Bar */}
-      <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
+      <div className="sticky top-0 z-10 glass-nav border-b border-border/50 px-4 py-3">
         <div className="flex items-center justify-between max-w-lg mx-auto">
           <button onClick={() => navigate('/')} className="p-1">
             <ArrowLeft className="h-5 w-5" />
@@ -110,10 +110,10 @@ export default function TrackerDetail() {
       {/* Tabs */}
       <div className="max-w-lg mx-auto w-full flex-1">
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 bg-background rounded-none border-b border-border h-11 p-0">
-            <TabsTrigger value="expenses" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Transactions</TabsTrigger>
-            <TabsTrigger value="dashboard" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Dashboard</TabsTrigger>
-            <TabsTrigger value="settings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none h-full transition-all">Settings</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 glass-nav rounded-none h-12 p-1 gap-1 border-b border-border/40">
+            <TabsTrigger value="expenses" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Transactions</TabsTrigger>
+            <TabsTrigger value="dashboard" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Dashboard</TabsTrigger>
+            <TabsTrigger value="settings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Settings</TabsTrigger>
           </TabsList>
 
           <TabsContent value="expenses" className="mt-0">

@@ -135,33 +135,33 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
   }, [nonTransferExpenses, categories]);
 
   // Summary cards with MoM trend
-  type SummaryCard = { label: string; value: string; color?: string; trend?: { pct: number; direction: 'up' | 'down' | 'flat' } | null; trendContext?: 'spending' | 'income' };
+  type SummaryCard = { label: string; value: string; color?: string; trend?: { pct: number; direction: 'up' | 'down' | 'flat' } | null; trendContext?: 'spending' | 'income'; gradientClass?: string };
   const summaryCards = useMemo((): SummaryCard[] => {
     const hasPrevData = prevExpenses !== undefined;
     if (typeFilter === 'debit') {
       const trend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
       const largest = [...debitExpenses].sort((a, b) => b.amount - a.amount)[0];
       return [
-        { label: 'Total Spent', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend, trendContext: 'spending' },
-        { label: 'Transactions', value: String(debitExpenses.length) },
-        { label: 'Largest Expense', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-' },
+        { label: 'Total Spent', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend, trendContext: 'spending', gradientClass: 'summary-card-out' },
+        { label: 'Transactions', value: String(debitExpenses.length), gradientClass: 'summary-card-neutral' },
+        { label: 'Largest Expense', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', gradientClass: 'summary-card-neutral' },
       ];
     } else if (typeFilter === 'credit') {
       const trend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
       const largest = [...creditExpenses].sort((a, b) => b.amount - a.amount)[0];
       return [
-        { label: 'Total Received', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend, trendContext: 'income' },
-        { label: 'Transactions', value: String(creditExpenses.length) },
-        { label: 'Largest Credit', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', color: 'text-emerald-600' },
+        { label: 'Total Received', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend, trendContext: 'income', gradientClass: 'summary-card-in' },
+        { label: 'Transactions', value: String(creditExpenses.length), gradientClass: 'summary-card-neutral' },
+        { label: 'Largest Credit', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', color: 'text-emerald-600', gradientClass: 'summary-card-neutral' },
       ];
     } else {
       const debitTrend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
       const creditTrend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
       const net = totalDebits - totalCredits;
       return [
-        { label: 'Total Out', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend: debitTrend, trendContext: 'spending' },
-        { label: 'Total In', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend: creditTrend, trendContext: 'income' },
-        { label: 'Net Balance', value: `${net < 0 ? '+' : ''}${formatAmountShort(Math.round(Math.abs(net)), trackerCurrency)}`, color: net <= 0 ? 'text-emerald-600' : 'text-red-600' },
+        { label: 'Total Out', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend: debitTrend, trendContext: 'spending', gradientClass: 'summary-card-out' },
+        { label: 'Total In', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend: creditTrend, trendContext: 'income', gradientClass: 'summary-card-in' },
+        { label: 'Net Balance', value: `${net < 0 ? '+' : ''}${formatAmountShort(Math.round(Math.abs(net)), trackerCurrency)}`, color: net <= 0 ? 'text-emerald-600' : 'text-red-600', gradientClass: 'summary-card-net' },
       ];
     }
   }, [typeFilter, debitExpenses, creditExpenses, totalDebits, totalCredits, prevDebitTotal, prevCreditTotal, prevExpenses]);
@@ -369,7 +369,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
       {/* Summary Cards */}
       <div className="flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide">
         {summaryCards.map((card, i) => (
-          <div key={i} className="min-w-[130px] flex-1 rounded-2xl bg-card border border-border p-3 shadow-sm">
+          <div key={i} className={`min-w-[130px] flex-1 rounded-2xl border p-3 shadow-sm transition-all duration-200 hover:shadow-md animate-stagger ${card.gradientClass || 'bg-card border-border'}`} style={{ animationDelay: `${i * 0.08}s` }}>
             <p className="text-[11px] text-muted-foreground mb-1">{card.label}</p>
             <p className={`font-semibold text-sm font-mono ${card.color || ''}`}>{card.value}</p>
             {card.trend && card.trendContext && (
@@ -387,7 +387,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
       </div>
 
       {/* Pie Charts — Stacked vertically, filter-aware */}
-      <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
+      <div className="rounded-2xl glass-card border-0 p-4 shadow-sm">
         <div className="space-y-6">
           {(typeFilter === 'all' || typeFilter === 'debit') &&
             renderDonut(debitCategoryData, totalDebits, 'Out', 'Spending', '💸')
@@ -402,7 +402,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
 
       {/* Category Breakdown */}
       {(mergedBreakdownData.length > 0 || compareEnabled) && (
-        <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
+        <div className="rounded-2xl glass-card border-0 p-4 shadow-sm space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-semibold text-sm">
               {typeFilter === 'debit' ? 'Spending by Category' : typeFilter === 'credit' ? 'Income by Category' : 'Category Breakdown (Net)'}

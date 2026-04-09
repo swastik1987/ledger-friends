@@ -65,7 +65,7 @@ export default function BottomNav() {
 
   return (
     <>
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-card border-t border-border safe-bottom">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 glass-nav border-t border-border/40 safe-bottom">
         <div className="max-w-lg mx-auto flex items-center justify-around py-1">
           {navItems.map((item, i) => {
             const Icon = item.icon;
@@ -79,7 +79,7 @@ export default function BottomNav() {
                   disabled={addDisabled}
                   className={`flex flex-col items-center justify-center py-1 px-3 ${addDisabled ? 'opacity-30' : ''}`}
                 >
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${addDisabled ? 'bg-muted' : 'bg-primary'} text-primary-foreground -mt-3 shadow-md`}>
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${addDisabled ? 'bg-muted' : 'bg-primary shadow-[0_2px_12px_rgba(99,102,241,0.4)]'} text-primary-foreground -mt-3 active:animate-scale-tap transition-transform duration-150`}>
                     <PlusCircle className="h-6 w-6" />
                   </div>
                   <span className="text-[10px] mt-0.5 text-muted-foreground">{addLabel}</span>
@@ -94,10 +94,10 @@ export default function BottomNav() {
                 key={i}
                 onClick={() => handleNav(item)}
                 disabled={disabled && !item.isProfile}
-                className={`flex flex-col items-center justify-center py-2 px-3 min-w-[56px] ${disabled && !item.isProfile ? 'opacity-30' : ''}`}
+                className={`relative flex flex-col items-center justify-center py-2 px-3 min-w-[56px] transition-colors duration-200 ${disabled && !item.isProfile ? 'opacity-30' : ''} ${active ? 'nav-glow' : ''}`}
               >
-                <Icon className={`h-5 w-5 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
-                <span className={`text-[10px] mt-0.5 ${active ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>{item.label}</span>
+                <Icon className={`h-5 w-5 transition-colors duration-200 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
+                <span className={`text-[10px] mt-0.5 transition-colors duration-200 ${active ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>{item.label}</span>
               </button>
             );
           })}

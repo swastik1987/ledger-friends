@@ -12,15 +12,15 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
 export default function AuthPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-primary-light to-background flex flex-col items-center justify-center p-4">
-      <div className="mb-8 text-center">
-        <img src="/logo-512.png" alt="ExpenseSync" className="mx-auto mb-4 h-20 w-20 rounded-2xl shadow-md" />
+    <div className="min-h-screen auth-gradient flex flex-col items-center justify-center p-4">
+      <div className="mb-8 text-center animate-fade-in-up">
+        <img src="/logo-512.png" alt="ExpenseSync" className="mx-auto mb-4 h-20 w-20 rounded-2xl shadow-lg logo-glow" />
         <h1 className="text-2xl font-bold text-foreground">ExpenseSync</h1>
         <p className="text-sm text-muted-foreground mt-1">Sync. Track. Report.</p>
       </div>
 
-      <div className="w-full max-w-sm">
-        <div className="rounded-2xl bg-card p-6 shadow-sm border border-border">
+      <div className="w-full max-w-sm animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+        <div className="rounded-2xl glass-card p-6 shadow-lg border-0">
           <div className="flex flex-col gap-3">
             <GoogleSignInButton />
             <AppleSignInButton />

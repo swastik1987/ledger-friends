@@ -90,12 +90,23 @@ export default {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        "fade-in-up": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "scale-tap": {
+          "0%": { transform: "scale(1)" },
+          "50%": { transform: "scale(0.93)" },
+          "100%": { transform: "scale(1)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "slide-up": "slide-up 0.3s ease-out",
         shimmer: "shimmer 1.5s ease-in-out infinite",
+        "fade-in-up": "fade-in-up 0.3s ease-out both",
+        "scale-tap": "scale-tap 0.2s ease-out",
       },
     },
   },

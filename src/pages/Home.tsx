@@ -89,9 +89,9 @@ export default function HomePage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-background pb-20">
+    <div className="flex flex-col min-h-screen bg-page-gradient pb-20">
       {/* Top Bar */}
-      <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
+      <div className="sticky top-0 z-10 glass-nav border-b border-border/50 px-4 py-3">
         <div className="flex items-center justify-between max-w-lg mx-auto">
           <div className="flex items-center gap-2">
             <img src="/logo-512.png" alt="ExpenseSync" className="h-8 w-8 rounded-lg" />
@@ -113,7 +113,7 @@ export default function HomePage() {
       <div className="flex-1 max-w-lg mx-auto w-full px-4 py-4 space-y-3">
         {/* Onboarding banner for new users */}
         {!isLoading && (!trackers || trackers.length === 0) && (
-          <div className="rounded-2xl bg-primary-light border border-primary/20 p-5 space-y-3">
+          <div className="rounded-2xl bg-gradient-to-br from-indigo-50 via-primary-light to-violet-50 border border-primary/15 p-5 space-y-3 shadow-sm animate-fade-in-up dark:from-indigo-950/30 dark:via-primary-light dark:to-violet-950/30">
             <p className="text-lg font-semibold">👋 Welcome to ExpenseSync!</p>
             <p className="text-sm text-muted-foreground">Start by creating your first tracker. You can invite collaborators after creating it.</p>
             <Button onClick={() => setShowCreate(true)} className="h-11">Create My First Tracker</Button>
@@ -132,12 +132,14 @@ export default function HomePage() {
           </div>
         )}
 
-        {trackers?.map(tracker => (
+        {trackers?.map((tracker, i) => (
           <button
             key={tracker.id}
             onClick={() => handleTrackerClick(tracker.id)}
-            className="w-full text-left rounded-2xl bg-card border border-border p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-3"
+            className="w-full text-left rounded-2xl glass-card border-0 p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-3 overflow-hidden relative animate-stagger"
+            style={{ animationDelay: `${i * 0.06}s` }}
           >
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500" />
             <div className="w-1 h-12 rounded-full bg-primary flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-lg truncate">{tracker.name}</p>

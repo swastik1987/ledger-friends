@@ -838,44 +838,47 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
         return (
           <div key={groupKey}>
-            <div className="sticky top-[105px] bg-background py-1 z-[5]">
-              {isCategorySort ? (
-                <div className="flex items-center gap-2">
-                  {groupCategory && (
-                    <span
-                      className="h-5 w-5 rounded-full flex items-center justify-center text-xs"
-                      style={{ backgroundColor: (groupCategory.color || '#ccc') + '20' }}
-                    >
-                      {groupCategory.icon}
-                    </span>
-                  )}
+            <div className="sticky top-[105px] bg-page-gradient py-1.5 z-[5]">
+              <div className="date-header py-1">
+                {isCategorySort ? (
+                  <div className="flex items-center gap-2">
+                    {groupCategory && (
+                      <span
+                        className="h-5 w-5 rounded-full flex items-center justify-center text-xs"
+                        style={{ backgroundColor: (groupCategory.color || '#ccc') + '20' }}
+                      >
+                        {groupCategory.icon}
+                      </span>
+                    )}
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      {groupKey}
+                    </p>
+                  </div>
+                ) : (
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {groupKey}
+                    {formatDateHeader(groupKey)}
                   </p>
-                </div>
-              ) : (
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  {formatDateHeader(groupKey)}
+                )}
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <span className="text-red-500">↑ {formatAmountShort(groupDebits, trackerCurrency)}</span>
+                  {' '}
+                  <span className="text-emerald-500">↓ {formatAmountShort(groupCredits, trackerCurrency)}</span>
+                  {' · '}
+                  <span>{items.length} txn{items.length !== 1 ? 's' : ''}</span>
                 </p>
-              )}
-              <p className="text-[10px] text-muted-foreground">
-                <span className="text-red-500">↑ {formatAmountShort(groupDebits, trackerCurrency)}</span>
-                {' '}
-                <span className="text-emerald-500">↓ {formatAmountShort(groupCredits, trackerCurrency)}</span>
-                {' · '}
-                <span>{items.length} txn{items.length !== 1 ? 's' : ''}</span>
-              </p>
+              </div>
             </div>
             <div className="space-y-2">
-              {items.map(expense => {
+              {items.map((expense, txIdx) => {
                 const canModify = expense.created_by_id === userId || isAdmin;
                 const isSelected = selectedIds.has(expense.id);
                 return (
                   <div
                     key={expense.id}
-                    className={`rounded-2xl bg-card border p-3 shadow-sm transition-colors ${
-                      isSelected ? 'border-primary bg-primary/5' : expense.is_transfer ? 'border-amber-200 dark:border-amber-800 opacity-60' : 'border-border'
+                    className={`rounded-2xl border p-3 shadow-sm transition-all duration-200 hover:shadow-md animate-stagger ${
+                      isSelected ? 'border-primary bg-primary/5' : expense.is_transfer ? 'border-amber-200 dark:border-amber-800 opacity-60 bg-card' : 'glass-card border-0'
                     }`}
+                    style={{ animationDelay: `${txIdx * 0.04}s` }}
                     onPointerDown={() => handlePointerDown(expense.id)}
                     onPointerUp={handlePointerUp}
                     onPointerLeave={handlePointerLeave}
