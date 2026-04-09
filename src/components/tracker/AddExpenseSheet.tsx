@@ -65,6 +65,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [isTransfer, setIsTransfer] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [bankName, setBankName] = useState('');
   const [duplicate, setDuplicate] = useState<Expense | null>(null);
 
   useEffect(() => {
@@ -77,6 +79,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setNotes(editExpense.notes || '');
       setExpenseCurrency(editExpense.currency || trackerCurrency);
       setIsTransfer(editExpense.is_transfer || false);
+      setPaymentMethod(editExpense.payment_method || '');
+      setBankName(editExpense.bank_name || '');
       setShowManualForm(true);
     } else if (open && !editExpense) {
       setAmount('');
@@ -87,6 +91,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setNotes('');
       setExpenseCurrency(trackerCurrency);
       setIsTransfer(false);
+      setPaymentMethod('');
+      setBankName('');
       setDuplicate(null);
       setShowManualForm(false);
     }
@@ -161,6 +167,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       notes: notes || null,
       is_debit: isDebit,
       is_transfer: isTransfer,
+      payment_method: paymentMethod || null,
+      bank_name: bankName || null,
       source: 'manual' as const,
       ...conversionFields,
     };
@@ -334,10 +342,53 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
               </button>
             </div>
 
+            {/* Payment Mode */}
+            <div className="space-y-1.5">
+              <Label>Payment Mode <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <div className="flex flex-wrap gap-1.5">
+                {(['UPI', 'Credit Card', 'Debit Card', 'Online', 'Cash', 'Other'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPaymentMethod(paymentMethod === mode ? '' : mode)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      paymentMethod === mode
+                        ? mode === 'UPI' ? 'bg-purple-50 border-purple-300 text-purple-700 dark:bg-purple-950/30 dark:text-purple-400'
+                        : mode === 'Credit Card' ? 'bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400'
+                        : mode === 'Debit Card' ? 'bg-sky-50 border-sky-300 text-sky-700 dark:bg-sky-950/30 dark:text-sky-400'
+                        : mode === 'Online' ? 'bg-teal-50 border-teal-300 text-teal-700 dark:bg-teal-950/30 dark:text-teal-400'
+                        : mode === 'Cash' ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-950/30 dark:text-green-400'
+                        : 'bg-slate-100 border-slate-300 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        : 'border-border text-muted-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Bank Name */}
+            <div className="space-y-1.5">
+              <Label>Bank Name <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                value={bankName}
+                onChange={e => setBankName(e.target.value)}
+                placeholder="e.g. HDFC Bank, SBI, ICICI"
+                className="h-11"
+                list="bank-suggestions"
+              />
+              <datalist id="bank-suggestions">
+                {[...new Set(expenses.map(e => e.bank_name).filter(Boolean))].map(name => (
+                  <option key={name} value={name!} />
+                ))}
+              </datalist>
+            </div>
+
             {/* Notes */}
             <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Merchant, payment method, reference no., or any other details" rows={3} />
+              <Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any additional details" rows={2} />
             </div>
 
             {/* Transfer toggle */}

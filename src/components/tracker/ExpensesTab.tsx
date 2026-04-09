@@ -382,6 +382,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       Category: e.category?.name || '',
       [`Amount (${getCurrency(trackerCurrency).symbol})`]: e.amount,
       'Payment Method': e.payment_method || '',
+      'Bank': e.bank_name || '',
       Notes: e.notes || '',
       Tags: e.tags?.join(', ') || '',
       'Added By': e.created_by_profile?.full_name || e.created_by_name || 'Deleted User',
@@ -391,7 +392,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [
       { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
-      { wch: 15 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
+      { wch: 15 }, { wch: 16 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
@@ -909,8 +910,27 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                           {expense.category?.icon}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{expense.category?.name}{expense.payment_method ? ` · ${expense.payment_method}` : ''}</p>
-                          <p className="text-[11px] text-muted-foreground">by {expense.created_by_profile?.full_name?.split(' ')[0] || expense.created_by_name?.split(' ')[0] || 'Deleted User'}</p>
+                          <p className="text-sm font-medium truncate">{expense.category?.name}</p>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[11px] text-muted-foreground">by {expense.created_by_profile?.full_name?.split(' ')[0] || expense.created_by_name?.split(' ')[0] || 'Deleted User'}</span>
+                            {expense.bank_name && (
+                              <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                                {expense.bank_name}
+                              </span>
+                            )}
+                            {expense.payment_method && (
+                              <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium ${
+                                expense.payment_method === 'UPI' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                                : expense.payment_method === 'Credit Card' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                : expense.payment_method === 'Debit Card' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+                                : expense.payment_method === 'Online' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
+                                : expense.payment_method === 'Cash' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}>
+                                {expense.payment_method}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="text-right shrink-0">
                           <div className="flex items-center justify-end gap-1">

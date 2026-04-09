@@ -100,6 +100,7 @@ export type Database = {
       expenses: {
         Row: {
           amount: number
+          bank_name: string | null
           category_id: string
           conversion_note: string | null
           conversion_rate: number | null
@@ -125,6 +126,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          bank_name?: string | null
           category_id: string
           conversion_note?: string | null
           conversion_rate?: number | null
@@ -150,6 +152,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          bank_name?: string | null
           category_id?: string
           conversion_note?: string | null
           conversion_rate?: number | null

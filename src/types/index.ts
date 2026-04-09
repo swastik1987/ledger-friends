@@ -1,6 +1,6 @@
 export type UserRole = 'admin' | 'member';
 export type ExpenseSource = 'manual' | 'statement_upload';
-export type PaymentMethod = 'UPI' | 'Credit Card' | 'Debit Card' | 'Net Banking' | 'Cash' | 'Other';
+export type PaymentMethod = 'UPI' | 'Credit Card' | 'Debit Card' | 'Online' | 'Cash' | 'Other';
 export type ReviewStatus = 'pending' | 'approved' | 'discarded';
 
 export interface Profile {
@@ -50,6 +50,7 @@ export interface Expense {
   description: string;
   merchant_name?: string;
   payment_method?: PaymentMethod;
+  bank_name?: string;
   notes?: string;
   tags?: string[];
   reference_number?: string;
@@ -84,6 +85,8 @@ export interface DraftExpense {
   category_changed?: boolean;
   detected_currency?: string; // currency detected from statement (ISO code)
   is_transfer?: boolean; // flagged as internal transfer (keyword or AI detection)
+  payment_method?: PaymentMethod;
+  bank_name?: string;
 }
 
 export interface TrackerWithStats extends Tracker {

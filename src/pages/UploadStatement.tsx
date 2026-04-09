@@ -779,6 +779,8 @@ export default function UploadStatement() {
           review_status: 'pending' as const,
           detected_currency: t.currency || undefined,
           is_transfer: isTransfer,
+          payment_method: t.payment_mode || undefined,
+          bank_name: t.bank_name || undefined,
         };
       });
 
@@ -865,6 +867,8 @@ export default function UploadStatement() {
         is_debit: d.is_debit,
         source: 'statement_upload' as const,
         is_transfer: d.is_transfer || false,
+        payment_method: d.payment_method || null,
+        bank_name: d.bank_name || null,
         reference_number: d.reference_number || null,
         notes: d.notes || null,
         ...(conv ? {
