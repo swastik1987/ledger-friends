@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Expense, Category, Tracker } from '@/types';
+import { Expense, Category, Tracker, PaymentMethod } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
