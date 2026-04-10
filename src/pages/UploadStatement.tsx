@@ -17,6 +17,7 @@ import { getCurrency, formatAmountShort } from '@/lib/currencies';
 import { fetchLearnedMappings, findLearnedCategory, recordCategoryLearning } from '@/lib/categoryLearning';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
 import Nudge from '@/components/Nudge';
+import CategoryIcon from '@/components/CategoryIcon';
 import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
@@ -1051,7 +1052,7 @@ export default function UploadStatement() {
                       <SelectContent>
                         {allCategories.map(cat => (
                           <SelectItem key={cat.id} value={cat.id}>
-                            <span>{cat.icon} {cat.name}</span>
+                            <span className="flex items-center gap-1.5"><CategoryIcon icon={cat.icon} color={cat.color} size={13} /> {cat.name}</span>
                           </SelectItem>
                         ))}
                       </SelectContent>

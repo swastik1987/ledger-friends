@@ -15,6 +15,7 @@ import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { supabase } from '@/integrations/supabase/client';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
+import CategoryIcon from '@/components/CategoryIcon';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -501,8 +502,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                       onClick={() => { setCategoryId(cat.id); setShowCategoryPicker(false); }}
                       className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${categoryId === cat.id ? 'bg-primary/10' : 'hover:bg-muted'}`}
                     >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm" style={{ backgroundColor: cat.color + '20' }}>
-                        {cat.icon}
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: cat.color + '20' }}>
+                        <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
                       </span>
                       <span className="font-medium text-sm">{cat.name}</span>
                       {!cat.is_system && <span className="text-xs text-muted-foreground ml-auto">Custom</span>}

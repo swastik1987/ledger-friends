@@ -1,10 +1,10 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
+import { Receipt, ArrowUpRight, ArrowDownLeft, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // used in bulk category picker
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { useTrackers, useCategories } from '@/hooks/useTrackers';
@@ -15,6 +15,8 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import CategoryIcon from '@/components/CategoryIcon';
+import MonthSelector from '@/components/MonthSelector';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import NetBalanceBanner from './NetBalanceBanner';
 import Nudge from '@/components/Nudge';
@@ -478,39 +480,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       {/* Month selector */}
       {!isSelecting && (
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (month === 'all') return;
-              const idx = months.findIndex(m => m.value === month);
-              if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value);
-            }}
-            disabled={month === 'all' || month === months[months.length - 1]?.value}
-            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <Select value={month} onValueChange={onMonthChange}>
-            <SelectTrigger className="flex-1 h-10">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {months.map(m => (
-                <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <button
-            onClick={() => {
-              if (month === 'all') return;
-              const idx = months.findIndex(m => m.value === month);
-              // idx 0 is 'all', idx 1 is current month — go to previous index (more recent)
-              if (idx > 1) onMonthChange(months[idx - 1].value);
-            }}
-            disabled={month === 'all' || month === months[1]?.value}
-            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
+          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
           {/* Find Self-Transfers button */}
           {!showTransferScan && expenses.length > 0 && (
             <TooltipProvider delayDuration={300}>
@@ -619,10 +589,10 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                           }`}
                         >
                           <span
-                            className="h-6 w-6 rounded-full flex items-center justify-center text-xs shrink-0"
+                            className="h-6 w-6 rounded-full flex items-center justify-center shrink-0"
                             style={{ backgroundColor: cat.color + '20' }}
                           >
-                            {cat.icon}
+                            <CategoryIcon icon={cat.icon} color={cat.color} size={13} />
                           </span>
                           <span className="flex-1 text-left truncate">{cat.name}</span>
                           {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
@@ -660,7 +630,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
             const cat = categories.find(c => c.id === catId);
             return cat ? (
               <span key={catId} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
-                {cat.icon} {cat.name}
+                <CategoryIcon icon={cat.icon} color={cat.color} size={11} /> {cat.name}
                 <button onClick={() => toggleFilterCategory(catId)} className="hover:text-primary/70">
                   <X className="h-3 w-3" />
                 </button>
@@ -882,10 +852,10 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                           </div>
                         )}
                         <div
-                          className="h-10 w-10 rounded-full flex items-center justify-center text-lg shrink-0"
+                          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
                           style={{ backgroundColor: expense.category?.color + '20' }}
                         >
-                          {expense.category?.icon}
+                          <CategoryIcon icon={expense.category?.icon || 'Tag'} color={expense.category?.color || '#6366f1'} size={22} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{expense.category?.name}</p>
@@ -1046,8 +1016,8 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                   className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted"
                   disabled={isBulkPending}
                 >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full text-sm" style={{ backgroundColor: cat.color + '20' }}>
-                    {cat.icon}
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: cat.color + '20' }}>
+                    <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
                   </span>
                   <span className="font-medium text-sm">{cat.name}</span>
                   {!cat.is_system && <span className="text-xs text-muted-foreground ml-auto">Custom</span>}

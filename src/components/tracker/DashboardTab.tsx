@@ -2,12 +2,14 @@ import { Expense, Category } from '@/types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { subMonths, format, parse } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, ChevronRightIcon, GitCompareArrows, X } from 'lucide-react';
+import { BarChart2, ArrowUpRight, ArrowDownLeft, TrendingUp, TrendingDown, Minus, ChevronRightIcon, GitCompareArrows, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import TransactionTypeFilter from './TransactionTypeFilter';
+import CategoryIcon from '@/components/CategoryIcon';
+import MonthSelector from '@/components/MonthSelector';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
@@ -233,24 +235,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
     return (
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 mb-4">
-          <button
-            onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value); }}
-            disabled={month === 'all' || month === months[months.length - 1]?.value}
-            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-          ><ChevronLeft className="h-5 w-5" /></button>
-          <Select value={month} onValueChange={onMonthChange}>
-            <SelectTrigger className="flex-1 h-10">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <button
-            onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx > 1) onMonthChange(months[idx - 1].value); }}
-            disabled={month === 'all' || month === months[1]?.value}
-            className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-          ><ChevronRight className="h-5 w-5" /></button>
+          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
         </div>
         <div className="text-center py-16">
           <BarChart2 className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
@@ -301,7 +286,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
                   const pct = ((d.value / total) * 100).toFixed(1);
                   return (
                     <div className="bg-card border border-border rounded-lg p-2 shadow-lg text-xs">
-                      <p className="font-semibold">{d.icon} {d.name}</p>
+                      <p className="font-semibold flex items-center gap-1"><CategoryIcon icon={d.icon} color={d.color} size={12} /> {d.name}</p>
                       <p className="font-mono">{formatAmountShort(Math.round(d.value), trackerCurrency)} ({pct}%)</p>
                     </div>
                   );
@@ -324,7 +309,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
               return (
                 <div key={`${d.category?.id}-${i}`} className="flex items-center gap-2">
                   <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.category?.color }} />
-                  <span className="flex-1 truncate text-xs text-muted-foreground">{d.category?.icon} {d.category?.name}</span>
+                  <span className="flex-1 truncate text-xs text-muted-foreground flex items-center gap-1"><CategoryIcon icon={d.category?.icon || 'Tag'} color={d.category?.color} size={11} /> {d.category?.name}</span>
                   <span className="font-mono text-xs">{formatAmountShort(Math.round(d.total), trackerCurrency)}</span>
                   <span className="text-[10px] text-muted-foreground w-10 text-right">{pct}%</span>
                 </div>
@@ -343,24 +328,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
     <div className="px-4 py-3 space-y-4">
       {/* Month selector */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx >= 0 && idx < months.length - 1) onMonthChange(months[idx + 1].value); }}
-          disabled={month === 'all' || month === months[months.length - 1]?.value}
-          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-        ><ChevronLeft className="h-5 w-5" /></button>
-        <Select value={month} onValueChange={onMonthChange}>
-          <SelectTrigger className="flex-1 h-10">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {months.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <button
-          onClick={() => { if (month === 'all') return; const idx = months.findIndex(m => m.value === month); if (idx > 1) onMonthChange(months[idx - 1].value); }}
-          disabled={month === 'all' || month === months[1]?.value}
-          className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30"
-        ><ChevronRight className="h-5 w-5" /></button>
+        <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
       </div>
 
       {/* Type filter */}
@@ -463,8 +431,8 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
                 onClick={() => d.category?.id && handleCategoryClick(d.category.id, d.isDebit)}
               >
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full flex items-center justify-center text-lg flex-shrink-0" style={{ backgroundColor: (d.category?.color || '#ccc') + '20' }}>
-                    {d.category?.icon}
+                  <div className="h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: (d.category?.color || '#ccc') + '20' }}>
+                    <CategoryIcon icon={d.category?.icon || 'Tag'} color={d.category?.color || '#6366f1'} size={22} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -543,8 +511,8 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
               <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground flex-shrink-0">
                 {idx + 1}
               </div>
-              <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm flex-shrink-0" style={{ backgroundColor: ((e.category?.color || '#ccc') + '20') }}>
-                {e.category?.icon}
+              <div className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: ((e.category?.color || '#ccc') + '20') }}>
+                <CategoryIcon icon={e.category?.icon || 'Tag'} color={e.category?.color || '#6366f1'} size={18} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{e.description}</p>

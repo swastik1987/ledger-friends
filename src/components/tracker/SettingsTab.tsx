@@ -19,62 +19,12 @@ import { useExpenses } from '@/hooks/useExpenses';
 import * as XLSX from 'xlsx';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
+import { CATEGORY_ICON_MAP, ICON_GROUPS, ICON_LABELS, getSuggestedIcons } from '@/lib/phosphorIcons';
+import CategoryIcon from '@/components/CategoryIcon';
 
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
-const PRESET_EMOJIS = ['🏷️', '🎯', '🏋️', '🎮', '🐕', '🏡', '☕', '🎵', '📸', '🧹', '🚰', '🎓', '🍕', '🚌', '🏖️', '💳', '🔧', '📺', '🧸', '🎪', '💎', '🧊', '🌿', '🎨', '🍣', '☂️', '🏪', '🎂', '📮', '🔑'];
 
 const STORAGE_KEY = 'expensesync-type-filter';
-
-// Client-side keyword → emoji mapping for instant fallback suggestions
-const EMOJI_KEYWORD_MAP: Record<string, string[]> = {
-  food: ['🍽️', '🍕', '🍴'], dining: ['🍽️', '🍛', '🥘'], restaurant: ['🍽️', '🍕', '🥂'],
-  grocery: ['🛒', '🥦', '🧺'], groceries: ['🛒', '🥦', '🧺'], supermarket: ['🛒', '🏪', '🧺'],
-  transport: ['🚗', '🚌', '🚕'], travel: ['✈️', '🌍', '🧳'], flight: ['✈️', '🛫', '🛬'],
-  fuel: ['⛽', '🛢️', '🚗'], petrol: ['⛽', '🛢️', '🚗'], gas: ['⛽', '🛢️', '🔥'],
-  shop: ['🛍️', '🏬', '🛒'], shopping: ['🛍️', '🏬', '🛒'],
-  entertain: ['🎬', '🎮', '🎭'], movie: ['🎬', '🍿', '🎥'], game: ['🎮', '🕹️', '🎯'],
-  health: ['🏥', '💊', '🩺'], medical: ['🏥', '💊', '🩺'], doctor: ['👨‍⚕️', '🩺', '💊'],
-  utility: ['💡', '🔌', '🏠'], utilities: ['💡', '🔌', '🏠'], electric: ['💡', '⚡', '🔌'],
-  rent: ['🏠', '🏡', '🔑'], house: ['🏠', '🏡', '🔑'], home: ['🏠', '🏡', '🛋️'],
-  education: ['📚', '🎓', '✏️'], school: ['🏫', '📚', '🎓'], book: ['📚', '📖', '🎓'],
-  personal: ['💄', '💆', '🧴'], beauty: ['💄', '💅', '💆'], care: ['💆', '🧴', '💊'],
-  subscription: ['📱', '🔄', '💻'], subscriptions: ['📱', '🔄', '💻'],
-  emi: ['🏦', '💳', '📊'], loan: ['🏦', '💰', '📋'], insurance: ['🛡️', '📋', '🏦'],
-  invest: ['📈', '💹', '💰'], investment: ['📈', '💹', '💰'], stock: ['📈', '📊', '💹'],
-  gift: ['🎁', '🎀', '💝'], donation: ['🎁', '🤲', '💝'],
-  office: ['💼', '🏢', '💻'], business: ['💼', '📊', '🏢'], work: ['💼', '🏢', '💻'],
-  pet: ['🐾', '🐕', '🐱'], dog: ['🐕', '🐾', '🦮'], cat: ['🐱', '🐾', '😺'],
-  coffee: ['☕', '🫖', '🍵'], tea: ['🍵', '🫖', '☕'], drink: ['🍺', '🥤', '🍷'],
-  gym: ['🏋️', '💪', '🏃'], fitness: ['🏋️', '💪', '🏃'], sport: ['⚽', '🏃', '🏋️'],
-  music: ['🎵', '🎸', '🎧'], clothes: ['👕', '👗', '🧥'], clothing: ['👕', '👗', '🧥'],
-  phone: ['📱', '📞', '💻'], internet: ['🌐', '📡', '💻'], wifi: ['📡', '🌐', '💻'],
-  baby: ['👶', '🍼', '🧸'], kid: ['👶', '🧸', '🎠'], child: ['👶', '🧸', '🎠'],
-  car: ['🚗', '🔧', '⛽'], bike: ['🚲', '🏍️', '🚴'], taxi: ['🚕', '🚗', '📱'],
-  salary: ['💰', '💵', '🏦'], income: ['💰', '📈', '💵'], refund: ['🔄', '💸', '💰'],
-  cashback: ['🎁', '💸', '💰'], reward: ['🎁', '🏆', '⭐'],
-  parking: ['🅿️', '🚗', '🏢'], toll: ['🛣️', '🚗', '💳'],
-  water: ['💧', '🚰', '🌊'], laundry: ['🧺', '👕', '🧼'], clean: ['🧹', '🧽', '✨'],
-  vacation: ['🏖️', '✈️', '🌴'], holiday: ['🏖️', '🌴', '✈️'],
-  charity: ['🤲', '❤️', '🎁'], temple: ['🛕', '🙏', '⛩️'], church: ['⛪', '🙏', '✝️'],
-  tax: ['📋', '🏛️', '💰'], saving: ['🏦', '💰', '🐖'], savings: ['🏦', '💰', '🐖'],
-  maintenance: ['🔧', '🏠', '🛠️'], repair: ['🔧', '🛠️', '🏠'],
-};
-
-function getClientEmojiSuggestions(name: string): string[] {
-  const lower = name.toLowerCase().trim();
-  // Try exact keyword match first
-  for (const [keyword, emojis] of Object.entries(EMOJI_KEYWORD_MAP)) {
-    if (lower.includes(keyword)) return emojis;
-  }
-  // Try matching each word
-  const words = lower.split(/\s+/);
-  for (const word of words) {
-    for (const [keyword, emojis] of Object.entries(EMOJI_KEYWORD_MAP)) {
-      if (keyword.includes(word) || word.includes(keyword)) return emojis;
-    }
-  }
-  return ['🏷️', '📌', '📋']; // generic fallback
-}
 
 function NudgeInviteMember() {
   const { show, dismiss } = useNudge('settings-invite-member');
@@ -162,12 +112,14 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const [showCategorySheet, setShowCategorySheet] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null); // null = creating new
   const [catName, setCatName] = useState('');
-  const [catIcon, setCatIcon] = useState('🏷️');
+  const [catIcon, setCatIcon] = useState('Tag');
   const [catColor, setCatColor] = useState('#FF6B6B');
-  const [aiEmojis, setAiEmojis] = useState<string[]>([]);
+  const [aiIcons, setAiIcons] = useState<string[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
-  const [showAllEmojis, setShowAllEmojis] = useState(false);
+  const [showIconGrid, setShowIconGrid] = useState(false);
+  const [iconSearch, setIconSearch] = useState('');
   const [showSystemCats, setShowSystemCats] = useState(false);
+  const [bulkRegenerating, setBulkRegenerating] = useState(false);
   const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Category delete flow state
@@ -211,32 +163,36 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
     setInviteEmail('');
   };
 
-  // ─── AI Emoji Suggestions ───
-  const fetchAiEmojis = useCallback(async (name: string) => {
+  // ─── AI Icon Suggestions ───
+  const fetchAiIcons = useCallback(async (name: string) => {
     if (!name.trim() || name.trim().length < 2) {
-      setAiEmojis([]);
+      setAiIcons([]);
       return;
     }
 
-    // Step 1: Instantly show client-side suggestions
-    const clientSuggestions = getClientEmojiSuggestions(name);
-    setAiEmojis(clientSuggestions);
-    setCatIcon(clientSuggestions[0]); // auto-select the first suggestion
+    // Step 1: Instantly show client-side keyword suggestions
+    const clientSuggestions = getSuggestedIcons(name);
+    setAiIcons(clientSuggestions);
+    setCatIcon(clientSuggestions[0]);
 
-    // Step 2: Try upgrading with AI suggestions from edge function
+    // Step 2: Upgrade with Gemini suggestions
     setAiLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('suggest-emojis', {
         body: { categoryName: name.trim() },
       });
       if (error) throw error;
-      const emojis = data?.emojis;
-      if (Array.isArray(emojis) && emojis.length >= 1) {
-        setAiEmojis(emojis.slice(0, 3));
-        setCatIcon(emojis[0]); // auto-select best AI suggestion
+      const icons = data?.icons ?? data?.emojis; // support both key names
+      if (Array.isArray(icons) && icons.length >= 1) {
+        // Only keep valid Phosphor icon names
+        const valid = icons.filter((v: unknown) => typeof v === 'string' && v in CATEGORY_ICON_MAP).slice(0, 3);
+        if (valid.length > 0) {
+          setAiIcons(valid);
+          setCatIcon(valid[0]);
+        }
       }
     } catch {
-      // Edge function unavailable — keep client-side suggestions (already set above)
+      // Edge function unavailable — keep client-side suggestions
     } finally {
       setAiLoading(false);
     }
@@ -244,19 +200,43 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
   const handleCatNameChange = (value: string) => {
     setCatName(value);
-    // Debounce AI call — 600ms after user stops typing
     if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
-    aiDebounceRef.current = setTimeout(() => fetchAiEmojis(value), 600);
+    aiDebounceRef.current = setTimeout(() => fetchAiIcons(value), 600);
+  };
+
+  // ─── Bulk regenerate icons for all custom categories ───
+  const handleBulkRegenerateIcons = async () => {
+    if (customCategories.length === 0) {
+      toast.error('No custom categories to update');
+      return;
+    }
+    setBulkRegenerating(true);
+    try {
+      let updated = 0;
+      for (const cat of customCategories) {
+        const best = getSuggestedIcons(cat.name)[0];
+        if (best && best !== cat.icon) {
+          await updateCategory.mutateAsync({ id: cat.id, name: cat.name, icon: best, color: cat.color });
+          updated++;
+        }
+      }
+      toast.success(updated > 0 ? `Updated ${updated} category icon${updated !== 1 ? 's' : ''}` : 'All icons are already up to date');
+    } catch {
+      toast.error('Failed to regenerate icons');
+    } finally {
+      setBulkRegenerating(false);
+    }
   };
 
   // ─── Open sheet for Create ───
   const openCreateSheet = () => {
     setEditingCategory(null);
     setCatName('');
-    setCatIcon('🏷️');
+    setCatIcon('Tag');
     setCatColor('#FF6B6B');
-    setAiEmojis([]);
-    setShowAllEmojis(false);
+    setAiIcons([]);
+    setShowIconGrid(false);
+    setIconSearch('');
     setShowCategorySheet(true);
   };
 
@@ -266,8 +246,9 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
     setCatName(cat.name);
     setCatIcon(cat.icon);
     setCatColor(cat.color);
-    setAiEmojis([]);
-    setShowAllEmojis(false);
+    setAiIcons([]);
+    setShowIconGrid(false);
+    setIconSearch('');
     setShowCategorySheet(true);
   };
 
@@ -291,7 +272,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
     setShowCategorySheet(false);
     setCatName('');
-    setAiEmojis([]);
+    setAiIcons([]);
   };
 
   const handleDeleteTracker = async () => {
@@ -518,11 +499,21 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
         {/* Custom categories */}
         {customCategories.length > 0 && (
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Custom</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Custom</p>
+              <button
+                onClick={handleBulkRegenerateIcons}
+                disabled={bulkRegenerating}
+                className="flex items-center gap-1 text-[11px] text-primary font-medium hover:underline disabled:opacity-50"
+              >
+                {bulkRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                Auto-assign Icons
+              </button>
+            </div>
             {customCategories.map(cat => (
               <div key={cat.id} className="flex items-center gap-3 py-1.5">
-                <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm shrink-0" style={{ backgroundColor: cat.color + '20' }}>
-                  {cat.icon}
+                <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                  <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
                 </div>
                 <span className="flex-1 text-sm truncate">{cat.name}</span>
                 <button onClick={() => openEditSheet(cat)} className="p-1 text-muted-foreground hover:text-foreground">
@@ -547,8 +538,8 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
           </button>
           {showSystemCats && systemCategories.map(cat => (
             <div key={cat.id} className="flex items-center gap-3 py-1.5">
-              <div className="h-8 w-8 rounded-full flex items-center justify-center text-sm shrink-0" style={{ backgroundColor: cat.color + '20' }}>
-                {cat.icon}
+              <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
               </div>
               <span className="flex-1 text-sm truncate">{cat.name}</span>
               <button onClick={() => openEditSheet(cat)} className="p-1 text-muted-foreground hover:text-foreground">
@@ -676,8 +667,8 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                         reassignCategoryId === cat.id ? 'bg-primary/10 ring-1 ring-primary' : 'hover:bg-muted'
                       }`}
                     >
-                      <span className="h-7 w-7 rounded-full flex items-center justify-center text-xs shrink-0" style={{ backgroundColor: cat.color + '20' }}>
-                        {cat.icon}
+                      <span className="h-7 w-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: cat.color + '20' }}>
+                        <CategoryIcon icon={cat.icon} color={cat.color} size={15} />
                       </span>
                       <span className="flex-1 text-left truncate">{cat.name}</span>
                       {!cat.is_system && <span className="text-[10px] text-muted-foreground">Custom</span>}
@@ -766,64 +757,92 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
               />
             </div>
 
-            {/* AI Emoji Suggestions */}
+            {/* AI Icon Suggestions */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
                 Suggested Icons
                 {aiLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </Label>
-              {aiEmojis.length > 0 ? (
+              {aiIcons.length > 0 ? (
                 <div className="flex gap-2">
-                  {aiEmojis.map((emoji, i) => (
+                  {aiIcons.map((iconName) => (
                     <button
-                      key={`ai-${i}-${emoji}`}
-                      onClick={() => setCatIcon(emoji)}
-                      className={`h-14 w-14 rounded-xl text-2xl flex items-center justify-center transition-all ${
-                        catIcon === emoji
+                      key={iconName}
+                      onClick={() => setCatIcon(iconName)}
+                      className={`h-14 w-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-all ${
+                        catIcon === iconName
                           ? 'bg-primary/10 ring-2 ring-primary scale-105'
                           : 'bg-muted hover:bg-muted/80'
                       }`}
                     >
-                      {emoji}
+                      <CategoryIcon icon={iconName} color={catColor} size={24} />
+                      <span className="text-[9px] text-muted-foreground leading-none truncate w-full text-center px-0.5">{iconName}</span>
                     </button>
                   ))}
                 </div>
               ) : catName.trim().length >= 2 ? (
                 <p className="text-xs text-muted-foreground py-2">Generating suggestions...</p>
               ) : (
-                <p className="text-xs text-muted-foreground py-2">Type at least 2 characters for suggestions</p>
+                <p className="text-xs text-muted-foreground py-2">Type a name to get icon suggestions</p>
               )}
             </div>
 
-            {/* Manual emoji grid (collapsible) */}
+            {/* Browse all icons (collapsible, searchable) */}
             <div className="space-y-1.5">
               <button
-                onClick={() => setShowAllEmojis(!showAllEmojis)}
+                onClick={() => setShowIconGrid(!showIconGrid)}
                 className="text-xs text-primary font-medium flex items-center gap-1"
               >
-                {showAllEmojis ? 'Hide' : 'Show'} all emojis
-                <span className="text-[10px]">{showAllEmojis ? '▲' : '▼'}</span>
+                {showIconGrid ? 'Hide' : 'Browse'} all icons
+                <span className="text-[10px]">{showIconGrid ? '▲' : '▼'}</span>
               </button>
-              {showAllEmojis && (
-                <div className="grid grid-cols-6 gap-2 pt-1">
-                  {PRESET_EMOJIS.map(e => (
-                    <button
-                      key={e}
-                      onClick={() => setCatIcon(e)}
-                      className={`h-10 w-full rounded-lg text-lg ${catIcon === e ? 'bg-primary/10 ring-2 ring-primary' : 'bg-muted'}`}
-                    >
-                      {e}
-                    </button>
-                  ))}
+              {showIconGrid && (
+                <div className="space-y-3 pt-1">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      value={iconSearch}
+                      onChange={e => setIconSearch(e.target.value)}
+                      placeholder="Search icons..."
+                      className="pl-8 h-9 text-sm"
+                    />
+                  </div>
+                  {(() => {
+                    const q = iconSearch.toLowerCase().trim();
+                    const groups = q
+                      ? [{ label: 'Results', icons: Object.keys(CATEGORY_ICON_MAP).filter(name =>
+                          name.toLowerCase().includes(q) || (ICON_LABELS[name] || '').toLowerCase().includes(q)
+                        )}]
+                      : ICON_GROUPS;
+                    return groups.map(group => group.icons.length === 0 ? null : (
+                      <div key={group.label}>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {group.icons.map(iconName => (
+                            <button
+                              key={iconName}
+                              onClick={() => setCatIcon(iconName)}
+                              title={iconName}
+                              className={`h-10 w-full rounded-lg flex items-center justify-center transition-all ${
+                                catIcon === iconName ? 'bg-primary/10 ring-2 ring-primary' : 'bg-muted hover:bg-muted/80'
+                              }`}
+                            >
+                              <CategoryIcon icon={iconName} color={catIcon === iconName ? catColor : '#94a3b8'} size={20} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
                 </div>
               )}
             </div>
 
             {/* Selected icon preview */}
             <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-3">
-              <div className="h-10 w-10 rounded-full flex items-center justify-center text-xl" style={{ backgroundColor: catColor + '20' }}>
-                {catIcon}
+              <div className="h-10 w-10 rounded-full flex items-center justify-center" style={{ backgroundColor: catColor + '20' }}>
+                <CategoryIcon icon={catIcon} color={catColor} size={22} />
               </div>
               <div>
                 <p className="text-sm font-medium">{catName || 'Category Name'}</p>
