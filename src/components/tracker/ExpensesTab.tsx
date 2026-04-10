@@ -1,7 +1,7 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, Download, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
+import { Receipt, ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,14 +13,14 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import TransactionTypeFilter from './TransactionTypeFilter';
 import NetBalanceBanner from './NetBalanceBanner';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
-import { getCurrency, formatAmountShort } from '@/lib/currencies';
+import { formatAmountShort } from '@/lib/currencies';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -129,7 +129,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const bulkDeleteExpenses = useBulkDeleteExpenses();
   const bulkMoveExpenses = useBulkMoveExpenses();
   const { data: allTrackers } = useTrackers();
-  const [showExport, setShowExport] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Multi-select state
@@ -373,34 +372,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
   const otherTrackers = (allTrackers || []).filter(t => t.id !== trackerId);
 
-  const handleExport = () => {
-    const rows = expenses.map(e => ({
-      Date: e.date,
-      Type: e.is_transfer ? 'Transfer' : e.is_debit ? 'Debit' : 'Credit',
-      Description: e.description,
-      Merchant: e.merchant_name || '',
-      Category: e.category?.name || '',
-      [`Amount (${getCurrency(trackerCurrency).symbol})`]: e.amount,
-      'Payment Method': e.payment_method || '',
-      'Bank': e.bank_name || '',
-      Notes: e.notes || '',
-      Tags: e.tags?.join(', ') || '',
-      'Added By': e.created_by_profile?.full_name || e.created_by_name || 'Deleted User',
-      'Reference No.': e.reference_number || '',
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
-      { wch: 15 }, { wch: 16 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
-    const safeName = trackerId.slice(0, 8);
-    XLSX.writeFile(wb, `ExpenseSync_${safeName}_${month}.xlsx`);
-    setShowExport(false);
-  };
-
   const [markingTransfer, setMarkingTransfer] = useState(false);
 
   // ── Cross-match transfer detection (on-demand, persistent dismissals) ──
@@ -540,9 +511,24 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
           >
             <ChevronRight className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowExport(true)} className="p-2 text-muted-foreground hover:text-foreground">
-            <Download className="h-5 w-5" />
-          </button>
+          {/* Find Self-Transfers button */}
+          {!showTransferScan && expenses.length > 0 && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleFindTransfers}
+                    className="p-2 text-muted-foreground hover:text-amber-600 transition-colors"
+                  >
+                    <Repeat className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>Find Self-Transfers</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {/* Sort button */}
           <Popover open={sortOpen} onOpenChange={setSortOpen}>
             <PopoverTrigger asChild>
@@ -742,17 +728,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
             </>
           )}
         </div>
-      )}
-
-      {/* Find Transfers button — on-demand scan trigger */}
-      {!isLoading && !isSelecting && !showTransferScan && expenses.length > 0 && (
-        <button
-          onClick={handleFindTransfers}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-amber-200 bg-amber-50/50 text-amber-700 text-sm font-medium hover:bg-amber-100 transition-colors dark:bg-amber-950/10 dark:border-amber-800 dark:text-amber-400"
-        >
-          <Repeat className="h-4 w-4" />
-          Find Potential Transfers
-        </button>
       )}
 
       {/* Cross-match transfer detection results */}
@@ -1133,22 +1108,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         </SheetContent>
       </Sheet>
 
-      {/* Export Sheet */}
-      <Sheet open={showExport} onOpenChange={setShowExport}>
-        <SheetContent side="bottom" className="rounded-t-2xl">
-          <SheetHeader>
-            <SheetTitle>Export Transactions</SheetTitle>
-          </SheetHeader>
-          <div className="py-4 space-y-4">
-            <p className="text-sm text-muted-foreground">Period: {monthLabel}</p>
-            <div className="space-y-2 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked readOnly className="rounded" /> Include all columns</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked readOnly className="rounded" /> Include member names</label>
-            </div>
-            <Button onClick={handleExport} className="w-full h-11">Download Excel File</Button>
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

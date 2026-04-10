@@ -11,10 +11,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown, Search, Tag } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Users, Loader2, Sparkles, ChevronDown, Search, Tag, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { CURRENCIES, getCurrency } from '@/lib/currencies';
+import { useExpenses } from '@/hooks/useExpenses';
+import * as XLSX from 'xlsx';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 
@@ -102,6 +104,48 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const deleteCategory = useDeleteCategory(trackerId);
 
   const convertCurrency = useConvertTrackerCurrency();
+  const { data: allExpenses = [], isLoading: isExportLoading } = useExpenses(trackerId, 'all');
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportAll = () => {
+    if (allExpenses.length === 0) {
+      toast.error('No transactions to export');
+      return;
+    }
+    setExporting(true);
+    try {
+      const currencySymbol = getCurrency(tracker.currency).symbol;
+      const rows = allExpenses.map(e => ({
+        Date: e.date,
+        Type: e.is_transfer ? 'Transfer' : e.is_debit ? 'Debit' : 'Credit',
+        Description: e.description,
+        Merchant: e.merchant_name || '',
+        Category: e.category?.name || '',
+        [`Amount (${currencySymbol})`]: e.amount,
+        'Payment Method': e.payment_method || '',
+        'Bank': e.bank_name || '',
+        Notes: e.notes || '',
+        Tags: e.tags?.join(', ') || '',
+        'Added By': e.created_by_profile?.full_name || e.created_by_name || 'Deleted User',
+        'Reference No.': e.reference_number || '',
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
+        { wch: 15 }, { wch: 16 }, { wch: 25 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+      const safeName = tracker.name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+      XLSX.writeFile(wb, `ExpenseSync_${safeName}_All.xlsx`);
+      toast.success(`Exported ${allExpenses.length} transactions`);
+    } catch {
+      toast.error('Failed to export');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(tracker.name);
@@ -384,6 +428,23 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Export Transactions */}
+      <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
+        <h3 className="font-semibold text-sm">Export Transactions</h3>
+        <p className="text-sm text-muted-foreground">
+          Download all transactions across all months as an Excel file.
+        </p>
+        <Button
+          variant="outline"
+          onClick={handleExportAll}
+          disabled={exporting || isExportLoading || allExpenses.length === 0}
+          className="w-full h-10 gap-2"
+        >
+          {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {isExportLoading ? 'Loading transactions...' : exporting ? 'Exporting...' : `Export ${allExpenses.length} Transaction${allExpenses.length !== 1 ? 's' : ''}`}
+        </Button>
       </div>
 
       {/* Members */}
