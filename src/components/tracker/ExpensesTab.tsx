@@ -480,7 +480,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       {/* Month selector */}
       {!isSelecting && (
         <div className="flex items-center gap-2">
-          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
+          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
           {/* Find Self-Transfers button */}
           {!showTransferScan && expenses.length > 0 && (
             <TooltipProvider delayDuration={300}>

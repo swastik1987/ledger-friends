@@ -13,9 +13,10 @@ interface MonthSelectorProps {
   month: string;
   months: { value: string; label: string }[];
   onMonthChange: (m: string) => void;
+  className?: string;
 }
 
-export default function MonthSelector({ month, months, onMonthChange }: MonthSelectorProps) {
+export default function MonthSelector({ month, months, onMonthChange, className }: MonthSelectorProps) {
   const [open, setOpen] = useState(false);
   const currentLabel = months.find(m => m.value === month)?.label ?? month;
   const currentIdx = months.findIndex(m => m.value === month);
@@ -37,12 +38,12 @@ export default function MonthSelector({ month, months, onMonthChange }: MonthSel
   const atNewest = month === 'all' || currentIdx === 1;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className={`flex items-center gap-1 ${className ?? ''}`}>
       {/* ← older */}
       <button
         onClick={goPrev}
         disabled={atOldest}
-        className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
+        className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
@@ -50,7 +51,7 @@ export default function MonthSelector({ month, months, onMonthChange }: MonthSel
       {/* Calendar chip — opens month list */}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-full text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm">
+          <button className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-full text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm min-w-0">
             <CalendarDays className="h-3.5 w-3.5" />
             <span>{currentLabel}</span>
           </button>
@@ -79,7 +80,7 @@ export default function MonthSelector({ month, months, onMonthChange }: MonthSel
       <button
         onClick={goNext}
         disabled={atNewest}
-        className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
+        className="p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30 shrink-0"
       >
         <ChevronRight className="h-4 w-4" />
       </button>

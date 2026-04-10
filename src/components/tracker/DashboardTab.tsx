@@ -235,7 +235,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
     return (
       <div className="px-4 py-3">
         <div className="flex items-center gap-2 mb-4">
-          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
+          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
         </div>
         <div className="text-center py-16">
           <BarChart2 className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
@@ -328,7 +328,7 @@ export default function DashboardTab({ trackerId, trackerCurrency, expenses, cat
     <div className="px-4 py-3 space-y-4">
       {/* Month selector */}
       <div className="flex items-center gap-2">
-        <MonthSelector month={month} months={months} onMonthChange={onMonthChange} />
+        <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
       </div>
 
       {/* Type filter */}
