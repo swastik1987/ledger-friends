@@ -85,8 +85,10 @@ serve(async (req) => {
 
     if (!geminiRes.ok) {
       const err = await geminiRes.text();
-      return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), {
-        status: 502,
+      console.error('Gemini API error:', geminiRes.status, err);
+      // Return safe defaults instead of failing the client
+      const defaults = ['Tag', 'Wallet', 'Star'];
+      return new Response(JSON.stringify({ icons: defaults, emojis: defaults, fallback: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
