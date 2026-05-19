@@ -16,6 +16,7 @@ import { DraftExpense, Category } from '@/types';
 import { getCurrency, formatAmountShort } from '@/lib/currencies';
 import { fetchLearnedMappings, findLearnedCategory, recordCategoryLearning } from '@/lib/categoryLearning';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
+import { findMerchantCategory } from '@/lib/merchantDictionary';
 import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
 import { useNudge } from '@/hooks/useNudge';
@@ -125,6 +126,60 @@ function parseDateValue(val: string): string {
 
 // Pick a random preset color for new categories
 const PRESET_COLORS = ['#FF6B6B', '#51CF66', '#339AF0', '#FF922B', '#CC5DE8', '#F06595', '#20C997', '#74C0FC', '#FFD43B', '#748FFC', '#A9E34B', '#FFA94D'];
+
+// ── Credit / debit category split. Used to (a) tell the AI which categories are valid for
+//    credits vs debits, and (b) post-validate the AI's category choice client-side. ──
+const SYSTEM_CREDIT_CATEGORY_NAMES = [
+  'Salary / Income',
+  'Refund',
+  'Reimbursement',
+  'Cashback / Reward',
+  'Interest Earned',
+  'Other Income',
+];
+
+function splitCategoriesByDirection(cats: Category[]) {
+  const credit: string[] = [];
+  const debit: string[] = [];
+  for (const c of cats) {
+    if (SYSTEM_CREDIT_CATEGORY_NAMES.includes(c.name)) credit.push(c.name);
+    else debit.push(c.name);
+  }
+  return { credit, debit };
+}
+
+// ── Reference-number normalisation: pull a long alphanumeric token out of the description ──
+const REF_TOKEN_RE = /\b([A-Z0-9]{10,})\b/;
+function extractReferenceNumber(rawDesc: string): string | null {
+  const m = rawDesc.match(REF_TOKEN_RE);
+  return m ? m[1] : null;
+}
+
+// ── Balance reconciliation: if balance and is_debit don't agree across consecutive rows,
+//    flag the row for review. Returns the set of temp_ids that failed reconciliation. ──
+function findBalanceMismatches<T extends { amount: number; is_debit: boolean; balance?: number | null }>(
+  rows: T[],
+): Set<number> {
+  const flags = new Set<number>();
+  // Compare each row against the next row with a balance.
+  let prevBalance: number | null = null;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const bal = typeof r.balance === 'number' && !isNaN(r.balance) ? r.balance : null;
+    if (bal === null) { continue; }
+    if (prevBalance !== null) {
+      const delta = bal - prevBalance;
+      // Expected delta: +amount for credit, -amount for debit
+      const expected = r.is_debit ? -r.amount : r.amount;
+      // Allow ±2 unit tolerance for rounding (some banks store paise rounded to whole rupees)
+      if (Math.abs(delta - expected) > 2) {
+        flags.add(i);
+      }
+    }
+    prevBalance = bal;
+  }
+  return flags;
+}
 
 /**
  * Find the best matching system/tracker category by name.
@@ -538,6 +593,7 @@ export default function UploadStatement() {
 
     try {
       let formatHint: string | null = null;
+      let headerSnippet: string | null = null; // First-chunk header lines, injected into chunks 2+
       const ext = file.name.split('.').pop()?.toLowerCase();
       const arrayBuffer = await file.arrayBuffer();
 
@@ -545,7 +601,7 @@ export default function UploadStatement() {
       const PAGES_PER_CHUNK = 2;
       const ROWS_PER_CHUNK = 40;
 
-      // ── Stage 1: Extract text (0% → 15%) ──
+      // ── Stage 1: Extract text (0% → 12%) ──
       if (ext === 'csv') {
         const text = new TextDecoder().decode(arrayBuffer);
         if (!text.trim()) throw new EmptyFileError();
@@ -553,6 +609,8 @@ export default function UploadStatement() {
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         const rows = result.data as Record<string, unknown>[];
         if (rows.length === 0) throw new EmptyFileError();
+        // Header snippet for CSV = the CSV header row (Papa stores it in meta.fields)
+        headerSnippet = result.meta?.fields ? result.meta.fields.join(',') : null;
         for (let i = 0; i < rows.length; i += ROWS_PER_CHUNK) {
           textChunks.push(JSON.stringify(rows.slice(i, i + ROWS_PER_CHUNK)));
         }
@@ -569,6 +627,7 @@ export default function UploadStatement() {
         formatHint = detectFormatHint(csvOutput);
         const lines = csvOutput.split('\n').filter((l: string) => l.trim());
         const header = lines[0] || '';
+        headerSnippet = header;
         const dataLines = lines.slice(1);
         for (let i = 0; i < dataLines.length; i += ROWS_PER_CHUNK) {
           textChunks.push([header, ...dataLines.slice(i, i + ROWS_PER_CHUNK)].join('\n'));
@@ -602,8 +661,11 @@ export default function UploadStatement() {
         const allText = pages.join(' ').trim();
         if (!allText) throw new EmptyFileError('This PDF has no extractable text. It may be a scanned image. Try a CSV or Excel file instead.');
 
-        // Extract format hints from PDF text (Fix 4: was missing for PDFs)
         formatHint = detectPdfFormatHint(allText);
+
+        // Header snippet for PDFs = first ~800 chars of the first page (catches bank header
+        // and column labels without bloating subsequent chunks)
+        headerSnippet = pages[0] ? pages[0].slice(0, 800) : null;
 
         for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
           textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
@@ -611,12 +673,29 @@ export default function UploadStatement() {
       }
 
       if (textChunks.length === 0) throw new EmptyFileError();
-      setProgress(15);
+      setProgress(12);
 
-      // ── Stage 2: AI parsing with learned context (15% → 80%) ──
+      // ── Stage 2a: Metadata extraction (cheap first pass — 12% → 18%) ──
+      setProgressMessage('🔍 Identifying statement format...');
+      let statementMetadata: any = null;
+      try {
+        const metaSample = (headerSnippet || '') + '\n\n' + (textChunks[0] || '').slice(0, 4000);
+        const { data: metaData } = await supabase.functions.invoke('parse-statement', {
+          body: { mode: 'metadata', extractedText: metaSample },
+        });
+        if (metaData?.metadata) {
+          statementMetadata = metaData.metadata;
+        }
+      } catch {
+        // Metadata pass is best-effort — fall through and let per-chunk extraction handle it
+      }
+      if (signal.aborted) return;
+      setProgress(18);
+
+      // ── Stage 2b: AI transaction parsing (18% → 80%) ──
       setProgressMessage('🧠 AI is categorising your transactions...');
       const allTransactions: any[] = [];
-      const chunkProgressRange = 65; // 15% to 80%
+      const chunkProgressRange = 62; // 18% → 80%
 
       // Fetch learned mappings to pass as context hints to Gemini
       const learnedForAI = await fetchLearnedMappings(2);
@@ -626,11 +705,21 @@ export default function UploadStatement() {
         count: m.applied_count,
       })).filter(m => m.category !== 'Unknown');
 
+      // Build allowed-category lists from the tracker's full category set (system + custom).
+      // Custom categories live with the debits by default unless their name matches a known
+      // credit category. The AI will be told to pick from these lists exactly.
+      const { debit: allowedDebitCategories, credit: allowedCreditCategories } =
+        splitCategoriesByDirection(categories || []);
+
       for (let ci = 0; ci < textChunks.length; ci++) {
-        // Check if user cancelled before each API call
         if (signal.aborted) return;
 
-        const chunk = textChunks[ci];
+        // Header injection: prepend the first chunk's headers to every subsequent chunk
+        // so the AI always has bank/column context, not just the raw row text.
+        const chunk = ci === 0 || !headerSnippet
+          ? textChunks[ci]
+          : `[STATEMENT HEADER FOR CONTEXT — repeated from page 1]\n${headerSnippet}\n[END HEADER]\n\n${textChunks[ci]}`;
+
         let data: any;
         let error: any;
         try {
@@ -639,6 +728,9 @@ export default function UploadStatement() {
               extractedText: chunk,
               formatHint,
               learnedMappings: learnedMappingsForPrompt.length > 0 ? learnedMappingsForPrompt : undefined,
+              allowedDebitCategories,
+              allowedCreditCategories,
+              statementMetadata,
             },
           });
           data = result.data;
@@ -651,7 +743,7 @@ export default function UploadStatement() {
         if (error) throw new ParseServiceError();
         const txns = data?.transactions || [];
         allTransactions.push(...txns);
-        setProgress(15 + Math.round(((ci + 1) / textChunks.length) * chunkProgressRange));
+        setProgress(18 + Math.round(((ci + 1) / textChunks.length) * chunkProgressRange));
       }
 
       if (allTransactions.length === 0) throw new NoTransactionsError();
@@ -669,92 +761,111 @@ export default function UploadStatement() {
       setProgress(85);
       setProgressMessage('🔍 Checking for duplicates...');
 
+      // First pass: build drafts with simplified is_debit parsing (schema guarantees boolean),
+      // raw_amount_text sign override, unconditional credit keyword override, merchant dictionary
+      // lookup, learned-mapping override, Miscellaneous flagging, and reference normalisation.
       const draftExpenses: DraftExpense[] = transactions.map((t: any, i: number) => {
         const aiMatchedCat = categories?.find(c => c.name === t.suggested_category || c.name === t.category);
 
-        // ── Robust is_debit parsing ──
-        let isDebit = true;
+        // ── is_debit parsing (schema enforces boolean, but keep a string fallback) ──
+        let isDebit: boolean;
         let debitUncertain = false;
-        const rawIsDebit = t.is_debit;
-
-        if (rawIsDebit === true || rawIsDebit === 'true' || rawIsDebit === 1 || rawIsDebit === '1') {
-          isDebit = true;
-        } else if (rawIsDebit === false || rawIsDebit === 'false' || rawIsDebit === 0 || rawIsDebit === '0') {
-          isDebit = false;
-        } else if (typeof rawIsDebit === 'string') {
-          const v = rawIsDebit.toLowerCase().replace(/[.\s]/g, '').trim();
-          if (['yes', 'debit', 'dr', 'withdrawal', 'expense', 'purchase', 'out', 'd'].includes(v)) {
-            isDebit = true;
-          } else if (['no', 'credit', 'cr', 'deposit', 'income', 'refund', 'receipt', 'in', 'c'].includes(v)) {
-            isDebit = false;
-          } else {
-            isDebit = true;
-            debitUncertain = true;
-          }
+        if (typeof t.is_debit === 'boolean') {
+          isDebit = t.is_debit;
+        } else if (typeof t.is_debit === 'string') {
+          const v = t.is_debit.toLowerCase().replace(/[.\s]/g, '').trim();
+          if (['true', 'yes', 'debit', 'dr', 'd'].includes(v)) isDebit = true;
+          else if (['false', 'no', 'credit', 'cr', 'c'].includes(v)) isDebit = false;
+          else { isDebit = true; debitUncertain = true; }
         } else {
           isDebit = true;
           debitUncertain = true;
         }
 
-        // ── Amount-sign cross-validation ──
-        // If original amount has a sign, use it to validate/override AI's is_debit.
-        // Handles formats: -500, +500, "+ C 299.00", "- ₹500", negative numbers
-        const rawAmount = t.amount;
-        const rawAmountStr = String(rawAmount ?? '').trim();
-        // Also check raw_description for "+" prefix before amount (HDFC credit card style)
+        // ── raw_amount_text sign / Dr-Cr cross-validation ──
+        // The AI now returns the original amount cell text (raw_amount_text), so sign-based
+        // hints have real signal instead of trying to read the stripped numeric amount.
+        const rawAmountText = String(t.raw_amount_text || '').trim();
+        if (rawAmountText) {
+          if (/^\s*\+/.test(rawAmountText) || /\b(cr|cr\.)\s*$/i.test(rawAmountText)) {
+            isDebit = false; debitUncertain = false;
+          } else if (/^\s*-/.test(rawAmountText) || /\b(dr|dr\.)\s*$/i.test(rawAmountText)) {
+            isDebit = true; debitUncertain = false;
+          }
+        }
+
+        // HDFC-style "+ C amount" in raw description
         const rawDesc = String(t.raw_description || '').trim();
-
-        if (typeof rawAmount === 'number' && rawAmount < 0) {
-          isDebit = true;
-          debitUncertain = false;
-        } else if (/^\+\s*[C₹$€£¥]?\s*[\d,]/.test(rawAmountStr)) {
-          // Amount string starts with + (possibly with currency marker): credit
-          isDebit = false;
-          debitUncertain = false;
-        } else if (/^-\s*[C₹$€£¥]?\s*[\d,]/.test(rawAmountStr)) {
-          // Amount string starts with - (possibly with currency marker): debit
-          isDebit = true;
-          debitUncertain = false;
-        }
-
-        // Additional check: if raw_description contains "+  C amount" pattern (HDFC style)
         if (/\+\s+C\s*[\d,]+\.\d{2}/.test(rawDesc)) {
-          isDebit = false;
-          debitUncertain = false;
+          isDebit = false; debitUncertain = false;
         }
 
-        // Credit card payment keywords override
+        // ── Unconditional strong-credit keyword override ──
+        // These keywords are deterministic credit signals on bank/CC statements. Apply
+        // regardless of AI confidence — false-positive rate is near zero.
         const descLower = (t.description || '').toLowerCase();
-        if (/\b(autopay|payment.*thank|refund|reversal|cashback)\b/i.test(descLower) && debitUncertain) {
-          isDebit = false;
-          debitUncertain = false;
+        const rawLower = rawDesc.toLowerCase();
+        const STRONG_CREDIT_RE = /\b(refund|reversal|cashback|payment\s*(received|credited|thank)|salary|reimbursement|interest\s*(credit|earned|paid))\b/i;
+        if (STRONG_CREDIT_RE.test(descLower) || STRONG_CREDIT_RE.test(rawLower)) {
+          isDebit = false; debitUncertain = false;
+        }
+        // AUTOPAY on credit-card statements is a card-bill payment received — credit on the CC side.
+        if (statementMetadata?.statement_type === 'credit_card' && /\bautopay\b/i.test(descLower)) {
+          isDebit = false; debitUncertain = false;
         }
 
-        // Check learned mappings — these override AI suggestions when found
-        const learned = findLearnedCategory(
-          t.description || '',
-          t.merchant_name,
-          learnedMappings,
-        );
+        // ── Category resolution: learned > merchant dictionary > AI suggestion ──
+        const learned = findLearnedCategory(t.description || '', t.merchant_name, learnedMappings);
+        const merchantHit = !learned ? findMerchantCategory(t.description || '', t.merchant_name) : null;
 
         let finalCategoryId: string;
         let finalCategoryName: string;
         let finalConfidence: number;
 
         if (learned) {
-          // Learned mapping found — use it with boosted confidence
           const learnedCat = categories?.find(c => c.id === learned.categoryId);
           finalCategoryId = learned.categoryId;
           finalCategoryName = learnedCat?.name || aiMatchedCat?.name || 'Miscellaneous';
           finalConfidence = learned.confidence;
+        } else if (merchantHit) {
+          const dictCat = categories?.find(c => c.name === merchantHit.category);
+          if (dictCat) {
+            finalCategoryId = dictCat.id;
+            finalCategoryName = dictCat.name;
+            finalConfidence = merchantHit.confidence ?? 0.9;
+          } else {
+            finalCategoryId = aiMatchedCat?.id || miscCategory?.id || '';
+            finalCategoryName = aiMatchedCat?.name || 'Miscellaneous';
+            finalConfidence = t.confidence || 0.5;
+          }
         } else {
-          // Fall back to AI suggestion
           finalCategoryId = aiMatchedCat?.id || miscCategory?.id || '';
           finalCategoryName = aiMatchedCat?.name || 'Miscellaneous';
           finalConfidence = t.confidence || 0.5;
         }
 
-        const needsReview = finalConfidence < 0.75 || debitUncertain;
+        // ── Category↔direction safety: never let a credit transaction land in a debit
+        //    category (or vice versa). If they conflict, drop confidence and force review. ──
+        const catName = finalCategoryName;
+        const catIsCredit = SYSTEM_CREDIT_CATEGORY_NAMES.includes(catName);
+        if (isDebit && catIsCredit) {
+          // Credit-only category on a debit — fall back to Miscellaneous
+          finalCategoryId = miscCategory?.id || finalCategoryId;
+          finalCategoryName = 'Miscellaneous';
+          finalConfidence = Math.min(finalConfidence, 0.4);
+        } else if (!isDebit && !catIsCredit) {
+          // Debit category on a credit transaction — fall back to Other Income
+          const otherIncome = categories?.find(c => c.name === 'Other Income');
+          if (otherIncome) {
+            finalCategoryId = otherIncome.id;
+            finalCategoryName = 'Other Income';
+            finalConfidence = Math.min(finalConfidence, 0.4);
+          }
+        }
+
+        // ── Always flag Miscellaneous for review (Fix #10) ──
+        const isMiscellaneous = finalCategoryName === 'Miscellaneous';
+        const needsReview = finalConfidence < 0.75 || debitUncertain || isMiscellaneous;
 
         const fullDesc = t.raw_description || t.description || 'Unknown';
         const shortDesc = (t.description || 'Unknown').length > 25
@@ -762,10 +873,14 @@ export default function UploadStatement() {
           : (t.description || 'Unknown');
 
         // Transfer suspicion: keyword match on description/raw_description, or AI flag.
-        // We DO NOT auto-confirm — these are flagged for the user to review on the tracker page.
         const transferKeyword = detectTransferByKeyword(fullDesc) || detectTransferByKeyword(shortDesc);
         const aiTransferFlag = t.is_likely_transfer === true;
         const suspectedTransfer = !!(transferKeyword || aiTransferFlag);
+
+        // Reference number normalisation: prefer AI-extracted, else scrape from raw description.
+        const refNumber = (typeof t.reference_number === 'string' && t.reference_number.trim())
+          ? t.reference_number.trim()
+          : extractReferenceNumber(fullDesc);
 
         return {
           temp_id: `draft-${i}`,
@@ -777,7 +892,7 @@ export default function UploadStatement() {
           suggested_category_id: finalCategoryId,
           suggested_category_name: finalCategoryName,
           confidence: finalConfidence,
-          reference_number: t.reference_number,
+          reference_number: refNumber || undefined,
           notes: fullDesc !== shortDesc ? fullDesc : null,
           needs_review: needsReview,
           review_status: 'pending' as const,
@@ -785,8 +900,26 @@ export default function UploadStatement() {
           suspected_transfer: suspectedTransfer,
           payment_method: t.payment_mode || undefined,
           bank_name: t.bank_name || undefined,
-        };
+          // Keep the parsed balance from the AI on the draft for post-process reconciliation.
+          // It's stripped before insert (not in the expenses schema).
+          balance: typeof t.balance === 'number' ? t.balance : undefined,
+        } as DraftExpense & { balance?: number };
       });
+
+      // ── Balance reconciliation (Fix #7) ──
+      // For consecutive transactions with visible balance, verify prev ± amount = curr.
+      // Rows that fail reconciliation get flagged for review. We only reconcile within a
+      // chunk-ordered run (AI returns transactions in document order).
+      const balanceMismatches = findBalanceMismatches(draftExpenses as any);
+      if (balanceMismatches.size > 0) {
+        for (const idx of balanceMismatches) {
+          draftExpenses[idx].needs_review = true;
+          draftExpenses[idx].confidence = Math.min(draftExpenses[idx].confidence, 0.4);
+        }
+      }
+
+      // Strip the temporary `balance` field — it's not part of DraftExpense or the DB schema.
+      for (const d of draftExpenses) delete (d as any).balance;
 
       // ── Stage 4: Done (95% → 100%) ──
       setProgress(95);
