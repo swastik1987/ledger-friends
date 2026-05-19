@@ -38,14 +38,21 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
+  // Sort suspected expenses by amount descending (absolute value — debit and credit treated equal).
+  // Amounts are stored as positive values regardless of is_debit direction.
+  const sortedExpenses = useMemo(
+    () => [...suspectedExpenses].sort((a, b) => b.amount - a.amount),
+    [suspectedExpenses]
+  );
+
   // Reset decisions when sheet opens or list changes
   useEffect(() => {
     if (open) {
       const initial: Record<string, Decision> = {};
-      suspectedExpenses.forEach(e => { initial[e.id] = 'skip'; });
+      sortedExpenses.forEach(e => { initial[e.id] = 'skip'; });
       setDecisions(initial);
     }
-  }, [open, suspectedExpenses]);
+  }, [open, sortedExpenses]);
 
   const counts = useMemo(() => {
     const c = { transfer: 0, not_transfer: 0, skip: 0 };
@@ -61,7 +68,7 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
 
   const setAll = (decision: Decision) => {
     const next: Record<string, Decision> = {};
-    suspectedExpenses.forEach(e => { next[e.id] = decision; });
+    sortedExpenses.forEach(e => { next[e.id] = decision; });
     setDecisions(next);
   };
 
@@ -76,7 +83,7 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
   const handleSave = async () => {
     const confirmedIds: string[] = [];
     const rejectedIds: string[] = [];
-    suspectedExpenses.forEach(e => {
+    sortedExpenses.forEach(e => {
       const d = decisions[e.id] || 'skip';
       if (d === 'transfer') confirmedIds.push(e.id);
       else if (d === 'not_transfer') rejectedIds.push(e.id);
@@ -138,10 +145,10 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
 
           {/* List */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {suspectedExpenses.length === 0 && (
+            {sortedExpenses.length === 0 && (
               <p className="text-center text-sm text-muted-foreground py-8">No transactions to review.</p>
             )}
-            {suspectedExpenses.map(exp => {
+            {sortedExpenses.map(exp => {
               const decision = decisions[exp.id] || 'skip';
               return (
                 <div

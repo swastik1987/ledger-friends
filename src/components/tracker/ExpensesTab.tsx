@@ -1,13 +1,13 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, ArrowUpRight, ArrowDownLeft, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, Repeat } from 'lucide-react';
+import { Receipt, ArrowUpRight, ArrowDownLeft, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // used in bulk category picker
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
-import { useTrackers, useCategories } from '@/hooks/useTrackers';
+import { useTrackers } from '@/hooks/useTrackers';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -23,9 +23,6 @@ import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort } from '@/lib/currencies';
-import { supabase } from '@/integrations/supabase/client';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -121,10 +118,11 @@ interface Props {
   userId: string;
   typeFilter: TransactionFilter;
   onTypeFilterChange: (v: TransactionFilter) => void;
+  suspectedTransferCount: number;
+  onOpenTransferReview: () => void;
 }
 
-export default function ExpensesTab({ trackerId, trackerCurrency, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange }: Props) {
-  const queryClient = useQueryClient();
+export default function ExpensesTab({ trackerId, trackerCurrency, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange, suspectedTransferCount, onOpenTransferReview }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
@@ -205,11 +203,10 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
   const activeFilterCount = filterUsers.size + filterCategories.size;
 
-  // Clear selection and transfer scan when month or type filter changes
+  // Clear selection when month or type filter changes
   useEffect(() => {
     setSelectedIds(new Set());
     setIsSelecting(false);
-    setShowTransferScan(false);
   }, [month, typeFilter]);
 
   // Apply all filters: type + user + category
@@ -374,84 +371,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
 
   const otherTrackers = (allTrackers || []).filter(t => t.id !== trackerId);
 
-  const [markingTransfer, setMarkingTransfer] = useState(false);
-
-  // ── Cross-match transfer detection (on-demand, persistent dismissals) ──
-  const DISMISSED_KEY = `expensesync-dismissed-transfers-${trackerId}`;
-  const [showTransferScan, setShowTransferScan] = useState(false);
-
-  // Load dismissed match keys from localStorage
-  const [dismissedMatches, setDismissedMatches] = useState<Set<string>>(() => {
-    try {
-      const stored = localStorage.getItem(DISMISSED_KEY);
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch { return new Set(); }
-  });
-
-  // Persist dismissals to localStorage whenever they change
-  const persistDismissals = useCallback((next: Set<string>) => {
-    setDismissedMatches(next);
-    try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
-    } catch { /* ignore */ }
-  }, [DISMISSED_KEY]);
-
-  const crossMatches = useMemo(() => {
-    if (!showTransferScan) return [];
-    const matches: { debit: Expense; credit: Expense; key: string }[] = [];
-    const debits = expenses.filter(e => e.is_debit && !e.is_transfer);
-    const credits = expenses.filter(e => !e.is_debit && !e.is_transfer);
-
-    for (const debit of debits) {
-      const debitDate = new Date(debit.date + 'T00:00:00');
-      for (const credit of credits) {
-        if (Math.abs(debit.amount - credit.amount) > 1) continue;
-        const creditDate = new Date(credit.date + 'T00:00:00');
-        const dayDiff = Math.abs((debitDate.getTime() - creditDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (dayDiff > 2) continue;
-        const key = [debit.id, credit.id].sort().join('-');
-        if (!dismissedMatches.has(key)) {
-          matches.push({ debit, credit, key });
-        }
-      }
-    }
-    return matches;
-  }, [expenses, dismissedMatches, showTransferScan]);
-
-  const handleFindTransfers = () => {
-    setShowTransferScan(true);
-  };
-
-  const handleMarkAsTransfer = async (expenseIds: string[], matchKey: string) => {
-    setMarkingTransfer(true);
-    try {
-      for (const id of expenseIds) {
-        await supabase.from('expenses').update({ is_transfer: true }).eq('id', id);
-      }
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      const next = new Set(dismissedMatches);
-      next.add(matchKey);
-      persistDismissals(next);
-      toast.success('Marked as internal transfer');
-    } catch {
-      toast.error('Failed to update');
-    } finally {
-      setMarkingTransfer(false);
-    }
-  };
-
-  const handleDismissMatch = (matchKey: string) => {
-    const next = new Set(dismissedMatches);
-    next.add(matchKey);
-    persistDismissals(next);
-  };
-
-  const handleDismissAll = () => {
-    const next = new Set(dismissedMatches);
-    crossMatches.forEach(m => next.add(m.key));
-    persistDismissals(next);
-  };
-
   const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
 
   return (
@@ -481,20 +400,23 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       {!isSelecting && (
         <div className="flex items-center gap-2">
           <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
-          {/* Find Self-Transfers button */}
-          {!showTransferScan && expenses.length > 0 && (
+          {/* Review suspected internal transfers */}
+          {suspectedTransferCount > 0 && (
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={handleFindTransfers}
-                    className="p-2 text-muted-foreground hover:text-amber-600 transition-colors"
+                    onClick={onOpenTransferReview}
+                    className="relative p-2 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
                   >
-                    <Repeat className="h-5 w-5" />
+                    <ArrowLeftRight className="h-5 w-5" />
+                    <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full bg-amber-500 text-[10px] font-bold text-white flex items-center justify-center">
+                      {suspectedTransferCount}
+                    </span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p>Find Self-Transfers</p>
+                  <p>Review {suspectedTransferCount} possible transfer{suspectedTransferCount !== 1 ? 's' : ''}</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -697,76 +619,6 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
               <Button onClick={onAddExpense} className="h-11">Add Transaction</Button>
             </>
           )}
-        </div>
-      )}
-
-      {/* Cross-match transfer detection results */}
-      {!isLoading && !isSelecting && showTransferScan && crossMatches.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-              ↔ Possible Internal Transfers ({crossMatches.length})
-            </p>
-            <div className="flex items-center gap-2">
-              <button onClick={handleDismissAll} className="text-xs text-amber-600 hover:underline">
-                Dismiss all
-              </button>
-              <button onClick={() => setShowTransferScan(false)} className="p-0.5 text-amber-500 hover:text-amber-700">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-          <p className="text-xs text-amber-600 dark:text-amber-500">
-            These debit-credit pairs have matching amounts and dates — they may be money moving between your own accounts.
-          </p>
-          {crossMatches.slice(0, 5).map(match => (
-            <div key={match.key} className="rounded-xl bg-card border border-border p-2.5 space-y-2">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-red-500 font-medium">↑ {formatAmountShort(match.debit.amount, trackerCurrency)}</span>
-                <span className="text-muted-foreground truncate flex-1">{match.debit.description}</span>
-                <span className="text-muted-foreground">{format(new Date(match.debit.date + 'T00:00:00'), 'd MMM')}</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-emerald-500 font-medium">↓ {formatAmountShort(match.credit.amount, trackerCurrency)}</span>
-                <span className="text-muted-foreground truncate flex-1">{match.credit.description}</span>
-                <span className="text-muted-foreground">{format(new Date(match.credit.date + 'T00:00:00'), 'd MMM')}</span>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs flex-1 border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400"
-                  onClick={() => handleMarkAsTransfer([match.debit.id, match.credit.id], match.key)}
-                  disabled={markingTransfer}
-                >
-                  {markingTransfer ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Mark Both as Transfer'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs text-muted-foreground"
-                  onClick={() => handleDismissMatch(match.key)}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            </div>
-          ))}
-          {crossMatches.length > 5 && (
-            <p className="text-xs text-amber-600 text-center">+{crossMatches.length - 5} more potential matches</p>
-          )}
-        </div>
-      )}
-
-      {/* No matches found after scan */}
-      {!isLoading && !isSelecting && showTransferScan && crossMatches.length === 0 && (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-700 dark:text-emerald-400">
-            No potential transfers found
-          </p>
-          <button onClick={() => setShowTransferScan(false)} className="p-0.5 text-emerald-500 hover:text-emerald-700">
-            <X className="h-4 w-4" />
-          </button>
         </div>
       )}
 

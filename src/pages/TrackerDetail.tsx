@@ -163,6 +163,8 @@ export default function TrackerDetail() {
               userId={user?.id || ''}
               typeFilter={typeFilter}
               onTypeFilterChange={setTypeFilter}
+              suspectedTransferCount={suspectedTransfers?.length || 0}
+              onOpenTransferReview={() => setShowTransferSheet(true)}
             />
           </TabsContent>
 
