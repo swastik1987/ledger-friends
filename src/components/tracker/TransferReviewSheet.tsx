@@ -38,10 +38,14 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-  // Sort suspected expenses by amount descending (absolute value — debit and credit treated equal).
-  // Amounts are stored as positive values regardless of is_debit direction.
+  // Sort suspected expenses by amount descending (debit and credit treated equal — amounts
+  // are stored as positive values regardless of is_debit direction). Date descending is the
+  // tiebreaker so same-amount rows surface newest-first.
   const sortedExpenses = useMemo(
-    () => [...suspectedExpenses].sort((a, b) => b.amount - a.amount),
+    () => [...suspectedExpenses].sort((a, b) => {
+      if (b.amount !== a.amount) return b.amount - a.amount;
+      return b.date.localeCompare(a.date);
+    }),
     [suspectedExpenses]
   );
 
