@@ -12,6 +12,7 @@ import { format } from 'date-fns';
 import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check, RefreshCw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
+import { detectTransferByKeyword } from '@/lib/transferDetector';
 import { supabase } from '@/integrations/supabase/client';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
@@ -156,6 +157,12 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setIsConverting(false);
     }
 
+    // Suspect-transfer detection: only flag NEW manual entries with a matching keyword.
+    // On edit, the user has explicitly seen the form (and the Internal Transfer toggle),
+    // so any open suspicion is treated as resolved.
+    const detectedSuspect = !!detectTransferByKeyword(description);
+    const suspectedTransfer = !isEdit && !isTransfer && detectedSuspect;
+
     const expenseData = {
       tracker_id: trackerId,
       created_by_id: user.id,
@@ -168,6 +175,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       notes: notes || null,
       is_debit: isDebit,
       is_transfer: isTransfer,
+      suspected_transfer: suspectedTransfer,
       payment_method: (paymentMethod || null) as PaymentMethod | undefined,
       bank_name: bankName || null,
       source: 'manual' as const,

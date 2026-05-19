@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTracker, useTrackerMembers, useCategories } from '@/hooks/useTrackers';
-import { useExpenses, useExpenseRealtime, useExpenseMonths } from '@/hooks/useExpenses';
+import { useExpenses, useExpenseRealtime, useExpenseMonths, useSuspectedTransfers } from '@/hooks/useExpenses';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useTransactionTypeFilter } from '@/hooks/useTransactionTypeFilter';
@@ -12,10 +12,14 @@ import ExpensesTab from '@/components/tracker/ExpensesTab';
 import DashboardTab from '@/components/tracker/DashboardTab';
 import SettingsTab from '@/components/tracker/SettingsTab';
 import AddExpenseSheet from '@/components/tracker/AddExpenseSheet';
+import TransferReviewModal from '@/components/tracker/TransferReviewModal';
+import TransferReviewSheet from '@/components/tracker/TransferReviewSheet';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+
+const dismissKey = (trackerId: string) => `transfer-review-dismissed-${trackerId}`;
 
 function NudgeUpload() {
   const { show, dismiss } = useNudge('tracker-upload-statement', 2000);
@@ -45,6 +49,34 @@ export default function TrackerDetail() {
 
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+
+  // ── Suspected transfer review flow ──
+  const { data: suspectedTransfers } = useSuspectedTransfers(trackerId!);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showTransferSheet, setShowTransferSheet] = useState(false);
+
+  // Show the popup once per session per tracker, if there are open suspects
+  useEffect(() => {
+    if (!trackerId || !suspectedTransfers || suspectedTransfers.length === 0) return;
+    const dismissed = typeof window !== 'undefined'
+      ? sessionStorage.getItem(dismissKey(trackerId)) === '1'
+      : false;
+    if (!dismissed && !showTransferSheet) {
+      setShowTransferModal(true);
+    }
+  }, [trackerId, suspectedTransfers, showTransferSheet]);
+
+  const handleDismissTransfers = () => {
+    if (trackerId && typeof window !== 'undefined') {
+      sessionStorage.setItem(dismissKey(trackerId), '1');
+    }
+    setShowTransferModal(false);
+  };
+
+  const handleReviewTransfers = () => {
+    setShowTransferModal(false);
+    setShowTransferSheet(true);
+  };
 
   useExpenseRealtime(trackerId!);
 
@@ -169,6 +201,22 @@ export default function TrackerDetail() {
         categories={categories || []}
         editExpenseId={editingExpenseId}
         expenses={expenses || []}
+      />
+
+      <TransferReviewModal
+        open={showTransferModal}
+        onOpenChange={setShowTransferModal}
+        count={suspectedTransfers?.length || 0}
+        onReview={handleReviewTransfers}
+        onDismiss={handleDismissTransfers}
+      />
+
+      <TransferReviewSheet
+        open={showTransferSheet}
+        onOpenChange={setShowTransferSheet}
+        trackerId={trackerId!}
+        trackerCurrency={tracker.currency || 'INR'}
+        suspectedExpenses={suspectedTransfers || []}
       />
 
       <BottomNav />

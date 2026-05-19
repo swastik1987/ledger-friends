@@ -57,6 +57,7 @@ export interface Expense {
   is_debit: boolean;
   source: ExpenseSource;
   is_transfer: boolean;
+  suspected_transfer: boolean;
   original_amount?: number;
   original_currency?: string;
   conversion_rate?: number;
@@ -84,7 +85,7 @@ export interface DraftExpense {
   review_status: ReviewStatus;
   category_changed?: boolean;
   detected_currency?: string; // currency detected from statement (ISO code)
-  is_transfer?: boolean; // flagged as internal transfer (keyword or AI detection)
+  suspected_transfer?: boolean; // suspected internal transfer (keyword or AI detection) — awaits user confirmation
   payment_method?: PaymentMethod;
   bank_name?: string;
 }

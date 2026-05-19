@@ -100,6 +100,7 @@ export function useCreateExpense() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast.success('Transaction saved');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -121,6 +122,7 @@ export function useUpdateExpense() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast.success('Transaction updated');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -137,6 +139,7 @@ export function useDeleteExpense() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast('🗑️ Transaction deleted');
     },
     onError: (err: Error) => toast.error(err.message),
@@ -154,6 +157,7 @@ export function useBulkCreateExpenses() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast.success(`✅ ${count} transactions imported successfully!`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -174,6 +178,7 @@ export function useBulkUpdateCategory() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast.success(`${count} transactions updated`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -194,6 +199,7 @@ export function useBulkDeleteExpenses() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       toast.success(`🗑️ ${count} transactions deleted`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -274,9 +280,80 @@ export function useBulkMoveExpenses() {
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
       queryClient.invalidateQueries({ queryKey: ['trackers'] });
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       toast.success(`${count} transactions moved`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+/**
+ * Fetch all open suspected transfers for a tracker (suspected_transfer=true AND is_transfer=false).
+ * Used by the tracker page popup + review sheet.
+ */
+export function useSuspectedTransfers(trackerId: string) {
+  return useQuery({
+    queryKey: ['suspected-transfers', trackerId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*, category:categories(*)')
+        .eq('tracker_id', trackerId)
+        .eq('suspected_transfer', true)
+        .eq('is_transfer', false)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+      return (data || []).map(e => ({
+        ...e,
+        amount: Number(e.amount),
+        category: e.category as unknown as Category,
+      })) as Expense[];
+    },
+    enabled: !!trackerId,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Resolve a batch of suspected transfers based on the user's tri-state review.
+ * - confirmedIds: rows the user marked as IS a transfer → is_transfer=true, suspected_transfer=false
+ * - rejectedIds: rows the user marked as NOT a transfer → suspected_transfer=false (is_transfer stays false)
+ * - Rows the user left as "Skip" are not passed in and stay suspected_transfer=true.
+ */
+export function useBulkResolveTransfers() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      trackerId,
+      confirmedIds,
+      rejectedIds,
+    }: { trackerId: string; confirmedIds: string[]; rejectedIds: string[] }) => {
+      if (confirmedIds.length > 0) {
+        const { error } = await supabase
+          .from('expenses')
+          .update({ is_transfer: true, suspected_transfer: false } as any)
+          .in('id', confirmedIds);
+        if (error) throw error;
+      }
+      if (rejectedIds.length > 0) {
+        const { error } = await supabase
+          .from('expenses')
+          .update({ suspected_transfer: false } as any)
+          .in('id', rejectedIds);
+        if (error) throw error;
+      }
+      return { confirmed: confirmedIds.length, rejected: rejectedIds.length, trackerId };
+    },
+    onSuccess: ({ confirmed, rejected, trackerId }) => {
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
+      const parts: string[] = [];
+      if (confirmed > 0) parts.push(`${confirmed} marked as transfer`);
+      if (rejected > 0) parts.push(`${rejected} marked as not transfer`);
+      toast.success(parts.length ? parts.join(' · ') : 'Review saved');
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -300,6 +377,7 @@ export function useExpenseRealtime(trackerId: string) {
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
+          queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
         }
       )
       .subscribe();

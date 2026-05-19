@@ -113,6 +113,7 @@ export type Database = {
           id: string
           is_debit: boolean
           is_transfer: boolean
+          suspected_transfer: boolean
           merchant_name: string | null
           notes: string | null
           original_amount: number | null
@@ -139,6 +140,7 @@ export type Database = {
           id?: string
           is_debit?: boolean
           is_transfer?: boolean
+          suspected_transfer?: boolean
           merchant_name?: string | null
           notes?: string | null
           original_amount?: number | null
@@ -165,6 +167,7 @@ export type Database = {
           id?: string
           is_debit?: boolean
           is_transfer?: boolean
+          suspected_transfer?: boolean
           merchant_name?: string | null
           notes?: string | null
           original_amount?: number | null
