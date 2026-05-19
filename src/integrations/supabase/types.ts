@@ -113,7 +113,6 @@ export type Database = {
           id: string
           is_debit: boolean
           is_transfer: boolean
-          suspected_transfer: boolean
           merchant_name: string | null
           notes: string | null
           original_amount: number | null
@@ -121,6 +120,7 @@ export type Database = {
           payment_method: string | null
           reference_number: string | null
           source: string
+          suspected_transfer: boolean
           tags: string[] | null
           tracker_id: string
           updated_at: string | null
@@ -140,7 +140,6 @@ export type Database = {
           id?: string
           is_debit?: boolean
           is_transfer?: boolean
-          suspected_transfer?: boolean
           merchant_name?: string | null
           notes?: string | null
           original_amount?: number | null
@@ -148,6 +147,7 @@ export type Database = {
           payment_method?: string | null
           reference_number?: string | null
           source: string
+          suspected_transfer?: boolean
           tags?: string[] | null
           tracker_id: string
           updated_at?: string | null
@@ -167,7 +167,6 @@ export type Database = {
           id?: string
           is_debit?: boolean
           is_transfer?: boolean
-          suspected_transfer?: boolean
           merchant_name?: string | null
           notes?: string | null
           original_amount?: number | null
@@ -175,6 +174,7 @@ export type Database = {
           payment_method?: string | null
           reference_number?: string | null
           source?: string
+          suspected_transfer?: boolean
           tags?: string[] | null
           tracker_id?: string
           updated_at?: string | null
