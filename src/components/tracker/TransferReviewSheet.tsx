@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, Minus, Loader2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Check, X, Minus, ArrowDownLeft, ArrowUpRight } from '@phosphor-icons/react';
+import { Loader2 } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
-  SheetHeader,
-  SheetTitle,
 } from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -16,8 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
-import CategoryIcon from '@/components/CategoryIcon';
+import CategoryDot from '@/components/CategoryDot';
 import { Expense } from '@/types';
 import { formatAmountShort } from '@/lib/currencies';
 import { useBulkResolveTransfers } from '@/hooks/useExpenses';
@@ -38,9 +36,6 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-  // Sort suspected expenses by amount descending (debit and credit treated equal — amounts
-  // are stored as positive values regardless of is_debit direction). Date descending is the
-  // tiebreaker so same-amount rows surface newest-first.
   const sortedExpenses = useMemo(
     () => [...suspectedExpenses].sort((a, b) => {
       if (b.amount !== a.amount) return b.amount - a.amount;
@@ -49,7 +44,6 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
     [suspectedExpenses]
   );
 
-  // Reset decisions when sheet opens or list changes
   useEffect(() => {
     if (open) {
       const initial: Record<string, Decision> = {};
@@ -77,11 +71,8 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
   };
 
   const requestClose = () => {
-    if (hasChanges) {
-      setShowLeaveConfirm(true);
-    } else {
-      onOpenChange(false);
-    }
+    if (hasChanges) setShowLeaveConfirm(true);
+    else onOpenChange(false);
   };
 
   const handleSave = async () => {
@@ -92,12 +83,10 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
       if (d === 'transfer') confirmedIds.push(e.id);
       else if (d === 'not_transfer') rejectedIds.push(e.id);
     });
-
     if (confirmedIds.length === 0 && rejectedIds.length === 0) {
       onOpenChange(false);
       return;
     }
-
     await resolve.mutateAsync({ trackerId, confirmedIds, rejectedIds });
     onOpenChange(false);
   };
@@ -107,122 +96,104 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
       <Sheet
         open={open}
         onOpenChange={(next) => {
-          if (!next) {
-            requestClose();
-            return;
-          }
+          if (!next) { requestClose(); return; }
           onOpenChange(next);
         }}
       >
-        <SheetContent side="bottom" className="rounded-t-2xl h-[92dvh] flex flex-col p-0">
-          <SheetHeader className="px-4 pt-4 pb-2 border-b border-border/40">
-            <SheetTitle>Review possible transfers</SheetTitle>
-            <p className="text-xs text-muted-foreground text-left">
+        <SheetContent
+          side="bottom"
+          className="rounded-t-3xl h-[92dvh] flex flex-col p-0 border-0"
+          style={{ background: 'hsl(var(--background))' }}
+        >
+          <div className="mx-auto w-9 h-1 rounded-full bg-line mt-2 mb-2" />
+
+          <div className="px-5 pt-1 pb-3">
+            <h2 className="font-display font-semibold text-[19px] text-ink" style={{ letterSpacing: '-0.02em' }}>
+              Review possible transfers
+            </h2>
+            <p className="text-[12px] text-ink-soft mt-1">
               Mark each transaction as Transfer, Not Transfer, or leave as Skip to decide later.
             </p>
-
-            {/* Bulk actions */}
-            <div className="flex items-center gap-1.5 pt-2 flex-wrap">
+            <div className="flex items-center gap-1.5 pt-3 flex-wrap">
               <button
                 type="button"
                 onClick={() => setAll('transfer')}
-                className="text-[11px] px-2 py-1 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 font-medium"
+                className="text-[11px] px-2.5 py-1 rounded-md font-semibold"
+                style={{ background: 'hsl(var(--warn-bg))', color: 'hsl(var(--warn))' }}
               >
                 All Transfer
               </button>
               <button
                 type="button"
                 onClick={() => setAll('not_transfer')}
-                className="text-[11px] px-2 py-1 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-medium"
+                className="text-[11px] px-2.5 py-1 rounded-md font-semibold bg-chip text-ink-soft"
               >
                 All Not Transfer
               </button>
               <button
                 type="button"
                 onClick={() => setAll('skip')}
-                className="text-[11px] px-2 py-1 rounded-md bg-muted text-muted-foreground hover:bg-muted/70 font-medium"
+                className="text-[11px] px-2.5 py-1 rounded-md font-semibold bg-muted text-ink-soft"
               >
                 Reset to Skip
               </button>
             </div>
-          </SheetHeader>
+          </div>
 
           {/* List */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2.5">
             {sortedExpenses.length === 0 && (
-              <p className="text-center text-sm text-muted-foreground py-8">No transactions to review.</p>
+              <p className="text-center text-sm text-ink-soft py-8">No transactions to review.</p>
             )}
             {sortedExpenses.map(exp => {
               const decision = decisions[exp.id] || 'skip';
+              const isCredit = !exp.is_debit;
+              const cat = exp.category;
+              const containerStyle =
+                decision === 'transfer'
+                  ? { background: 'hsl(var(--warn) / 0.10)', borderColor: 'hsl(var(--warn) / 0.50)' }
+                  : decision === 'not_transfer'
+                    ? { background: 'hsl(var(--chip-bg))', borderColor: 'hsl(var(--line))' }
+                    : { background: 'hsl(var(--card))', borderColor: 'hsl(var(--line-soft))' };
               return (
                 <div
                   key={exp.id}
-                  className={`rounded-2xl border p-3 transition-colors ${
-                    decision === 'transfer'
-                      ? 'bg-amber-50/50 border-amber-300 dark:bg-amber-950/20 dark:border-amber-800'
-                      : decision === 'not_transfer'
-                        ? 'bg-slate-50 border-slate-300 dark:bg-slate-900/40 dark:border-slate-700'
-                        : 'bg-card border-border'
-                  }`}
+                  className="rounded-2xl border p-3 transition-colors"
+                  style={containerStyle}
                 >
                   <div className="flex items-start gap-3">
-                    {exp.category && (
-                      <span
-                        className="flex h-9 w-9 items-center justify-center rounded-full shrink-0"
-                        style={{ backgroundColor: exp.category.color + '20' }}
-                      >
-                        <CategoryIcon icon={exp.category.icon} color={exp.category.color} size={18} />
-                      </span>
-                    )}
+                    <CategoryDot icon={cat?.icon || 'Tag'} color={cat?.color || 'hsl(var(--ember))'} size={36} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{exp.description}</p>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                      <p className="font-display font-semibold text-[14px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
+                        {exp.merchant_name || exp.description}
+                      </p>
+                      <div className="flex items-center gap-1.5 text-[11.5px] text-ink-soft mt-0.5 font-medium">
                         <span>{format(parseISO(exp.date), 'd MMM yyyy')}</span>
                         {exp.bank_name && <span>· {exp.bank_name}</span>}
                       </div>
                     </div>
-                    <div className={`text-right shrink-0 font-mono text-sm font-semibold ${exp.is_debit ? 'text-slate-800 dark:text-slate-200' : 'text-emerald-600'}`}>
-                      {exp.is_debit ? <ArrowUpRight className="inline h-3 w-3 mr-0.5" /> : <ArrowDownLeft className="inline h-3 w-3 mr-0.5" />}
-                      {exp.is_debit ? '' : '+'}
-                      {formatAmountShort(exp.amount, exp.currency || trackerCurrency)}
+                    <div
+                      className="text-right shrink-0 inline-flex items-center gap-0.5 font-mono font-semibold text-[14px] tabular-nums"
+                      style={{ color: isCredit ? 'hsl(var(--earn))' : 'hsl(var(--ink))' }}
+                    >
+                      {isCredit
+                        ? <ArrowDownLeft size={11} weight="bold" />
+                        : <ArrowUpRight size={11} weight="bold" />}
+                      {isCredit ? '+' : ''}{formatAmountShort(exp.amount, exp.currency || trackerCurrency)}
                     </div>
                   </div>
 
                   {/* Tri-state segmented control */}
                   <div className="grid grid-cols-3 gap-1.5 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => setDecision(exp.id, 'transfer')}
-                      className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium border-2 transition-colors ${
-                        decision === 'transfer'
-                          ? 'bg-amber-100 border-amber-400 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700'
-                          : 'bg-card border-border text-muted-foreground hover:border-amber-300'
-                      }`}
-                    >
-                      <Check className="h-3.5 w-3.5" /> Transfer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDecision(exp.id, 'not_transfer')}
-                      className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium border-2 transition-colors ${
-                        decision === 'not_transfer'
-                          ? 'bg-slate-200 border-slate-400 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600'
-                          : 'bg-card border-border text-muted-foreground hover:border-slate-400'
-                      }`}
-                    >
-                      <X className="h-3.5 w-3.5" /> Not Transfer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDecision(exp.id, 'skip')}
-                      className={`flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-medium border-2 transition-colors ${
-                        decision === 'skip'
-                          ? 'bg-muted border-muted-foreground/40 text-foreground'
-                          : 'bg-card border-border text-muted-foreground hover:border-muted-foreground/40'
-                      }`}
-                    >
-                      <Minus className="h-3.5 w-3.5" /> Skip
-                    </button>
+                    <TriBtn active={decision === 'transfer'} tone="warn" onClick={() => setDecision(exp.id, 'transfer')}>
+                      <Check size={13} weight="bold" /> Transfer
+                    </TriBtn>
+                    <TriBtn active={decision === 'not_transfer'} tone="neutral" onClick={() => setDecision(exp.id, 'not_transfer')}>
+                      <X size={13} weight="bold" /> Not Transfer
+                    </TriBtn>
+                    <TriBtn active={decision === 'skip'} tone="muted" onClick={() => setDecision(exp.id, 'skip')}>
+                      <Minus size={13} weight="bold" /> Skip
+                    </TriBtn>
                   </div>
                 </div>
               );
@@ -230,30 +201,28 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
           </div>
 
           {/* Footer */}
-          <div className="border-t border-border/40 px-4 py-3 space-y-2 bg-background">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="border-t border-line-soft px-4 py-3 space-y-2 bg-background safe-bottom">
+            <div className="flex items-center justify-between text-[11.5px] text-ink-soft font-medium">
               <span>{counts.transfer} transfer{counts.transfer !== 1 ? 's' : ''}</span>
               <span>{counts.not_transfer} not transfer{counts.not_transfer !== 1 ? 's' : ''}</span>
               <span>{counts.skip} skipped</span>
             </div>
-            <Button
+            <button
               onClick={handleSave}
               disabled={resolve.isPending || !hasChanges}
-              className="w-full h-11"
+              className="w-full h-11 rounded-xl bg-ember text-white font-bold text-[14px] disabled:opacity-50 inline-flex items-center justify-center"
+              style={hasChanges ? { boxShadow: '0 6px 18px hsl(var(--ember) / 0.40)' } : undefined}
             >
-              {resolve.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : hasChanges ? (
-                `Save (${counts.transfer + counts.not_transfer} changes)`
-              ) : (
-                'Nothing to save'
-              )}
-            </Button>
+              {resolve.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : hasChanges
+                  ? `Save (${counts.transfer + counts.not_transfer} changes)`
+                  : 'Nothing to save'}
+            </button>
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Discard-changes confirmation */}
       <AlertDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -266,7 +235,7 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
             <AlertDialogCancel>Keep Reviewing</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => { setShowLeaveConfirm(false); onOpenChange(false); }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-spend text-white hover:bg-spend/90"
             >
               Discard
             </AlertDialogAction>
@@ -274,5 +243,32 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function TriBtn({
+  active, tone, onClick, children,
+}: {
+  active: boolean;
+  tone: 'warn' | 'neutral' | 'muted';
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const styles = active
+    ? tone === 'warn'
+      ? { background: 'hsl(var(--warn) / 0.15)', color: 'hsl(var(--warn))', borderColor: 'hsl(var(--warn))' }
+      : tone === 'neutral'
+        ? { background: 'hsl(var(--chip-bg))', color: 'hsl(var(--ink))', borderColor: 'hsl(var(--ink) / 0.40)' }
+        : { background: 'hsl(var(--muted))', color: 'hsl(var(--ink))', borderColor: 'hsl(var(--ink) / 0.30)' }
+    : { background: 'hsl(var(--card))', color: 'hsl(var(--ink-soft))', borderColor: 'hsl(var(--line))' };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11.5px] font-semibold border-2 transition-colors"
+      style={styles}
+    >
+      {children}
+    </button>
   );
 }

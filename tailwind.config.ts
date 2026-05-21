@@ -14,8 +14,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
-        mono: ['DM Mono', 'ui-monospace', 'monospace'],
+        sans: ['Manrope', 'system-ui', 'sans-serif'],
+        display: ['Bricolage Grotesque', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -40,6 +41,10 @@ export default {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
         },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -56,6 +61,34 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Sand & Ember warm tokens
+        ink: {
+          DEFAULT: "hsl(var(--ink))",
+          soft: "hsl(var(--ink-soft))",
+          faint: "hsl(var(--ink-faint))",
+        },
+        line: {
+          DEFAULT: "hsl(var(--line))",
+          soft: "hsl(var(--line-soft))",
+        },
+        surface: {
+          DEFAULT: "hsl(var(--card))",
+          alt: "hsl(var(--surface-alt))",
+        },
+        ember: "hsl(var(--ember))",
+        spend: {
+          DEFAULT: "hsl(var(--spend))",
+          bg: "hsl(var(--spend-bg))",
+        },
+        earn: {
+          DEFAULT: "hsl(var(--earn))",
+          bg: "hsl(var(--earn-bg))",
+        },
+        warn: {
+          DEFAULT: "hsl(var(--warn))",
+          bg: "hsl(var(--warn-bg))",
+        },
+        chip: "hsl(var(--chip-bg))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",

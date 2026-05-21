@@ -1,28 +1,14 @@
 import { Expense, Category } from '@/types';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { subMonths, format, parse } from 'date-fns';
-import { BarChart2, ArrowUpRight, ArrowDownLeft, TrendingUp, TrendingDown, Minus, ChevronRightIcon, GitCompareArrows, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowUp, ArrowDown, ArrowsLeftRight, Receipt as ReceiptIcon } from '@phosphor-icons/react';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
-import { Button } from '@/components/ui/button';
-import TransactionTypeFilter from './TransactionTypeFilter';
-import CategoryIcon from '@/components/CategoryIcon';
-import MonthSelector from '@/components/MonthSelector';
-import Nudge from '@/components/Nudge';
-import { useNudge } from '@/hooks/useNudge';
+import TrackerToolBar, { SortOption } from './TrackerToolBar';
+import TypeSegment from './TypeSegment';
+import CategoryDot from '@/components/CategoryDot';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
-import { formatAmountShort } from '@/lib/currencies';
-
-function NudgePieChart() {
-  const { show, dismiss } = useNudge('dashboard-pie-chart');
-  return (
-    <div className="relative w-fit mx-auto">
-      <Nudge show={show} onDismiss={dismiss} message="Tap any category in the breakdown to jump to those transactions. Use Compare to see month-over-month trends." position="bottom" />
-    </div>
-  );
-}
+import { formatAmountShort, getCurrency } from '@/lib/currencies';
 
 interface Props {
   trackerId: string;
@@ -34,495 +20,317 @@ interface Props {
   isLoading: boolean;
   typeFilter: TransactionFilter;
   onTypeFilterChange: (v: TransactionFilter) => void;
+  suspectedTransferCount: number;
+  onOpenTransferReview: () => void;
 }
 
-export default function DashboardTab({ trackerId, trackerCurrency, expenses, categories, month, onMonthChange, isLoading, typeFilter, onTypeFilterChange }: Props) {
+function Sparkline({ values, color, width = 320, height = 40 }: { values: number[]; color: string; width?: number; height?: number }) {
+  if (values.length < 2) return null;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const pad = 3;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const pts = values.map((v, i) => {
+    const x = pad + (i / (values.length - 1)) * w;
+    const y = pad + (1 - (v - min) / range) * h;
+    return [x, y];
+  });
+  const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const last = pts[pts.length - 1];
+  const area = d + ` L ${pts[pts.length - 1][0]} ${height} L ${pts[0][0]} ${height} Z`;
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+      <path d={area} fill={color} opacity={0.12} />
+      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last[0]} cy={last[1]} r="3.5" fill={color} />
+      <circle cx={last[0]} cy={last[1]} r="6" fill={color} opacity={0.18} />
+    </svg>
+  );
+}
+
+function StackedShareBar({ slices }: { slices: { id: string; value: number; color: string }[] }) {
+  const total = slices.reduce((s, x) => s + x.value, 0) || 1;
+  return (
+    <div className="h-3.5 rounded-full overflow-hidden flex bg-line-soft" style={{ gap: 2 }}>
+      {slices.map(s => (
+        <div key={s.id} style={{ flex: s.value / total, background: s.color }} />
+      ))}
+    </div>
+  );
+}
+
+export default function DashboardTab({
+  trackerId, trackerCurrency, expenses, categories,
+  month, onMonthChange, isLoading, typeFilter, onTypeFilterChange,
+  suspectedTransferCount, onOpenTransferReview,
+}: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const symbol = getCurrency(trackerCurrency).symbol;
+  const [sortBy, setSortBy] = useState<SortOption>('date-desc');
 
-  const handleCategoryClick = (categoryId: string, isDebit: boolean) => {
-    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeFilter}&filterCategory=${categoryId}&month=${month}`);
-  };
-
-  // Fetch previous month data for MoM trend (skip when viewing all months)
   const isAllMonths = month === 'all';
   const prevMonth = isAllMonths ? '' : format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
   const { data: prevExpenses } = useExpenses(trackerId, prevMonth);
 
-  // Comparison mode state
-  const [compareEnabled, setCompareEnabled] = useState(false);
-  const [compareMonth, setCompareMonth] = useState(() => prevMonth || format(subMonths(new Date(), 1), 'yyyy-MM'));
-  // Available comparison months = all specific months except the currently selected one
-  const compareMonths = useMemo(() => months.filter(m => m.value !== month && m.value !== 'all'), [months, month]);
-  // Fetch comparison month data (only when enabled and not viewing all)
-  const { data: compareExpenses } = useExpenses(trackerId, compareEnabled && !isAllMonths ? compareMonth : '');
+  const monthLabel = months.find(m => m.value === month)?.label || month;
+  const isSpendingView = typeFilter !== 'credit';
 
-  // Reset compare month to prev when main month changes; disable compare for "all"
-  useEffect(() => {
-    if (month === 'all') {
-      setCompareEnabled(false);
-      return;
-    }
-    const newPrev = format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
-    setCompareMonth(newPrev);
-  }, [month]);
+  const nonTransfer = useMemo(() => expenses.filter(e => !e.is_transfer), [expenses]);
+  const debits = useMemo(() => nonTransfer.filter(e => e.is_debit), [nonTransfer]);
+  const credits = useMemo(() => nonTransfer.filter(e => !e.is_debit), [nonTransfer]);
 
-  // Exclude transfers from all dashboard calculations to avoid double-counting
-  const nonTransferExpenses = useMemo(() => expenses.filter(e => !e.is_transfer), [expenses]);
-  const debitExpenses = useMemo(() => nonTransferExpenses.filter(e => e.is_debit), [nonTransferExpenses]);
-  const creditExpenses = useMemo(() => nonTransferExpenses.filter(e => !e.is_debit), [nonTransferExpenses]);
-  const totalDebits = debitExpenses.reduce((s, e) => s + e.amount, 0);
-  const totalCredits = creditExpenses.reduce((s, e) => s + e.amount, 0);
+  const totalDebits = debits.reduce((s, e) => s + e.amount, 0);
+  const totalCredits = credits.reduce((s, e) => s + e.amount, 0);
 
-  // Previous month totals
-  const prevDebitTotal = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer && e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
-  const prevCreditTotal = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer && !e.is_debit).reduce((s, e) => s + e.amount, 0), [prevExpenses]);
+  const prevNonTransfer = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer), [prevExpenses]);
+  const prevTotalDebits = prevNonTransfer.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
+  const prevTotalCredits = prevNonTransfer.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
 
-  // MoM percentage change
-  const getMoMTrend = (current: number, previous: number) => {
-    if (previous === 0 && current === 0) return null;
-    if (previous === 0) return { pct: 100, direction: 'up' as const };
-    const pct = Math.round(((current - previous) / previous) * 100);
-    if (pct === 0) return { pct: 0, direction: 'flat' as const };
-    return { pct: Math.abs(pct), direction: pct > 0 ? 'up' as const : 'down' as const };
-  };
+  const heroTotal = isSpendingView ? totalDebits : totalCredits;
+  const prevHeroTotal = isSpendingView ? prevTotalDebits : prevTotalCredits;
+  const pctChange = prevHeroTotal > 0 ? Math.round(((heroTotal - prevHeroTotal) / prevHeroTotal) * 100) : null;
 
-  // Trend color depends on context: for spending, up is bad; for income, up is good
-  const getTrendColor = (direction: 'up' | 'down' | 'flat', context: 'spending' | 'income') => {
-    if (direction === 'flat') return 'text-muted-foreground';
-    if (context === 'spending') {
-      return direction === 'up' ? 'text-amber-600' : 'text-emerald-600';
-    }
-    // income
-    return direction === 'up' ? 'text-emerald-600' : 'text-amber-600';
-  };
+  const heroTxnCount = isSpendingView ? debits.length : credits.length;
+  // Average per day in the month (approximate)
+  const avgPerDay = useMemo(() => {
+    if (heroTotal === 0) return 0;
+    const dayKeys = new Set(nonTransfer.filter(e => isSpendingView ? e.is_debit : !e.is_debit).map(e => e.date));
+    return Math.round(heroTotal / Math.max(dayKeys.size, 1));
+  }, [heroTotal, nonTransfer, isSpendingView]);
 
-  const buildCategoryData = (exps: Expense[]) => {
-    const map: Record<string, { category: Category; total: number; count: number }> = {};
-    exps.forEach(e => {
-      if (!map[e.category_id]) {
-        map[e.category_id] = { category: e.category || categories.find(c => c.id === e.category_id)!, total: 0, count: 0 };
-      }
-      map[e.category_id].total += e.amount;
-      map[e.category_id].count++;
-    });
-    return Object.values(map).sort((a, b) => b.total - a.total);
-  };
-
-  const debitCategoryData = useMemo(() => buildCategoryData(debitExpenses), [debitExpenses, categories]);
-  const creditCategoryData = useMemo(() => buildCategoryData(creditExpenses), [creditExpenses, categories]);
-
-  // Net category breakdown for "All" mode (excluding transfers)
-  const netCategoryData = useMemo(() => {
-    const map: Record<string, { category: Category; debitTotal: number; creditTotal: number; count: number }> = {};
-    nonTransferExpenses.forEach(e => {
-      if (!map[e.category_id]) {
-        map[e.category_id] = { category: e.category || categories.find(c => c.id === e.category_id)!, debitTotal: 0, creditTotal: 0, count: 0 };
-      }
-      if (e.is_debit) map[e.category_id].debitTotal += e.amount;
-      else map[e.category_id].creditTotal += e.amount;
-      map[e.category_id].count++;
-    });
-    return Object.values(map)
-      .map(d => ({
-        category: d.category,
-        total: Math.abs(d.debitTotal - d.creditTotal),
-        count: d.count,
-        isDebit: d.debitTotal >= d.creditTotal,
-        debitTotal: d.debitTotal,
-        creditTotal: d.creditTotal,
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [nonTransferExpenses, categories]);
-
-  // Summary cards with MoM trend
-  type SummaryCard = { label: string; value: string; color?: string; trend?: { pct: number; direction: 'up' | 'down' | 'flat' } | null; trendContext?: 'spending' | 'income'; gradientClass?: string };
-  const summaryCards = useMemo((): SummaryCard[] => {
-    const hasPrevData = prevExpenses !== undefined;
-    if (typeFilter === 'debit') {
-      const trend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
-      const largest = [...debitExpenses].sort((a, b) => b.amount - a.amount)[0];
-      return [
-        { label: 'Total Spent', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend, trendContext: 'spending', gradientClass: 'summary-card-out' },
-        { label: 'Transactions', value: String(debitExpenses.length), gradientClass: 'summary-card-neutral' },
-        { label: 'Largest Expense', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', gradientClass: 'summary-card-neutral' },
-      ];
-    } else if (typeFilter === 'credit') {
-      const trend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
-      const largest = [...creditExpenses].sort((a, b) => b.amount - a.amount)[0];
-      return [
-        { label: 'Total Received', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend, trendContext: 'income', gradientClass: 'summary-card-in' },
-        { label: 'Transactions', value: String(creditExpenses.length), gradientClass: 'summary-card-neutral' },
-        { label: 'Largest Credit', value: largest ? formatAmountShort(Math.round(largest.amount), trackerCurrency) : '-', color: 'text-emerald-600', gradientClass: 'summary-card-neutral' },
-      ];
-    } else {
-      const debitTrend = hasPrevData ? getMoMTrend(totalDebits, prevDebitTotal) : null;
-      const creditTrend = hasPrevData ? getMoMTrend(totalCredits, prevCreditTotal) : null;
-      const net = totalDebits - totalCredits;
-      return [
-        { label: 'Total Out', value: formatAmountShort(Math.round(totalDebits), trackerCurrency), color: 'text-red-600', trend: debitTrend, trendContext: 'spending', gradientClass: 'summary-card-out' },
-        { label: 'Total In', value: formatAmountShort(Math.round(totalCredits), trackerCurrency), color: 'text-emerald-600', trend: creditTrend, trendContext: 'income', gradientClass: 'summary-card-in' },
-        { label: 'Net Balance', value: `${net < 0 ? '+' : ''}${formatAmountShort(Math.round(Math.abs(net)), trackerCurrency)}`, color: net <= 0 ? 'text-emerald-600' : 'text-red-600', gradientClass: 'summary-card-net' },
-      ];
-    }
-  }, [typeFilter, debitExpenses, creditExpenses, totalDebits, totalCredits, prevDebitTotal, prevCreditTotal, prevExpenses]);
-
-  // Category breakdown based on filter
-  const breakdownData = useMemo(() => {
-    if (typeFilter === 'debit') return debitCategoryData.map(d => ({ ...d, isDebit: true }));
-    if (typeFilter === 'credit') return creditCategoryData.map(d => ({ ...d, isDebit: false }));
-    return netCategoryData;
-  }, [typeFilter, debitCategoryData, creditCategoryData, netCategoryData]);
-
-  // Build comparison category data
-  const compareCategoryMap = useMemo(() => {
-    if (!compareEnabled || !compareExpenses) return new Map<string, number>();
+  // Sparkline values: daily totals for the month (by date asc)
+  const sparkValues = useMemo(() => {
     const map = new Map<string, number>();
-    const nonTransferCompare = compareExpenses.filter(e => !e.is_transfer);
-    const filtered = typeFilter === 'debit'
-      ? nonTransferCompare.filter(e => e.is_debit)
-      : typeFilter === 'credit'
-        ? nonTransferCompare.filter(e => !e.is_debit)
-        : nonTransferCompare;
-    filtered.forEach(e => {
-      map.set(e.category_id, (map.get(e.category_id) || 0) + e.amount);
-    });
-    return map;
-  }, [compareEnabled, compareExpenses, typeFilter]);
+    nonTransfer
+      .filter(e => isSpendingView ? e.is_debit : !e.is_debit)
+      .forEach(e => {
+        map.set(e.date, (map.get(e.date) || 0) + e.amount);
+      });
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  }, [nonTransfer, isSpendingView]);
 
-  // Merged breakdown: current + categories only in comparison month
-  const mergedBreakdownData = useMemo(() => {
-    if (!compareEnabled || !compareExpenses) return breakdownData;
-    const currentCatIds = new Set(breakdownData.map(d => d.category?.id));
-    const extraEntries: typeof breakdownData = [];
-    compareCategoryMap.forEach((total, catId) => {
-      if (!currentCatIds.has(catId)) {
-        const cat = categories.find(c => c.id === catId);
-        if (cat) {
-          const isDebit = typeFilter === 'credit' ? false : typeFilter === 'debit' ? true :
-            (compareExpenses || []).filter(e => e.category_id === catId && e.is_debit).reduce((s, e) => s + e.amount, 0) >=
-            (compareExpenses || []).filter(e => e.category_id === catId && !e.is_debit).reduce((s, e) => s + e.amount, 0);
-          extraEntries.push({ category: cat, total: 0, count: 0, isDebit: isDebit });
-        }
-      }
-    });
-    return [...breakdownData, ...extraEntries];
-  }, [breakdownData, compareEnabled, compareExpenses, compareCategoryMap, categories, typeFilter]);
-
-  const breakdownMaxTotal = Math.max(
-    ...mergedBreakdownData.map(d => Math.max(d.total, compareCategoryMap.get(d.category?.id || '') || 0)),
-    1
+  // Category aggregation for "Where it went" / "Where it came from"
+  const targetSet = isSpendingView ? debits : credits;
+  const prevTargetSet = useMemo(
+    () => prevNonTransfer.filter(e => isSpendingView ? e.is_debit : !e.is_debit),
+    [prevNonTransfer, isSpendingView]
   );
 
-  // Top 5
-  const top5 = useMemo(() => {
-    if (typeFilter === 'credit') return [...creditExpenses].sort((a, b) => b.amount - a.amount).slice(0, 5);
-    return [...debitExpenses].sort((a, b) => b.amount - a.amount).slice(0, 5);
-  }, [typeFilter, debitExpenses, creditExpenses]);
+  const categoryBreakdown = useMemo(() => {
+    const agg = new Map<string, { value: number; count: number; cat: Category }>();
+    targetSet.forEach(e => {
+      const cat = categories.find(c => c.id === e.category_id);
+      if (!cat) return;
+      const entry = agg.get(cat.id) || { value: 0, count: 0, cat };
+      entry.value += e.amount;
+      entry.count += 1;
+      agg.set(cat.id, entry);
+    });
+    const prevAgg = new Map<string, number>();
+    prevTargetSet.forEach(e => {
+      prevAgg.set(e.category_id, (prevAgg.get(e.category_id) || 0) + e.amount);
+    });
+    return Array.from(agg.values())
+      .map(item => {
+        const prev = prevAgg.get(item.cat.id) || 0;
+        const change = prev > 0 ? Math.round(((item.value - prev) / prev) * 100) : (item.value > 0 ? 100 : 0);
+        return { ...item, change };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [targetSet, prevTargetSet, categories]);
+
+  const totalBreakdown = categoryBreakdown.reduce((s, c) => s + c.value, 0);
+
+  // Biggest transactions
+  const biggest = useMemo(() => [...targetSet].sort((a, b) => b.amount - a.amount).slice(0, 5), [targetSet]);
+
+  const handleCategoryClick = (categoryId: string) => {
+    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeFilter}&filterCategory=${categoryId}&month=${month}`);
+  };
 
   if (isLoading) {
     return (
-      <div className="px-4 py-3 space-y-3">
+      <div className="space-y-3 px-4">
         {[1, 2, 3].map(i => (
-          <div key={i} className="rounded-2xl bg-card border border-border p-4 animate-pulse h-24" />
+          <div key={i} className="rounded-2xl bg-card border border-line-soft p-4 animate-pulse h-40" />
         ))}
       </div>
     );
   }
-
-  if (expenses.length === 0) {
-    return (
-      <div className="px-4 py-3">
-        <div className="flex items-center gap-2 mb-4">
-          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
-        </div>
-        <div className="text-center py-16">
-          <BarChart2 className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-          <p className="font-semibold text-lg">No data for this period</p>
-          <p className="text-sm text-muted-foreground">Add transactions to see your dashboard</p>
-        </div>
-      </div>
-    );
-  }
-
-  const renderDonut = (data: { category: Category; total: number; count: number }[], total: number, label: string, title: string, emoji: string) => {
-    const hasData = data.length > 0 && total > 0;
-    return (
-      <div>
-        <p className="text-sm font-semibold text-muted-foreground text-center mb-2">{emoji} {title}</p>
-        {hasData ? (
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={data.map(d => ({ name: d.category?.name, value: d.total, color: d.category?.color, icon: d.category?.icon, id: d.category?.id }))}
-                cx="50%"
-                cy="50%"
-                outerRadius={95}
-                innerRadius={58}
-                dataKey="value"
-                stroke="none"
-              >
-                {data.map((d, i) => (
-                  <Cell key={i} fill={d.category?.color || '#ccc'} />
-                ))}
-                <Label
-                  content={() => (
-                    <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle">
-                      <tspan x="50%" dy="-6" className="fill-foreground font-mono text-base font-bold">
-                        {formatAmountShort(Math.round(total), trackerCurrency)}
-                      </tspan>
-                      <tspan x="50%" dy="18" className="fill-muted-foreground text-[10px]">
-                        {label}
-                      </tspan>
-                    </text>
-                  )}
-                />
-              </Pie>
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  const pct = ((d.value / total) * 100).toFixed(1);
-                  return (
-                    <div className="bg-card border border-border rounded-lg p-2 shadow-lg text-xs">
-                      <p className="font-semibold flex items-center gap-1"><CategoryIcon icon={d.icon} color={d.color} size={12} /> {d.name}</p>
-                      <p className="font-mono">{formatAmountShort(Math.round(d.value), trackerCurrency)} ({pct}%)</p>
-                    </div>
-                  );
-                }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="h-[220px] flex items-center justify-center">
-            <div className="w-[160px] h-[160px] rounded-full border-2 border-dashed border-muted-foreground/20 flex items-center justify-center">
-              <p className="text-xs text-muted-foreground text-center px-4">No {label.toLowerCase()}s<br />this month</p>
-            </div>
-          </div>
-        )}
-        {/* Inline legend for this chart */}
-        {hasData && (
-          <div className="space-y-1.5 mt-1 px-2">
-            {data.slice(0, 5).map((d, i) => {
-              const pct = total > 0 ? ((d.total / total) * 100).toFixed(1) : '0';
-              return (
-                <div key={`${d.category?.id}-${i}`} className="flex items-center gap-2">
-                  <div className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.category?.color }} />
-                  <span className="flex-1 truncate text-xs text-muted-foreground flex items-center gap-1"><CategoryIcon icon={d.category?.icon || 'Tag'} color={d.category?.color} size={11} /> {d.category?.name}</span>
-                  <span className="font-mono text-xs">{formatAmountShort(Math.round(d.total), trackerCurrency)}</span>
-                  <span className="text-[10px] text-muted-foreground w-10 text-right">{pct}%</span>
-                </div>
-              );
-            })}
-            {data.length > 5 && (
-              <p className="text-[10px] text-muted-foreground text-center">+{data.length - 5} more categories</p>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
-    <div className="px-4 py-3 space-y-4">
-      {/* Month selector */}
-      <div className="flex items-center gap-2">
-        <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
-      </div>
+    <div className="pb-4">
+      <TrackerToolBar
+        monthLabel={monthLabel}
+        months={months}
+        currentMonth={month}
+        onMonthChange={onMonthChange}
+        sort={sortBy}
+        onSortChange={setSortBy}
+        filterCount={0}
+        onOpenFilter={() => { /* no-op on dashboard */ }}
+        transferCount={suspectedTransferCount}
+        onOpenTransferReview={onOpenTransferReview}
+      />
 
-      {/* Type filter */}
-      <TransactionTypeFilter value={typeFilter} onChange={onTypeFilterChange} />
+      <TypeSegment value={typeFilter} onChange={onTypeFilterChange} />
 
-      {/* Summary Cards */}
-      <div className="flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide">
-        {summaryCards.map((card, i) => (
-          <div key={i} className={`min-w-[130px] flex-1 rounded-2xl border p-3 shadow-sm transition-all duration-200 hover:shadow-md animate-stagger ${card.gradientClass || 'bg-card border-border'}`} style={{ animationDelay: `${i * 0.08}s` }}>
-            <p className="text-[11px] text-muted-foreground mb-1">{card.label}</p>
-            <p className={`font-semibold text-sm font-mono ${card.color || ''}`}>{card.value}</p>
-            {card.trend && card.trendContext && (
-              <div className={`flex items-center gap-0.5 mt-1.5 ${getTrendColor(card.trend.direction, card.trendContext)}`}>
-                {card.trend.direction === 'up' ? <TrendingUp className="h-3 w-3" /> :
-                  card.trend.direction === 'down' ? <TrendingDown className="h-3 w-3" /> :
-                  <Minus className="h-3 w-3" />}
-                <span className="text-[10px] font-medium">
-                  {card.trend.direction === 'flat' ? 'Same as' : `${card.trend.pct}% vs`} last month
-                </span>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Pie Charts — Stacked vertically, filter-aware */}
-      <div className="rounded-2xl glass-card border-0 p-4 shadow-sm">
-        <div className="space-y-6">
-          {(typeFilter === 'all' || typeFilter === 'debit') &&
-            renderDonut(debitCategoryData, totalDebits, 'Out', 'Spending', '💸')
-          }
-          {(typeFilter === 'all' || typeFilter === 'credit') &&
-            renderDonut(creditCategoryData, totalCredits, 'In', 'Income', '💰')
-          }
+      {/* Hero: this month total + sparkline */}
+      <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
+        <div className="text-[11px] font-semibold tracking-wider uppercase text-ink-faint">
+          {isSpendingView ? `You spent in ${monthLabel}` : `You earned in ${monthLabel}`}
         </div>
+        <div className="flex items-baseline gap-2.5 mt-1">
+          <div className="font-display tabular-nums text-ink" style={{ fontSize: 40, fontWeight: 500, letterSpacing: '-0.04em' }}>
+            {symbol}{Math.round(heroTotal).toLocaleString('en-IN')}
+          </div>
+          {pctChange !== null && (
+            <span
+              className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+              style={{
+                background: pctChange === 0
+                  ? 'hsl(var(--chip-bg))'
+                  : (isSpendingView ? pctChange > 0 : pctChange < 0)
+                    ? 'hsl(var(--spend-bg))'
+                    : 'hsl(var(--earn-bg))',
+                color: pctChange === 0
+                  ? 'hsl(var(--ink-soft))'
+                  : (isSpendingView ? pctChange > 0 : pctChange < 0)
+                    ? 'hsl(var(--spend))'
+                    : 'hsl(var(--earn))',
+              }}
+            >
+              {pctChange !== 0 && (pctChange > 0
+                ? <ArrowUp size={11} weight="bold" />
+                : <ArrowDown size={11} weight="bold" />
+              )}
+              {Math.abs(pctChange)}% vs last
+            </span>
+          )}
+        </div>
+        <div className="mt-2 text-[12px] text-ink-soft font-medium">
+          Avg {symbol}{avgPerDay.toLocaleString('en-IN')} / day · {heroTxnCount} transaction{heroTxnCount !== 1 ? 's' : ''}
+        </div>
+        {sparkValues.length >= 2 && (
+          <div className="mt-3 -mx-1">
+            <Sparkline values={sparkValues} color="hsl(var(--ember))" width={320} height={40} />
+          </div>
+        )}
       </div>
 
-      <NudgePieChart />
-
-      {/* Category Breakdown */}
-      {(mergedBreakdownData.length > 0 || compareEnabled) && (
-        <div className="rounded-2xl glass-card border-0 p-4 shadow-sm space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="font-semibold text-sm">
-              {typeFilter === 'debit' ? 'Spending by Category' : typeFilter === 'credit' ? 'Income by Category' : 'Category Breakdown (Net)'}
+      {/* Where it went */}
+      {categoryBreakdown.length > 0 && (
+        <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="font-display font-semibold text-[16px] text-ink" style={{ letterSpacing: '-0.02em' }}>
+              {isSpendingView ? 'Where it went' : 'Where it came from'}
             </h3>
-            {!compareEnabled ? (
-              !isAllMonths && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-primary"
-                onClick={() => setCompareEnabled(true)}
-              >
-                <GitCompareArrows className="h-3.5 w-3.5" />
-                Compare
-              </Button>
-              )
-            ) : (
-              <button
-                onClick={() => setCompareEnabled(false)}
-                className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+            <button className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-soft">
+              <ArrowsLeftRight size={13} /> Compare
+            </button>
           </div>
-          {compareEnabled && (
-            <div className="flex items-center gap-2 bg-muted/50 rounded-xl p-2">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">vs</span>
-              <Select value={compareMonth} onValueChange={setCompareMonth}>
-                <SelectTrigger className="h-8 text-xs flex-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {compareMonths.map(m => (
-                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {mergedBreakdownData.map((d, idx) => {
-            const compareTotal = compareCategoryMap.get(d.category?.id || '') || 0;
-            const pctOfMax = breakdownMaxTotal > 0 ? (d.total / breakdownMaxTotal) * 100 : 0;
-            const comparePctOfMax = breakdownMaxTotal > 0 ? (compareTotal / breakdownMaxTotal) * 100 : 0;
-            const pctOfTotal = typeFilter === 'all'
-              ? (totalDebits + totalCredits > 0 ? (d.total / (totalDebits + totalCredits)) * 100 : 0)
-              : typeFilter === 'debit'
-                ? (totalDebits > 0 ? (d.total / totalDebits) * 100 : 0)
-                : (totalCredits > 0 ? (d.total / totalCredits) * 100 : 0);
-            // Change percentage for comparison
-            const changePct = compareEnabled && compareTotal > 0
-              ? Math.round(((d.total - compareTotal) / compareTotal) * 100)
-              : compareEnabled && d.total > 0 ? 100 : null;
-            return (
-              <button
-                key={`${d.category?.id}-${idx}`}
-                className="w-full text-left hover:bg-muted/50 -mx-2 px-2 py-1.5 rounded-xl transition-colors cursor-pointer"
-                onClick={() => d.category?.id && handleCategoryClick(d.category.id, d.isDebit)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: (d.category?.color || '#ccc') + '20' }}>
-                    <CategoryIcon icon={d.category?.icon || 'Tag'} color={d.category?.color || '#6366f1'} size={22} />
-                  </div>
+
+          <StackedShareBar slices={categoryBreakdown.map(c => ({ id: c.cat.id, value: c.value, color: c.cat.color }))} />
+
+          <div className="mt-3 flex flex-col">
+            {categoryBreakdown.map((c, idx) => {
+              const pct = totalBreakdown > 0 ? ((c.value / totalBreakdown) * 100).toFixed(1) : '0.0';
+              // "Bad" change depends on view: more spending is bad; more income is good
+              const isBad = isSpendingView ? c.change > 0 : c.change < 0;
+              const isGood = isSpendingView ? c.change < 0 : c.change > 0;
+              const trendColor = c.change === 0
+                ? 'hsl(var(--ink-faint))'
+                : isBad
+                  ? 'hsl(var(--spend))'
+                  : isGood
+                    ? 'hsl(var(--earn))'
+                    : 'hsl(var(--ink-faint))';
+              return (
+                <button
+                  key={c.cat.id}
+                  onClick={() => handleCategoryClick(c.cat.id)}
+                  className="flex items-center gap-3 py-2.5 text-left"
+                  style={{ borderTop: idx === 0 ? 'none' : '1px solid hsl(var(--line-soft))' }}
+                >
+                  <CategoryDot icon={c.cat.icon} color={c.cat.color} size={34} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      {typeFilter === 'all' && (
-                        d.isDebit ? (
-                          <ArrowUpRight className="h-3 w-3 text-red-400 flex-shrink-0" />
-                        ) : (
-                          <ArrowDownLeft className="h-3 w-3 text-emerald-400 flex-shrink-0" />
-                        )
-                      )}
-                      <p className="font-medium text-sm truncate">{d.category?.name}</p>
+                    <div className="font-display font-semibold text-[14px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
+                      {c.cat.name}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {d.count > 0 ? `${d.count} txn${d.count !== 1 ? 's' : ''} · ${pctOfTotal.toFixed(1)}%` : 'No txns this month'}
-                    </p>
+                    <div className="text-[11.5px] text-ink-faint font-medium mt-0.5">
+                      {c.count} txn{c.count !== 1 ? 's' : ''} · {pct}%
+                    </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className={`font-mono text-sm font-semibold ${d.isDebit ? 'text-foreground' : 'text-emerald-600'}`}>
-                      {d.total > 0 ? `${d.isDebit ? '' : '+'}${formatAmountShort(Math.round(d.total), trackerCurrency)}` : '-'}
-                    </p>
-                    {compareEnabled && (
-                      <div className="flex items-center justify-end gap-1 mt-0.5">
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {compareTotal > 0 ? formatAmountShort(Math.round(compareTotal), trackerCurrency) : '-'}
-                        </span>
-                        {changePct !== null && (
-                          <span className={`text-[10px] font-medium ${
-                            d.isDebit
-                              ? (changePct > 0 ? 'text-amber-600' : 'text-emerald-600')
-                              : (changePct > 0 ? 'text-emerald-600' : 'text-amber-600')
-                          }`}>
-                            {changePct > 0 ? '+' : ''}{changePct}%
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <ChevronRightIcon className="h-4 w-4 text-muted-foreground/50 flex-shrink-0" />
-                </div>
-                <div className="mt-2 ml-[52px] space-y-1">
-                  <div className="h-1.5 bg-muted rounded-full">
+                  <div className="text-right">
+                    <div className="font-mono text-[14px] font-semibold text-ink tabular-nums">
+                      {formatAmountShort(c.value, trackerCurrency)}
+                    </div>
                     <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${pctOfMax}%`,
-                        backgroundColor: d.isDebit ? (d.category?.color || '#ccc') : '#10B981',
-                      }}
-                    />
-                  </div>
-                  {compareEnabled && (
-                    <div className="h-1.5 bg-muted rounded-full">
-                      <div
-                        className="h-full rounded-full transition-all duration-500 opacity-40"
-                        style={{
-                          width: `${comparePctOfMax}%`,
-                          backgroundColor: d.isDebit ? (d.category?.color || '#ccc') : '#10B981',
-                        }}
-                      />
+                      className="inline-flex items-center gap-0.5 text-[11px] font-semibold mt-0.5"
+                      style={{ color: trendColor }}
+                    >
+                      {c.change !== 0 && (c.change > 0
+                        ? <ArrowUp size={10} weight="bold" />
+                        : <ArrowDown size={10} weight="bold" />)}
+                      {c.change === 0 ? 'flat' : `${Math.abs(c.change)}%`}
                     </div>
-                  )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Biggest */}
+      {biggest.length > 0 && (
+        <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
+          <h3 className="font-display font-semibold text-[16px] text-ink mb-2" style={{ letterSpacing: '-0.02em' }}>
+            Biggest this month
+          </h3>
+          {biggest.map((e, i) => {
+            const cat = categories.find(c => c.id === e.category_id);
+            return (
+              <div
+                key={e.id}
+                className="flex items-center gap-3 py-2.5"
+                style={{ borderTop: i === 0 ? 'none' : '1px solid hsl(var(--line-soft))' }}
+              >
+                <span
+                  className="inline-flex items-center justify-center rounded-full font-mono font-bold text-[11px]"
+                  style={{
+                    width: 22, height: 22,
+                    background: 'hsl(var(--surface-alt))',
+                    color: 'hsl(var(--ink-soft))',
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <CategoryDot icon={cat?.icon || 'Tag'} color={cat?.color || 'hsl(var(--ember))'} size={32} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-display font-semibold text-[14px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
+                    {e.merchant_name || e.description}
+                  </div>
+                  <div className="text-[11px] text-ink-faint font-medium">{cat?.name || '—'}</div>
                 </div>
-              </button>
+                <div className="font-mono font-semibold text-[14px] text-ink tabular-nums">
+                  {formatAmountShort(e.amount, trackerCurrency)}
+                </div>
+              </div>
             );
           })}
         </div>
       )}
 
-      {/* Top 5 */}
-      {top5.length > 0 && (
-        <div className="rounded-2xl bg-card border border-border p-4 shadow-sm space-y-3">
-          <h3 className="font-semibold text-sm">
-            {typeFilter === 'credit' ? '💰 Biggest Credits' : '💸 Biggest Spends'}
-          </h3>
-          {top5.map((e, idx) => (
-            <div key={e.id} className="flex items-center gap-3">
-              <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground flex-shrink-0">
-                {idx + 1}
-              </div>
-              <div className="h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: ((e.category?.color || '#ccc') + '20') }}>
-                <CategoryIcon icon={e.category?.icon || 'Tag'} color={e.category?.color || '#6366f1'} size={18} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{e.description}</p>
-                <p className="text-xs text-muted-foreground">{format(new Date(e.date + 'T00:00:00'), 'd MMM')} · {e.category?.name}</p>
-              </div>
-              <p className={`font-mono text-sm font-semibold flex-shrink-0 ${e.is_debit ? '' : 'text-emerald-600'}`}>
-                {e.is_debit ? '' : '+'}{formatAmountShort(Math.round(e.amount), trackerCurrency)}
-              </p>
-            </div>
-          ))}
+      {/* Empty fallback */}
+      {categoryBreakdown.length === 0 && biggest.length === 0 && (
+        <div className="text-center py-16 px-4">
+          <ReceiptIcon size={64} color="hsl(var(--ink-faint) / 0.45)" className="mx-auto mb-4" />
+          <p className="font-display font-semibold text-lg text-ink">No data in {monthLabel}</p>
+          <p className="text-sm text-ink-soft">Add some transactions to see the dashboard</p>
         </div>
       )}
     </div>

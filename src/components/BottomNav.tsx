@@ -1,14 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
-import { Home, ClipboardList, PlusCircle, BarChart2, User } from 'lucide-react';
-
-const navItems = [
-  { icon: Home, label: 'Home', path: '/' },
-  { icon: ClipboardList, label: 'Transactions', path: '/tracker/:id?tab=expenses', requiresTracker: true },
-  { icon: PlusCircle, label: 'Add Txn', isAdd: true },
-  { icon: BarChart2, label: 'Dashboard', path: '/tracker/:id?tab=dashboard', requiresTracker: true },
-  { icon: User, label: 'Profile', isProfile: true },
-];
+import { House, Receipt, User } from '@phosphor-icons/react';
 
 export default function BottomNav() {
   const navigate = useNavigate();
@@ -16,93 +8,57 @@ export default function BottomNav() {
   const { activeTrackerId } = useApp();
 
   const isOnHomePage = location.pathname === '/';
+  const isOnProfile = location.pathname === '/profile';
   const isInsideTracker = location.pathname.startsWith('/tracker/') && !location.pathname.includes('/upload');
 
-  const handleNav = (item: typeof navItems[0]) => {
-    if (item.isProfile) {
-      navigate('/profile');
-      return;
-    }
-    if (item.isAdd) {
-      if (isOnHomePage) {
-        // On homepage: open create tracker sheet
-        window.dispatchEvent(new CustomEvent('open-create-tracker'));
-      } else if (isInsideTracker && activeTrackerId) {
-        // Inside tracker: open add expense sheet
-        window.dispatchEvent(new CustomEvent('open-add-expense'));
-      }
-      return;
-    }
-    // Transactions / Dashboard require being inside a tracker
-    if (item.requiresTracker && (!activeTrackerId || isOnHomePage)) return;
-
-    let path = item.path!;
-    if (item.requiresTracker && activeTrackerId) {
-      path = path.replace(':id', activeTrackerId);
-    }
-    navigate(path);
+  const goHome = () => navigate('/');
+  const goTrackers = () => {
+    if (activeTrackerId) navigate(`/tracker/${activeTrackerId}`);
+    else navigate('/');
   };
+  const goProfile = () => navigate('/profile');
 
-  const isActive = (item: typeof navItems[0]) => {
-    if (item.isProfile) return location.pathname === '/profile';
-    if (item.path === '/') return location.pathname === '/';
-    if (item.requiresTracker && activeTrackerId) {
-      const trackerPath = `/tracker/${activeTrackerId}`;
-      if (item.label === 'Transactions') return location.pathname === trackerPath && (location.search.includes('tab=expenses') || !location.search.includes('tab='));
-      if (item.label === 'Dashboard') return location.pathname === trackerPath && location.search.includes('tab=dashboard');
-    }
-    return false;
-  };
-
-  // Contextual label and state for the + button
-  const addLabel = isOnHomePage ? 'New Tracker' : 'Add Txn';
-  const addDisabled = !isOnHomePage && !isInsideTracker;
-
-  // Transactions & Dashboard disabled on homepage
-  const isTrackerTabDisabled = (item: typeof navItems[0]) => {
-    return item.requiresTracker && (isOnHomePage || !activeTrackerId);
-  };
+  const items: {
+    id: string;
+    label: string;
+    Icon: typeof House;
+    active: boolean;
+    onClick: () => void;
+  }[] = [
+    { id: 'home', label: 'Home', Icon: House, active: isOnHomePage, onClick: goHome },
+    { id: 'trackers', label: 'Trackers', Icon: Receipt, active: isInsideTracker, onClick: goTrackers },
+    { id: 'you', label: 'You', Icon: User, active: isOnProfile, onClick: goProfile },
+  ];
 
   return (
-    <>
-      <nav className="fixed bottom-0 left-0 right-0 z-30 glass-nav border-t border-border/40 safe-bottom">
-        <div className="max-w-lg mx-auto flex items-center justify-around py-1">
-          {navItems.map((item, i) => {
-            const Icon = item.icon;
-            const active = isActive(item);
-
-            if (item.isAdd) {
-              return (
-                <button
-                  key={i}
-                  onClick={() => handleNav(item)}
-                  disabled={addDisabled}
-                  className={`flex flex-col items-center justify-center py-1 px-3 ${addDisabled ? 'opacity-30' : ''}`}
-                >
-                  <div className={`flex h-11 w-11 items-center justify-center rounded-full ${addDisabled ? 'bg-muted' : 'bg-primary shadow-[0_2px_12px_rgba(99,102,241,0.4)]'} text-primary-foreground -mt-3 active:animate-scale-tap transition-transform duration-150`}>
-                    <PlusCircle className="h-6 w-6" />
-                  </div>
-                  <span className="text-[10px] mt-0.5 text-muted-foreground">{addLabel}</span>
-                </button>
-              );
-            }
-
-            const disabled = isTrackerTabDisabled(item);
-
-            return (
-              <button
-                key={i}
-                onClick={() => handleNav(item)}
-                disabled={disabled && !item.isProfile}
-                className={`relative flex flex-col items-center justify-center py-2 px-3 min-w-[56px] transition-colors duration-200 ${disabled && !item.isProfile ? 'opacity-30' : ''} ${active ? 'nav-glow' : ''}`}
+    <nav className="fixed bottom-0 left-0 right-0 z-30 glass-nav border-t border-line-soft safe-bottom">
+      <div className="max-w-lg mx-auto grid grid-cols-3">
+        {items.map(item => {
+          const { Icon, active } = item;
+          return (
+            <button
+              key={item.id}
+              onClick={item.onClick}
+              className="flex flex-col items-center justify-center gap-0.5 py-2.5 transition-colors"
+            >
+              <Icon
+                size={22}
+                weight={active ? 'fill' : 'regular'}
+                color={active ? 'hsl(var(--ember))' : 'hsl(var(--ink-faint))'}
+              />
+              <span
+                className="text-[10px] tracking-wide"
+                style={{
+                  color: active ? 'hsl(var(--ember))' : 'hsl(var(--ink-faint))',
+                  fontWeight: active ? 700 : 500,
+                }}
               >
-                <Icon className={`h-5 w-5 transition-colors duration-200 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
-                <span className={`text-[10px] mt-0.5 transition-colors duration-200 ${active ? 'text-primary font-semibold' : 'text-muted-foreground'}`}>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-    </>
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

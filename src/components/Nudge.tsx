@@ -58,7 +58,8 @@ export default function Nudge({ show, onDismiss, message, position = 'bottom', a
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); onDismiss(); }}
-            className="text-[10px] font-medium text-indigo-300 hover:text-indigo-200 mt-1"
+            className="text-[10px] font-medium mt-1"
+            style={{ color: 'hsl(var(--ember))' }}
           >
             Got it
           </button>

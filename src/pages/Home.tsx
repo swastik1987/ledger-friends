@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import BottomNav from '@/components/BottomNav';
+import FloatingAdd from '@/components/FloatingAdd';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 
 function getGreeting() {
@@ -91,18 +92,18 @@ export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen bg-page-gradient pb-20">
       {/* Top Bar */}
-      <div className="sticky top-0 z-10 glass-nav border-b border-border/50 px-4 py-3">
+      <div className="sticky top-0 z-10 glass-nav border-b border-line-soft px-4 py-3">
         <div className="flex items-center justify-between max-w-lg mx-auto">
           <div className="flex items-center gap-2">
             <img src="/logo-512.png" alt="ExpenseSync" className="h-8 w-8 rounded-lg" />
-            <span className="font-semibold text-sm">ExpenseSync</span>
+            <span className="font-display font-semibold text-sm">ExpenseSync</span>
           </div>
           <div className="text-center flex-1">
-            <p className="text-sm font-medium">{getGreeting()}, {firstName} 👋</p>
+            <p className="text-sm font-medium text-ink-soft">{getGreeting()}, {firstName}</p>
           </div>
           <button
             onClick={() => navigate('/profile')}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-sm"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-ember text-white font-semibold text-sm"
           >
             {firstName[0]?.toUpperCase()}
           </button>
@@ -113,10 +114,10 @@ export default function HomePage() {
       <div className="flex-1 max-w-lg mx-auto w-full px-4 py-4 space-y-3">
         {/* Onboarding banner for new users */}
         {!isLoading && (!trackers || trackers.length === 0) && (
-          <div className="rounded-2xl bg-gradient-to-br from-indigo-50 via-primary-light to-violet-50 border border-primary/15 p-5 space-y-3 shadow-sm animate-fade-in-up dark:from-indigo-950/30 dark:via-primary-light dark:to-violet-950/30">
-            <p className="text-lg font-semibold">👋 Welcome to ExpenseSync!</p>
-            <p className="text-sm text-muted-foreground">Start by creating your first tracker. You can invite collaborators after creating it.</p>
-            <Button onClick={() => setShowCreate(true)} className="h-11">Create My First Tracker</Button>
+          <div className="rounded-2xl bg-surface-alt border border-line-soft p-5 space-y-3 shadow-sm animate-fade-in-up">
+            <p className="font-display text-lg font-semibold">Welcome to ExpenseSync</p>
+            <p className="text-sm text-ink-soft">Start by creating your first tracker. You can invite collaborators after creating it.</p>
+            <Button onClick={() => setShowCreate(true)} className="h-11 bg-ember hover:bg-ember/90 text-white">Create My First Tracker</Button>
           </div>
         )}
 
@@ -136,20 +137,19 @@ export default function HomePage() {
           <button
             key={tracker.id}
             onClick={() => handleTrackerClick(tracker.id)}
-            className="w-full text-left rounded-2xl glass-card border-0 p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-3 overflow-hidden relative animate-stagger"
+            className="w-full text-left rounded-2xl bg-card border border-line-soft p-4 shadow-sm hover:shadow-md transition-all duration-200 flex items-center gap-3 animate-stagger"
             style={{ animationDelay: `${i * 0.06}s` }}
           >
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500" />
-            <div className="w-1 h-12 rounded-full bg-primary flex-shrink-0" />
+            <div className="w-1 h-12 rounded-full bg-ember flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-lg truncate">{tracker.name}</p>
-              <p className="font-mono text-lg font-medium">{formatAmountShort(tracker.monthly_total, tracker.currency)}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="font-display font-semibold text-lg truncate text-ink">{tracker.name}</p>
+              <p className="font-mono text-lg font-medium text-ink">{formatAmountShort(tracker.monthly_total, tracker.currency)}</p>
+              <p className="text-xs text-ink-soft">
                 {tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''} · Total spent
                 {tracker.date_range ? ` between ${format(parseISO(tracker.date_range.min), 'MMM yyyy')}${tracker.date_range.min.slice(0, 7) !== tracker.date_range.max.slice(0, 7) ? ` – ${format(parseISO(tracker.date_range.max), 'MMM yyyy')}` : ''}` : ''}
               </p>
             </div>
-            <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+            <ChevronRight className="h-5 w-5 text-ink-faint flex-shrink-0" />
           </button>
         ))}
 
@@ -228,6 +228,7 @@ export default function HomePage() {
         </SheetContent>
       </Sheet>
 
+      <FloatingAdd onClick={() => setShowCreate(true)} label="New tracker" />
       <BottomNav />
     </div>
   );

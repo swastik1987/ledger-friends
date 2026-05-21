@@ -17,6 +17,7 @@ import { supabase } from '@/integrations/supabase/client';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import CategoryIcon from '@/components/CategoryIcon';
+import CategoryDot from '@/components/CategoryDot';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -249,13 +250,13 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
             {/* Amount + Currency */}
             <div className="text-center space-y-2">
               <div className="inline-flex items-center gap-1">
-                <span className={`font-mono text-3xl ${isDebit ? 'text-red-600' : 'text-emerald-600'}`}>{getCurrency(expenseCurrency).symbol}</span>
+                <span className={`font-mono text-3xl ${isDebit ? 'text-spend' : 'text-earn'}`}>{getCurrency(expenseCurrency).symbol}</span>
                 <input
                   type="number"
                   value={amount}
                   onChange={e => setAmount(e.target.value)}
                   placeholder="0"
-                  className={`font-mono text-4xl font-bold text-center bg-transparent border-none outline-none w-48 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isDebit ? 'text-red-600' : 'text-emerald-600'}`}
+                  className={`font-mono text-4xl font-bold text-center bg-transparent border-none outline-none w-48 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${isDebit ? 'text-spend' : 'text-earn'}`}
                   autoFocus={!isEdit}
                 />
               </div>
@@ -291,8 +292,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   onClick={() => setIsDebit(true)}
                   className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
                     isDebit
-                      ? 'bg-red-50 border-red-400 text-red-600 dark:bg-red-950/30'
-                      : 'bg-card border-border text-muted-foreground'
+                      ? 'bg-spend/10 border-spend text-spend'
+                      : 'bg-card border-line text-ink-soft'
                   }`}
                 >
                   <ArrowUpRight className="h-4 w-4" />
@@ -302,8 +303,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   onClick={() => setIsDebit(false)}
                   className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
                     !isDebit
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-600 dark:bg-emerald-950/30'
-                      : 'bg-card border-border text-muted-foreground'
+                      ? 'bg-earn/10 border-earn text-earn'
+                      : 'bg-card border-line text-ink-soft'
                   }`}
                 >
                   <ArrowDownLeft className="h-4 w-4" />
@@ -340,9 +341,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
               >
                 {selectedCategory ? (
                   <>
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full text-xs" style={{ backgroundColor: selectedCategory.color + '20' }}>
-                      {selectedCategory.icon}
-                    </span>
+                    <CategoryDot icon={selectedCategory.icon} color={selectedCategory.color} size={24} />
                     <span>{selectedCategory.name}</span>
                   </>
                 ) : (
@@ -360,15 +359,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                     key={mode}
                     type="button"
                     onClick={() => setPaymentMethod(paymentMethod === mode ? '' : mode)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                       paymentMethod === mode
-                        ? mode === 'UPI' ? 'bg-purple-50 border-purple-300 text-purple-700 dark:bg-purple-950/30 dark:text-purple-400'
-                        : mode === 'Credit Card' ? 'bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400'
-                        : mode === 'Debit Card' ? 'bg-sky-50 border-sky-300 text-sky-700 dark:bg-sky-950/30 dark:text-sky-400'
-                        : mode === 'Online' ? 'bg-teal-50 border-teal-300 text-teal-700 dark:bg-teal-950/30 dark:text-teal-400'
-                        : mode === 'Cash' ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-950/30 dark:text-green-400'
-                        : 'bg-slate-100 border-slate-300 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                        : 'border-border text-muted-foreground hover:bg-muted/50'
+                        ? 'bg-ember/10 border-ember text-ember'
+                        : 'border-line text-ink-soft hover:bg-muted/50'
                     }`}
                   >
                     {mode}
@@ -406,12 +400,12 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
               onClick={() => setIsTransfer(!isTransfer)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
                 isTransfer
-                  ? 'bg-amber-50 border-amber-300 dark:bg-amber-950/20 dark:border-amber-700'
-                  : 'border-border hover:bg-muted/50'
+                  ? 'bg-warn/10 border-warn/50'
+                  : 'border-line hover:bg-muted/50'
               }`}
             >
               <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
-                isTransfer ? 'bg-amber-500 border-amber-500' : 'border-muted-foreground/40'
+                isTransfer ? 'bg-warn border-warn' : 'border-line'
               }`}>
                 {isTransfer && (
                   <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -420,10 +414,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                 )}
               </div>
               <div className="text-left">
-                <p className={`text-sm font-medium ${isTransfer ? 'text-amber-700 dark:text-amber-400' : 'text-foreground'}`}>
+                <p className={`text-sm font-medium ${isTransfer ? 'text-warn' : 'text-ink'}`}>
                   ↔ Internal Transfer
                 </p>
-                <p className="text-[11px] text-muted-foreground">Exclude from spending/income totals</p>
+                <p className="text-[11px] text-ink-soft">Exclude from spending/income totals</p>
               </div>
             </button>
 
@@ -489,7 +483,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
 
             {/* Credit-specific header */}
             {!isDebit && !categorySearch && (
-              <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider px-1">Income Categories</p>
+              <p className="text-xs font-semibold text-earn uppercase tracking-wider px-1">Income Categories</p>
             )}
 
             <div className="space-y-1">
@@ -508,13 +502,11 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                     )}
                     <button
                       onClick={() => { setCategoryId(cat.id); setShowCategoryPicker(false); }}
-                      className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${categoryId === cat.id ? 'bg-primary/10' : 'hover:bg-muted'}`}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${categoryId === cat.id ? 'bg-ember/10' : 'hover:bg-muted'}`}
                     >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: cat.color + '20' }}>
-                        <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
-                      </span>
+                      <CategoryDot icon={cat.icon} color={cat.color} size={32} />
                       <span className="font-medium text-sm">{cat.name}</span>
-                      {!cat.is_system && <span className="text-xs text-muted-foreground ml-auto">Custom</span>}
+                      {!cat.is_system && <span className="text-xs text-ink-faint ml-auto">Custom</span>}
                     </button>
                   </div>
                 );

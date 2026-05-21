@@ -1,39 +1,30 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
-import { format, isToday, isYesterday, parse } from 'date-fns';
-import { Receipt, ArrowUpRight, ArrowDownLeft, Pencil, Trash2, X, Search, Loader2, Tag, SlidersHorizontal, Check, ArrowUpDown, MoveRight, ArrowLeftRight } from 'lucide-react';
+import { format, isToday, isYesterday } from 'date-fns';
+import { Receipt, X, MagnifyingGlass, Tag, ArrowsLeftRight, Trash, ArrowsClockwise } from '@phosphor-icons/react';
+import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // used in bulk category picker
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { useTrackers } from '@/hooks/useTrackers';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import CategoryIcon from '@/components/CategoryIcon';
-import MonthSelector from '@/components/MonthSelector';
-import TransactionTypeFilter from './TransactionTypeFilter';
-import NetBalanceBanner from './NetBalanceBanner';
-import Nudge from '@/components/Nudge';
-import { useNudge } from '@/hooks/useNudge';
+import CategoryDot from '@/components/CategoryDot';
+import FloatingAdd from '@/components/FloatingAdd';
+import HeroSummary from './HeroSummary';
+import TypeSegment from './TypeSegment';
+import TrackerToolBar, { SortOption } from './TrackerToolBar';
+import DayHeader from './DayHeader';
+import TxnRow from './TxnRow';
+import FilterSheet from './FilterSheet';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
-import { formatAmountShort } from '@/lib/currencies';
+import { formatAmountShort, getCurrency } from '@/lib/currencies';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
-
-type SortOption = 'date-desc' | 'date-asc' | 'category-asc' | 'category-desc';
-
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'date-desc', label: 'Date (Newest first)' },
-  { value: 'date-asc', label: 'Date (Oldest first)' },
-  { value: 'category-asc', label: 'Category (A → Z)' },
-  { value: 'category-desc', label: 'Category (Z → A)' },
-];
 
 const SORT_STORAGE_KEY = 'expensesync-sort-pref';
 
@@ -41,8 +32,6 @@ function readSortPref(trackerId: string): SortOption {
   try {
     const data = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || '{}');
     const val = data[trackerId];
-    // Migrate old amount-* prefs to default
-    if (val === 'amount-desc' || val === 'amount-asc') return 'date-desc';
     if (val === 'date-desc' || val === 'date-asc' || val === 'category-asc' || val === 'category-desc') return val;
     return 'date-desc';
   } catch { return 'date-desc'; }
@@ -55,8 +44,6 @@ function writeSortPref(trackerId: string, value: SortOption) {
     localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(data));
   } catch { /* ignore */ }
 }
-
-// generateMonths removed — now using useExpenseMonths hook
 
 function formatDateHeader(dateStr: string) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -71,7 +58,6 @@ function groupByDate(expenses: Expense[], ascending: boolean) {
     if (!groups[e.date]) groups[e.date] = [];
     groups[e.date].push(e);
   });
-  // Sort groups by date key; within each group, amount descending
   return Object.entries(groups)
     .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
     .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
@@ -84,24 +70,9 @@ function groupByCategory(expenses: Expense[], categories: Category[], ascending:
     if (!groups[catName]) groups[catName] = [];
     groups[catName].push(e);
   });
-  // Sort groups by category name; within each group, amount descending
   return Object.entries(groups)
     .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
     .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
-}
-
-function NudgeFilterSort() {
-  const { show, dismiss } = useNudge('expenses-filter-sort');
-  return <Nudge show={show} onDismiss={dismiss} message="Sort by date or category, and filter by user or category to find transactions quickly." position="bottom" />;
-}
-
-function NudgeLongPress() {
-  const { show, dismiss } = useNudge('expenses-long-press', 3000);
-  return (
-    <div className="relative w-fit mx-auto">
-      <Nudge show={show} onDismiss={dismiss} message="Long-press any transaction to select multiple — then bulk edit category, move, or delete." position="bottom" />
-    </div>
-  );
 }
 
 interface Props {
@@ -122,7 +93,11 @@ interface Props {
   onOpenTransferReview: () => void;
 }
 
-export default function ExpensesTab({ trackerId, trackerCurrency, expenses, categories, isLoading, month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId, typeFilter, onTypeFilterChange, suspectedTransferCount, onOpenTransferReview }: Props) {
+export default function ExpensesTab({
+  trackerId, trackerCurrency, expenses, categories, isLoading,
+  month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId,
+  typeFilter, onTypeFilterChange, suspectedTransferCount, onOpenTransferReview,
+}: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const deleteExpense = useDeleteExpense();
   const bulkUpdateCategory = useBulkUpdateCategory();
@@ -131,46 +106,32 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const { data: allTrackers } = useTrackers();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelecting, setIsSelecting] = useState(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
 
-  // Bulk category change
   const [showBulkCategoryPicker, setShowBulkCategoryPicker] = useState(false);
   const [bulkCategorySearch, setBulkCategorySearch] = useState('');
-
-  // Bulk delete confirmation
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
-
-  // Bulk move to another tracker
   const [showMoveTrackerPicker, setShowMoveTrackerPicker] = useState(false);
 
-  // Sort state — persists in localStorage
   const [sortBy, setSortBy] = useState<SortOption>(() => readSortPref(trackerId));
-  const [sortOpen, setSortOpen] = useState(false);
-
   const handleSortChange = (value: SortOption) => {
     setSortBy(value);
     writeSortPref(trackerId, value);
-    setSortOpen(false);
   };
 
-  // Filter state — persists across month changes, resets on page exit (component unmount)
   const [filterUsers, setFilterUsers] = useState<Set<string>>(new Set());
   const [filterCategories, setFilterCategories] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // Auto-apply filters from URL params (e.g. from dashboard category click)
   const filterAppliedRef = useRef(false);
   useEffect(() => {
     if (filterAppliedRef.current) return;
     const urlFilterCat = searchParams.get('filterCategory');
-    const urlFilterType = searchParams.get('type');
     if (urlFilterCat) {
       setFilterCategories(new Set([urlFilterCat]));
-      // Clean up the URL param after applying
       setSearchParams(prev => {
         const params = new URLSearchParams(prev);
         params.delete('filterCategory');
@@ -181,55 +142,30 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   }, [searchParams, setSearchParams]);
 
   const monthLabel = months.find(m => m.value === month)?.label || month;
-
-  // Extract unique users from current expenses
-  const uniqueUsers = useMemo(() => {
-    const map = new Map<string, string>(); // id -> name
-    expenses.forEach(e => {
-      const key = e.created_by_id || `deleted-${e.created_by_name}`;
-      const name = e.created_by_profile?.full_name || e.created_by_name || 'Deleted User';
-      if (key && !map.has(key)) {
-        map.set(key, name);
-      }
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [expenses]);
-
-  // Extract categories used in current expenses
-  const usedCategories = useMemo(() => {
-    const ids = new Set(expenses.map(e => e.category_id));
-    return categories.filter(c => ids.has(c.id));
-  }, [expenses, categories]);
-
   const activeFilterCount = filterUsers.size + filterCategories.size;
 
-  // Clear selection when month or type filter changes
   useEffect(() => {
     setSelectedIds(new Set());
     setIsSelecting(false);
   }, [month, typeFilter]);
 
-  // Apply all filters: type + user + category
+  // Hero shows unfiltered (by user/cat) but type-filtered totals from the month
+  const monthSpend = useMemo(() => expenses.filter(e => e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0), [expenses]);
+  const monthEarn = useMemo(() => expenses.filter(e => !e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0), [expenses]);
+
   const filteredExpenses = useMemo(() => {
     let result = expenses;
-
-    // Type filter
     if (typeFilter === 'debit') result = result.filter(e => e.is_debit);
     else if (typeFilter === 'credit') result = result.filter(e => !e.is_debit);
-
-    // User filter
     if (filterUsers.size > 0) {
       result = result.filter(e => {
         const key = e.created_by_id || `deleted-${e.created_by_name}`;
         return filterUsers.has(key);
       });
     }
-
-    // Category filter
     if (filterCategories.size > 0) {
       result = result.filter(e => filterCategories.has(e.category_id));
     }
-
     return result;
   }, [expenses, typeFilter, filterUsers, filterCategories]);
 
@@ -237,37 +173,29 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const isAscending = sortBy === 'date-asc' || sortBy === 'category-asc';
 
   const groups = useMemo(() => {
-    if (isCategorySort) {
-      return groupByCategory(filteredExpenses, categories, isAscending);
-    }
+    if (isCategorySort) return groupByCategory(filteredExpenses, categories, isAscending);
     return groupByDate(filteredExpenses, isAscending);
   }, [filteredExpenses, sortBy, categories, isCategorySort, isAscending]);
 
-  // Toggle helpers for filter multi-select
   const toggleFilterUser = (uid: string) => {
     setFilterUsers(prev => {
       const next = new Set(prev);
-      if (next.has(uid)) next.delete(uid);
-      else next.add(uid);
+      if (next.has(uid)) next.delete(uid); else next.add(uid);
       return next;
     });
   };
-
   const toggleFilterCategory = (catId: string) => {
     setFilterCategories(prev => {
       const next = new Set(prev);
-      if (next.has(catId)) next.delete(catId);
-      else next.add(catId);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
       return next;
     });
   };
-
   const clearAllFilters = () => {
     setFilterUsers(new Set());
     setFilterCategories(new Set());
   };
 
-  // Long press handlers
   const handlePointerDown = useCallback((expenseId: string) => {
     longPressTriggeredRef.current = false;
     longPressTimerRef.current = setTimeout(() => {
@@ -277,14 +205,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
     }, 500);
   }, []);
 
-  const handlePointerUp = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  }, []);
-
-  const handlePointerLeave = useCallback(() => {
+  const handlePointerCancel = useCallback(() => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -296,9 +217,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
       const next = new Set(prev);
       if (next.has(expenseId)) {
         next.delete(expenseId);
-        if (next.size === 0) {
-          setIsSelecting(false);
-        }
+        if (next.size === 0) setIsSelecting(false);
       } else {
         next.add(expenseId);
       }
@@ -312,19 +231,12 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   }, []);
 
   const handleCardClick = useCallback((expense: Expense) => {
-    if (longPressTriggeredRef.current) {
-      return;
-    }
-    if (isSelecting) {
-      toggleSelect(expense.id);
-    }
+    if (longPressTriggeredRef.current) return;
+    if (isSelecting) toggleSelect(expense.id);
   }, [isSelecting, toggleSelect]);
 
-  // Bulk category change
   const sortedBulkCategories = (() => {
-    const filtered = categories.filter(c =>
-      c.name.toLowerCase().includes(bulkCategorySearch.toLowerCase())
-    );
+    const filtered = categories.filter(c => c.name.toLowerCase().includes(bulkCategorySearch.toLowerCase()));
     const selectedExpenses = filteredExpenses.filter(e => selectedIds.has(e.id));
     const mostlyCredits = selectedExpenses.filter(e => !e.is_debit).length > selectedExpenses.length / 2;
     if (mostlyCredits) {
@@ -352,17 +264,12 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   const handleBulkMove = async (targetTrackerId: string) => {
     const ids = Array.from(selectedIds);
     setShowMoveTrackerPicker(false);
-
-    // Fetch target tracker's categories
     const { data: targetCats } = await (await import('@/integrations/supabase/client')).supabase
       .from('categories')
       .select('*')
       .or(`is_system.eq.true,tracker_id.eq.${targetTrackerId}`);
-
     await bulkMoveExpenses.mutateAsync({
-      ids,
-      targetTrackerId,
-      expenses,
+      ids, targetTrackerId, expenses,
       sourceCategories: categories,
       targetCategories: (targetCats || []) as Category[],
     });
@@ -370,212 +277,58 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
   };
 
   const otherTrackers = (allTrackers || []).filter(t => t.id !== trackerId);
-
   const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
+  const symbol = getCurrency(trackerCurrency).symbol;
 
   return (
-    <div className="px-4 py-3 space-y-3">
-      {/* Selection header bar */}
+    <div className="pb-4">
+      {/* Selection header */}
       {isSelecting && (
-        <div className="flex items-center justify-between bg-primary/10 rounded-xl px-3 py-2 -mx-1">
-          <div className="flex items-center gap-2">
-            <button onClick={clearSelection} className="p-1 rounded-full hover:bg-primary/20 transition-colors">
-              <X className="h-5 w-5 text-primary" />
-            </button>
-            <span className="text-sm font-semibold text-primary">{selectedIds.size} selected</span>
-          </div>
+        <div className="mx-4 mt-1 mb-3 px-3 py-2.5 rounded-2xl flex items-center gap-3" style={{ background: 'hsl(var(--ink))', color: 'hsl(var(--background))' }}>
+          <button onClick={clearSelection} className="p-0">
+            <X size={18} color="currentColor" />
+          </button>
+          <div className="flex-1 font-semibold text-[14px]">{selectedIds.size} selected</div>
           <button
-            onClick={() => {
-              const allIds = new Set(filteredExpenses.map(e => e.id));
-              setSelectedIds(allIds);
-            }}
-            className="text-xs font-medium text-primary hover:underline"
+            onClick={() => setSelectedIds(new Set(filteredExpenses.map(e => e.id)))}
+            className="text-[12px] font-semibold opacity-90"
           >
-            Select All
+            Select all
           </button>
         </div>
       )}
 
-      {/* Month selector */}
       {!isSelecting && (
-        <div className="flex items-center gap-2">
-          <MonthSelector month={month} months={months} onMonthChange={onMonthChange} className="flex-1 min-w-0" />
-          {/* Review suspected internal transfers */}
-          {suspectedTransferCount > 0 && (
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={onOpenTransferReview}
-                    className="relative p-2 text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
-                  >
-                    <ArrowLeftRight className="h-5 w-5" />
-                    <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full bg-amber-500 text-[10px] font-bold text-white flex items-center justify-center">
-                      {suspectedTransferCount}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>Review {suspectedTransferCount} possible transfer{suspectedTransferCount !== 1 ? 's' : ''}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {/* Sort button */}
-          <Popover open={sortOpen} onOpenChange={setSortOpen}>
-            <PopoverTrigger asChild>
-              <button className={`relative p-2 transition-colors ${sortBy !== 'date-desc' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                <ArrowUpDown className="h-5 w-5" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-56 p-1" sideOffset={8}>
-              {SORT_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => handleSortChange(opt.value)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    sortBy === opt.value ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
-                  }`}
-                >
-                  <span className="flex-1 text-left">{opt.label}</span>
-                  {sortBy === opt.value && <Check className="h-4 w-4 text-primary shrink-0" />}
-                </button>
-              ))}
-            </PopoverContent>
-          </Popover>
-          {/* Filter button */}
-          <div className="relative">
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-            <PopoverTrigger asChild>
-              <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
-                <SlidersHorizontal className="h-5 w-5" />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-0" sideOffset={8}>
-              <div className="p-3 border-b border-border flex items-center justify-between">
-                <p className="text-sm font-semibold">Filters</p>
-                {activeFilterCount > 0 && (
-                  <button onClick={clearAllFilters} className="text-xs text-primary font-medium hover:underline">
-                    Clear all
-                  </button>
-                )}
-              </div>
+        <>
+          <HeroSummary
+            monthLabel={monthLabel}
+            spend={monthSpend}
+            earn={monthEarn}
+            currencyCode={trackerCurrency}
+          />
 
-              <div className="max-h-[60vh] overflow-y-auto">
-                {/* Users section */}
-                {uniqueUsers.length > 1 && (
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">By User</p>
-                    <div className="space-y-0.5">
-                      {uniqueUsers.map(u => {
-                        const isActive = filterUsers.has(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            onClick={() => toggleFilterUser(u.id)}
-                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                              isActive ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
-                            }`}
-                          >
-                            <div className={`h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
-                              isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                            }`}>
-                              {u.name.charAt(0).toUpperCase()}
-                            </div>
-                            <span className="flex-1 text-left truncate">{u.name}</span>
-                            {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+          <TrackerToolBar
+            monthLabel={monthLabel}
+            months={months}
+            currentMonth={month}
+            onMonthChange={onMonthChange}
+            sort={sortBy}
+            onSortChange={handleSortChange}
+            filterCount={activeFilterCount}
+            onOpenFilter={() => setFilterOpen(true)}
+            transferCount={suspectedTransferCount}
+            onOpenTransferReview={onOpenTransferReview}
+          />
 
-                {/* Categories section */}
-                <div className="p-3">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">By Category</p>
-                  <div className="space-y-0.5">
-                    {usedCategories.map(cat => {
-                      const isActive = filterCategories.has(cat.id);
-                      return (
-                        <button
-                          key={cat.id}
-                          onClick={() => toggleFilterCategory(cat.id)}
-                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                            isActive ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground'
-                          }`}
-                        >
-                          <span
-                            className="h-6 w-6 rounded-full flex items-center justify-center shrink-0"
-                            style={{ backgroundColor: cat.color + '20' }}
-                          >
-                            <CategoryIcon icon={cat.icon} color={cat.color} size={13} />
-                          </span>
-                          <span className="flex-1 text-left truncate">{cat.name}</span>
-                          {isActive && <Check className="h-4 w-4 text-primary shrink-0" />}
-                        </button>
-                      );
-                    })}
-                    {usedCategories.length === 0 && (
-                      <p className="text-xs text-muted-foreground py-2">No categories in this month</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <NudgeFilterSort />
-          </div>
-        </div>
+          <TypeSegment value={typeFilter} onChange={onTypeFilterChange} />
+        </>
       )}
-
-      {/* Active filter chips */}
-      {!isSelecting && activeFilterCount > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {Array.from(filterUsers).map(uid => {
-            const user = uniqueUsers.find(u => u.id === uid);
-            return user ? (
-              <span key={uid} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
-                {user.name.split(' ')[0]}
-                <button onClick={() => toggleFilterUser(uid)} className="hover:text-primary/70">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ) : null;
-          })}
-          {Array.from(filterCategories).map(catId => {
-            const cat = categories.find(c => c.id === catId);
-            return cat ? (
-              <span key={catId} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs font-medium">
-                <CategoryIcon icon={cat.icon} color={cat.color} size={11} /> {cat.name}
-                <button onClick={() => toggleFilterCategory(catId)} className="hover:text-primary/70">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ) : null;
-          })}
-          <button onClick={clearAllFilters} className="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
-            Clear all
-          </button>
-        </div>
-      )}
-
-      {/* Type filter */}
-      {!isSelecting && <TransactionTypeFilter value={typeFilter} onChange={onTypeFilterChange} />}
-
-      {/* Net Balance Banner — uses filtered expenses */}
-      {!isSelecting && <NetBalanceBanner expenses={filteredExpenses} monthLabel={monthLabel} activeFilter={typeFilter} currencyCode={trackerCurrency} />}
 
       {/* Loading */}
       {isLoading && (
-        <div className="space-y-3">
+        <div className="space-y-2 mx-4">
           {[1, 2, 3, 4, 5].map(i => (
-            <div key={i} className="rounded-2xl bg-card border border-border p-3 animate-pulse">
+            <div key={i} className="rounded-2xl bg-card border border-line-soft p-3 animate-pulse">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-muted" />
                 <div className="flex-1">
@@ -589,262 +342,116 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         </div>
       )}
 
-      {/* Empty states */}
+      {/* Empty */}
       {!isLoading && filteredExpenses.length === 0 && (
-        <div className="text-center py-16">
+        <div className="text-center py-16 px-4">
+          <Receipt size={64} color="hsl(var(--ink-faint) / 0.45)" className="mx-auto mb-4" />
           {activeFilterCount > 0 ? (
             <>
-              <SlidersHorizontal className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-              <p className="font-semibold text-lg">No matching transactions</p>
-              <p className="text-sm text-muted-foreground mb-4">Try adjusting your filters</p>
+              <p className="font-display font-semibold text-lg text-ink">No matching transactions</p>
+              <p className="text-sm text-ink-soft mb-4">Try adjusting your filters</p>
               <Button variant="outline" onClick={clearAllFilters} className="h-11">Clear Filters</Button>
-            </>
-          ) : typeFilter === 'debit' ? (
-            <>
-              <ArrowUpRight className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-              <p className="font-semibold text-lg">No debit transactions in {monthLabel}</p>
-              <p className="text-sm text-muted-foreground mb-4">All your transactions this month are credits</p>
-            </>
-          ) : typeFilter === 'credit' ? (
-            <>
-              <ArrowDownLeft className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-              <p className="font-semibold text-lg">No credit transactions in {monthLabel}</p>
-              <p className="text-sm text-muted-foreground mb-4">Switch to Debit or All to see your transactions</p>
             </>
           ) : (
             <>
-              <Receipt className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-              <p className="font-semibold text-lg">No transactions in {monthLabel}</p>
-              <p className="text-sm text-muted-foreground mb-4">Add your first transaction</p>
-              <Button onClick={onAddExpense} className="h-11">Add Transaction</Button>
+              <p className="font-display font-semibold text-lg text-ink">No transactions in {monthLabel}</p>
+              <p className="text-sm text-ink-soft mb-4">Add your first transaction</p>
+              <Button onClick={onAddExpense} className="h-11 bg-ember hover:bg-ember/90 text-white">Add Transaction</Button>
             </>
           )}
         </div>
       )}
 
-      {/* Long-press nudge — show once above the list */}
-      {!isLoading && groups.length > 0 && !isSelecting && <NudgeLongPress />}
-
       {/* Transaction groups */}
       {!isLoading && groups.map(([groupKey, items]) => {
         const groupDebits = items.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
         const groupCredits = items.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
-
-        // For category sort, find the category to show icon+color in header
-        const groupCategory = isCategorySort ? categories.find(c => c.name === groupKey) : null;
+        const net = groupCredits - groupDebits;
+        const netClass: 'pos' | 'neg' | 'neutral' = net > 0 ? 'pos' : net < 0 ? 'neg' : 'neutral';
+        const netLabel = net === 0
+          ? '—'
+          : (net > 0 ? `+${symbol}${Math.round(Math.abs(net)).toLocaleString('en-IN')}` : `−${symbol}${Math.round(Math.abs(net)).toLocaleString('en-IN')}`);
+        const groupCategory = isCategorySort ? categories.find(c => c.name === groupKey) || null : null;
+        const label = isCategorySort ? groupKey : formatDateHeader(groupKey);
 
         return (
           <div key={groupKey}>
-            <div className="sticky top-[105px] bg-page-gradient py-1.5 z-[5]">
-              <div className="date-header py-1">
-                {isCategorySort ? (
-                  <div className="flex items-center gap-2">
-                    {groupCategory && (
-                      <span
-                        className="h-5 w-5 rounded-full flex items-center justify-center text-xs"
-                        style={{ backgroundColor: (groupCategory.color || '#ccc') + '20' }}
-                      >
-                        {groupCategory.icon}
-                      </span>
-                    )}
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      {groupKey}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {formatDateHeader(groupKey)}
-                  </p>
-                )}
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  <span className="text-red-500">↑ {formatAmountShort(groupDebits, trackerCurrency)}</span>
-                  {' '}
-                  <span className="text-emerald-500">↓ {formatAmountShort(groupCredits, trackerCurrency)}</span>
-                  {' · '}
-                  <span>{items.length} txn{items.length !== 1 ? 's' : ''}</span>
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {items.map((expense, txIdx) => {
-                const canModify = expense.created_by_id === userId || isAdmin;
-                const isSelected = selectedIds.has(expense.id);
-                return (
-                  <div
-                    key={expense.id}
-                    className={`rounded-2xl border p-3 shadow-sm transition-all duration-200 hover:shadow-md animate-stagger ${
-                      isSelected ? 'border-primary bg-primary/5' : expense.is_transfer ? 'border-amber-200 dark:border-amber-800 opacity-60 bg-card' : 'glass-card border-0'
-                    }`}
-                    style={{ animationDelay: `${txIdx * 0.04}s` }}
-                    onPointerDown={() => handlePointerDown(expense.id)}
-                    onPointerUp={handlePointerUp}
-                    onPointerLeave={handlePointerLeave}
-                    onContextMenu={(e) => e.preventDefault()}
-                  >
-                    <button
-                      onClick={() => handleCardClick(expense)}
-                      className="w-full text-left"
-                    >
-                      <div className="flex items-center gap-3">
-                        {/* Checkbox in selection mode */}
-                        {isSelecting && (
-                          <div
-                            className={`h-5 w-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
-                              isSelected
-                                ? 'bg-primary border-primary'
-                                : 'border-muted-foreground/40 bg-card'
-                            }`}
-                            onClick={(e) => { e.stopPropagation(); toggleSelect(expense.id); }}
-                          >
-                            {isSelected && (
-                              <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                        )}
-                        <div
-                          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
-                          style={{ backgroundColor: expense.category?.color + '20' }}
-                        >
-                          <CategoryIcon icon={expense.category?.icon || 'Tag'} color={expense.category?.color || '#6366f1'} size={22} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{expense.category?.name}</p>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-[11px] text-muted-foreground">by {expense.created_by_profile?.full_name?.split(' ')[0] || expense.created_by_name?.split(' ')[0] || 'Deleted User'}</span>
-                            {expense.bank_name && (
-                              <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
-                                {expense.bank_name}
-                              </span>
-                            )}
-                            {expense.payment_method && (
-                              <span className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium ${
-                                expense.payment_method === 'UPI' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                                : expense.payment_method === 'Credit Card' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                                : expense.payment_method === 'Debit Card' ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
-                                : expense.payment_method === 'Online' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-                                : expense.payment_method === 'Cash' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                              }`}>
-                                {expense.payment_method}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="flex items-center justify-end gap-1">
-                            {!expense.is_debit && <ArrowDownLeft className="h-3 w-3 text-emerald-500" />}
-                            <p className={`font-mono font-semibold text-sm ${expense.is_debit ? 'text-foreground' : 'text-emerald-600'}`}>
-                              {expense.is_debit ? '' : '+'}{formatAmountShort(expense.amount, trackerCurrency)}
-                            </p>
-                          </div>
-                          <p className="text-xs text-muted-foreground">{format(new Date(expense.date + 'T00:00:00'), 'd MMM')}</p>
-                        </div>
-                      </div>
-                      {!isSelecting && (
-                        <div className="mt-2 pl-[52px] flex items-start gap-2">
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <p className="text-sm text-foreground text-left truncate">{expense.description}</p>
-                              {expense.is_transfer && (
-                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-medium dark:bg-amber-900/30 dark:text-amber-400">
-                                  ↔ Transfer
-                                </span>
-                              )}
-                            </div>
-                            {expense.conversion_note && (
-                              <p className="text-[11px] text-muted-foreground text-left italic">{expense.conversion_note}</p>
-                            )}
-                            {expense.notes && (
-                              <p className="text-xs text-muted-foreground text-left line-clamp-2">{expense.notes}</p>
-                            )}
-                          </div>
-                          {canModify && (
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onEditExpense(expense.id); }}
-                                className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <button
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="p-1.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
-                                    <AlertDialogDescription>This will permanently delete &quot;{expense.description}&quot;.</AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => deleteExpense.mutate(expense.id)} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+            <DayHeader label={label} netLabel={netLabel} netClass={netClass} category={groupCategory} />
+            {items.map(expense => {
+              const canModify = expense.created_by_id === userId || isAdmin;
+              return (
+                <TxnRow
+                  key={expense.id}
+                  expense={expense}
+                  trackerCurrency={trackerCurrency}
+                  selectMode={isSelecting}
+                  selected={selectedIds.has(expense.id)}
+                  canModify={canModify}
+                  onSelect={toggleSelect}
+                  onEdit={onEditExpense}
+                  onDelete={(id) => deleteExpense.mutate(id)}
+                  onLongPressStart={handlePointerDown}
+                  onLongPressCancel={handlePointerCancel}
+                  onClick={handleCardClick}
+                />
+              );
+            })}
           </div>
         );
       })}
 
-      {/* Sticky bottom action bar for multi-select */}
+      {/* Floating Add */}
+      {!isSelecting && <FloatingAdd onClick={onAddExpense} label="Add transaction" />}
+
+      {/* Multi-select action bar */}
       {isSelecting && selectedIds.size > 0 && (
-        <div className="fixed bottom-20 left-0 right-0 z-50 px-4 pb-2">
-          <div className="max-w-lg mx-auto bg-card border border-border rounded-2xl shadow-lg p-3 flex items-center gap-2">
-            <div className="flex-1 text-sm font-medium text-foreground">
-              {selectedIds.size} selected
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-9 gap-1.5"
+        <div className="fixed left-0 right-0 z-50 px-4" style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 76px)' }}>
+          <div className="max-w-lg mx-auto bg-card border border-line rounded-2xl shadow-lg p-2.5 flex items-center gap-2">
+            <div className="flex-1 text-[12.5px] font-semibold text-ink-soft pl-1">{selectedIds.size} selected</div>
+            <button
               onClick={() => { setBulkCategorySearch(''); setShowBulkCategoryPicker(true); }}
               disabled={isBulkPending}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-[12px] font-semibold text-ink"
             >
-              <Tag className="h-4 w-4" />
-              Category
-            </Button>
+              <Tag size={14} /> Category
+            </button>
             {otherTrackers.length > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-9 gap-1.5"
+              <button
                 onClick={() => setShowMoveTrackerPicker(true)}
                 disabled={isBulkPending}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-[12px] font-semibold text-ink"
               >
-                {bulkMoveExpenses.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoveRight className="h-4 w-4" />}
+                {bulkMoveExpenses.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowsClockwise size={14} />}
                 Move
-              </Button>
+              </button>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-9 gap-1.5 border-destructive text-destructive hover:bg-destructive/10"
+            <button
               onClick={() => setShowBulkDeleteConfirm(true)}
               disabled={isBulkPending}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-spend text-[12px] font-semibold text-spend"
             >
-              {bulkDeleteExpenses.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {bulkDeleteExpenses.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash size={14} />}
               Delete
-            </Button>
+            </button>
           </div>
         </div>
       )}
 
-      {/* Bulk Category Picker Sheet */}
+      {/* Filter sheet */}
+      <FilterSheet
+        open={filterOpen}
+        onOpenChange={setFilterOpen}
+        expenses={expenses}
+        matchingCount={filteredExpenses.length}
+        categories={categories}
+        selectedUsers={filterUsers}
+        selectedCategories={filterCategories}
+        onToggleUser={toggleFilterUser}
+        onToggleCategory={toggleFilterCategory}
+        onClearAll={clearAllFilters}
+      />
+
+      {/* Bulk Category Picker */}
       <Sheet open={showBulkCategoryPicker} onOpenChange={setShowBulkCategoryPicker}>
         <SheetContent side="bottom" className="rounded-t-2xl h-[70dvh]">
           <SheetHeader>
@@ -852,7 +459,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
           </SheetHeader>
           <div className="py-3 space-y-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2" size={16} color="hsl(var(--ink-faint))" />
               <Input
                 value={bulkCategorySearch}
                 onChange={e => setBulkCategorySearch(e.target.value)}
@@ -868,11 +475,9 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                   className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted"
                   disabled={isBulkPending}
                 >
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: cat.color + '20' }}>
-                    <CategoryIcon icon={cat.icon} color={cat.color} size={18} />
-                  </span>
+                  <CategoryDot icon={cat.icon} color={cat.color} size={32} />
                   <span className="font-medium text-sm">{cat.name}</span>
-                  {!cat.is_system && <span className="text-xs text-muted-foreground ml-auto">Custom</span>}
+                  {!cat.is_system && <span className="text-xs text-ink-faint ml-auto">Custom</span>}
                 </button>
               ))}
             </div>
@@ -880,7 +485,7 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
         </SheetContent>
       </Sheet>
 
-      {/* Bulk Delete Confirmation */}
+      {/* Bulk delete confirmation */}
       <AlertDialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -891,17 +496,14 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleBulkDelete}
-              className="bg-destructive text-destructive-foreground"
-            >
+            <AlertDialogAction onClick={handleBulkDelete} className="bg-spend text-white hover:bg-spend/90">
               Delete All
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Move to Tracker Sheet */}
+      {/* Move sheet */}
       <Sheet open={showMoveTrackerPicker} onOpenChange={setShowMoveTrackerPicker}>
         <SheetContent side="bottom" className="rounded-t-2xl">
           <SheetHeader>
@@ -915,21 +517,20 @@ export default function ExpensesTab({ trackerId, trackerCurrency, expenses, cate
                 disabled={isBulkPending}
                 className="w-full flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted"
               >
-                <div className="w-1 h-8 rounded-full bg-primary shrink-0" />
+                <div className="w-1 h-8 rounded-full bg-ember shrink-0" />
                 <div className="flex-1 text-left">
                   <p className="text-sm font-medium">{t.name}</p>
-                  <p className="text-xs text-muted-foreground">{t.member_count} member{t.member_count !== 1 ? 's' : ''}</p>
+                  <p className="text-xs text-ink-faint">{t.member_count} member{t.member_count !== 1 ? 's' : ''}</p>
                 </div>
-                <MoveRight className="h-4 w-4 text-muted-foreground" />
+                <ArrowsLeftRight size={14} color="hsl(var(--ink-faint))" />
               </button>
             ))}
             {otherTrackers.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">No other trackers available</p>
+              <p className="text-sm text-ink-faint text-center py-4">No other trackers available</p>
             )}
           </div>
         </SheetContent>
       </Sheet>
-
     </div>
   );
 }

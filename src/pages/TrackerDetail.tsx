@@ -5,8 +5,6 @@ import { useExpenses, useExpenseRealtime, useExpenseMonths, useSuspectedTransfer
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useTransactionTypeFilter } from '@/hooks/useTransactionTypeFilter';
-import { ArrowLeft, Upload } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BottomNav from '@/components/BottomNav';
 import ExpensesTab from '@/components/tracker/ExpensesTab';
 import DashboardTab from '@/components/tracker/DashboardTab';
@@ -14,17 +12,12 @@ import SettingsTab from '@/components/tracker/SettingsTab';
 import AddExpenseSheet from '@/components/tracker/AddExpenseSheet';
 import TransferReviewModal from '@/components/tracker/TransferReviewModal';
 import TransferReviewSheet from '@/components/tracker/TransferReviewSheet';
-import Nudge from '@/components/Nudge';
-import { useNudge } from '@/hooks/useNudge';
+import TrackerTopBar from '@/components/tracker/TrackerTopBar';
+import TrackerTabBar from '@/components/tracker/TrackerTabBar';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
 const dismissKey = (trackerId: string) => `transfer-review-dismissed-${trackerId}`;
-
-function NudgeUpload() {
-  const { show, dismiss } = useNudge('tracker-upload-statement', 2000);
-  return <Nudge show={show} onDismiss={dismiss} message="Import transactions from your bank statement — PDF, CSV, or Excel. AI will categorise them for you." position="bottom" />;
-}
 
 export default function TrackerDetail() {
   const { trackerId } = useParams<{ trackerId: string }>();
@@ -33,14 +26,13 @@ export default function TrackerDetail() {
   const { user } = useAuth();
   const { setActiveTrackerId } = useApp();
 
-  const tab = searchParams.get('tab') || 'expenses';
+  const tab = (searchParams.get('tab') || 'expenses') as 'expenses' | 'dashboard' | 'settings';
 
   const { data: tracker, isError: trackerError } = useTracker(trackerId!);
   const { data: members, isFetched: membersFetched } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
   const { data: availableMonths } = useExpenseMonths(trackerId!);
 
-  // Default to latest month with data (first non-'all' entry), fallback to current month
   const latestMonth = availableMonths?.find(m => m.value !== 'all')?.value || format(new Date(), 'yyyy-MM');
   const month = searchParams.get('month') || latestMonth;
 
@@ -50,12 +42,10 @@ export default function TrackerDetail() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
-  // ── Suspected transfer review flow ──
   const { data: suspectedTransfers } = useSuspectedTransfers(trackerId!);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showTransferSheet, setShowTransferSheet] = useState(false);
 
-  // Show the popup once per session per tracker, if there are open suspects
   useEffect(() => {
     if (!trackerId || !suspectedTransfers || suspectedTransfers.length === 0) return;
     const dismissed = typeof window !== 'undefined'
@@ -92,7 +82,7 @@ export default function TrackerDetail() {
 
   const isAdmin = members?.some(m => m.user_id === user?.id && m.role === 'admin') ?? false;
 
-  const setTab = (t: string) => {
+  const setTab = (t: 'expenses' | 'dashboard' | 'settings') => {
     const params = new URLSearchParams(searchParams);
     params.set('tab', t);
     setSearchParams(params);
@@ -104,7 +94,6 @@ export default function TrackerDetail() {
     setSearchParams(params);
   };
 
-  // Redirect if tracker doesn't exist or user is not a member
   useEffect(() => {
     if (trackerError) {
       toast.error('Tracker not found');
@@ -117,82 +106,66 @@ export default function TrackerDetail() {
 
   if (!tracker) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+      <div className="animate-pulse text-ink-soft">Loading...</div>
     </div>
   );
 
+  const memberCount = members?.length || 0;
+  const transferCount = suspectedTransfers?.length || 0;
+
   return (
-    <div className="flex flex-col min-h-screen bg-page-gradient pb-20">
-      {/* Top Bar */}
-      <div className="sticky top-0 z-10 glass-nav border-b border-border/50 px-4 py-3">
-        <div className="flex items-center justify-between max-w-lg mx-auto">
-          <button onClick={() => navigate('/')} className="p-1">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="font-semibold text-base truncate flex-1 text-center mx-2">{tracker.name}</h1>
-          <div className="relative">
-            <button onClick={() => navigate(`/tracker/${trackerId}/upload`)} className="p-1 text-muted-foreground hover:text-foreground">
-              <Upload className="h-5 w-5" />
-            </button>
-            <NudgeUpload />
-          </div>
-        </div>
-      </div>
+    <div className="flex flex-col min-h-screen bg-background pb-24">
+      <TrackerTopBar trackerId={trackerId!} trackerName={tracker.name} memberCount={memberCount} />
 
-      {/* Tabs */}
       <div className="max-w-lg mx-auto w-full flex-1">
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid w-full grid-cols-3 sticky top-[57px] z-10 glass-nav rounded-none h-12 p-1 gap-1 border-b border-border/40">
-            <TabsTrigger value="expenses" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Transactions</TabsTrigger>
-            <TabsTrigger value="dashboard" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Dashboard</TabsTrigger>
-            <TabsTrigger value="settings" className="data-[state=active]:bg-indigo-50 data-[state=active]:text-indigo-700 data-[state=active]:font-semibold data-[state=active]:shadow-sm dark:data-[state=active]:bg-indigo-950/40 dark:data-[state=active]:text-indigo-300 rounded-lg h-full transition-all duration-200">Settings</TabsTrigger>
-          </TabsList>
+        <TrackerTabBar active={tab} onChange={setTab} />
 
-          <TabsContent value="expenses" className="mt-0">
-            <ExpensesTab
-              trackerId={trackerId!}
-              trackerCurrency={tracker.currency || 'INR'}
-              expenses={expenses || []}
-              categories={categories || []}
-              isLoading={expensesLoading}
-              month={month}
-              onMonthChange={setMonth}
-              onAddExpense={() => setShowAddExpense(true)}
-              onEditExpense={(id) => { setEditingExpenseId(id); setShowAddExpense(true); }}
-              isAdmin={isAdmin}
-              userId={user?.id || ''}
-              typeFilter={typeFilter}
-              onTypeFilterChange={setTypeFilter}
-              suspectedTransferCount={suspectedTransfers?.length || 0}
-              onOpenTransferReview={() => setShowTransferSheet(true)}
-            />
-          </TabsContent>
+        {tab === 'expenses' && (
+          <ExpensesTab
+            trackerId={trackerId!}
+            trackerCurrency={tracker.currency || 'INR'}
+            expenses={expenses || []}
+            categories={categories || []}
+            isLoading={expensesLoading}
+            month={month}
+            onMonthChange={setMonth}
+            onAddExpense={() => setShowAddExpense(true)}
+            onEditExpense={(id) => { setEditingExpenseId(id); setShowAddExpense(true); }}
+            isAdmin={isAdmin}
+            userId={user?.id || ''}
+            typeFilter={typeFilter}
+            onTypeFilterChange={setTypeFilter}
+            suspectedTransferCount={transferCount}
+            onOpenTransferReview={() => setShowTransferSheet(true)}
+          />
+        )}
 
-          <TabsContent value="dashboard" className="mt-0">
-            <DashboardTab
-              trackerId={trackerId!}
-              trackerCurrency={tracker.currency || 'INR'}
-              expenses={expenses || []}
-              categories={categories || []}
-              month={month}
-              onMonthChange={setMonth}
-              isLoading={expensesLoading}
-              typeFilter={typeFilter}
-              onTypeFilterChange={setTypeFilter}
-            />
-          </TabsContent>
+        {tab === 'dashboard' && (
+          <DashboardTab
+            trackerId={trackerId!}
+            trackerCurrency={tracker.currency || 'INR'}
+            expenses={expenses || []}
+            categories={categories || []}
+            month={month}
+            onMonthChange={setMonth}
+            isLoading={expensesLoading}
+            typeFilter={typeFilter}
+            onTypeFilterChange={setTypeFilter}
+            suspectedTransferCount={transferCount}
+            onOpenTransferReview={() => setShowTransferSheet(true)}
+          />
+        )}
 
-          <TabsContent value="settings" className="mt-0">
-            <SettingsTab
-              trackerId={trackerId!}
-              tracker={tracker}
-              members={members || []}
-              categories={categories || []}
-              isAdmin={isAdmin}
-              userId={user?.id || ''}
-            />
-          </TabsContent>
-        </Tabs>
+        {tab === 'settings' && (
+          <SettingsTab
+            trackerId={trackerId!}
+            tracker={tracker}
+            members={members || []}
+            categories={categories || []}
+            isAdmin={isAdmin}
+            userId={user?.id || ''}
+          />
+        )}
       </div>
 
       <AddExpenseSheet
@@ -208,7 +181,7 @@ export default function TrackerDetail() {
       <TransferReviewModal
         open={showTransferModal}
         onOpenChange={setShowTransferModal}
-        count={suspectedTransfers?.length || 0}
+        count={transferCount}
         onReview={handleReviewTransfers}
         onDismiss={handleDismissTransfers}
       />
