@@ -272,42 +272,42 @@ export default function TxnRow({
                 {expense.merchant_name || expense.description}
               </p>
 
-              {/* Row 2: [category · transfer chip] ............ by FirstName */}
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-soft font-medium">
-                <div className="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
-                  {cat && (
-                    <span className="inline-flex items-center gap-1">
-                      <span
-                        className="inline-block rounded-full"
-                        style={{ width: 6, height: 6, background: cat.color }}
-                      />
-                      {cat.name}
+              {/* Row 2: category · transfer chip */}
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-soft font-medium flex-wrap">
+                {cat && (
+                  <span className="inline-flex items-center gap-1">
+                    <span
+                      className="inline-block rounded-full"
+                      style={{ width: 6, height: 6, background: cat.color }}
+                    />
+                    {cat.name}
+                  </span>
+                )}
+                {expense.is_transfer && (
+                  <>
+                    <span className="opacity-40">·</span>
+                    <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-warn/15 text-warn">
+                      ↔ Transfer
                     </span>
-                  )}
-                  {expense.is_transfer && (
-                    <>
-                      <span className="opacity-40">·</span>
-                      <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-warn/15 text-warn">
-                        ↔ Transfer
-                      </span>
-                    </>
-                  )}
-                </div>
-                <span className="text-[10.5px] text-ink-faint font-medium shrink-0">
-                  {expense.created_by_profile?.full_name?.split(' ')[0] ||
-                    expense.created_by_name?.split(' ')[0] ||
-                    'Deleted'}
-                </span>
+                  </>
+                )}
               </div>
             </div>
 
-            <div
-              className="text-right shrink-0 inline-flex items-center justify-end gap-0.5 font-mono font-semibold text-[15px] tabular-nums"
-              style={{ color: amountColor }}
-            >
-              {isCredit && <ArrowDownLeft size={11} weight="bold" />}
-              {isCredit ? '+' : ''}
-              {formatAmountShort(expense.amount, trackerCurrency)}
+            <div className="text-right shrink-0">
+              <div
+                className="inline-flex items-center justify-end gap-0.5 font-mono font-semibold text-[15px] tabular-nums"
+                style={{ color: amountColor }}
+              >
+                {isCredit && <ArrowDownLeft size={11} weight="bold" />}
+                {isCredit ? '+' : ''}
+                {formatAmountShort(expense.amount, trackerCurrency)}
+              </div>
+              <p className="text-[10.5px] text-ink-faint font-medium mt-0.5">
+                {expense.created_by_profile?.full_name?.split(' ')[0] ||
+                  expense.created_by_name?.split(' ')[0] ||
+                  'Deleted'}
+              </p>
             </div>
           </div>
 
