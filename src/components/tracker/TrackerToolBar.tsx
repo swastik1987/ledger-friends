@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, ArrowUp, ArrowDown } from '@phosphor-icons/react';
+import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, ArrowUp, ArrowDown, Check } from '@phosphor-icons/react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
