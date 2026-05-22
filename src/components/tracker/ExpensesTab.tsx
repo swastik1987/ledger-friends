@@ -148,8 +148,19 @@ export default function ExpensesTab({
   }, [month, typeFilter]);
 
   // Hero shows unfiltered (by user/cat) but type-filtered totals from the month
-  const monthSpend = useMemo(() => expenses.filter(e => e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0), [expenses]);
-  const monthEarn = useMemo(() => expenses.filter(e => !e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0), [expenses]);
+  // Hero totals are filter-aware: 'credit' filter zeroes spend, 'debit' filter zeroes earn.
+  const monthSpend = useMemo(
+    () => typeFilter === 'credit'
+      ? 0
+      : expenses.filter(e => e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0),
+    [expenses, typeFilter]
+  );
+  const monthEarn = useMemo(
+    () => typeFilter === 'debit'
+      ? 0
+      : expenses.filter(e => !e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0),
+    [expenses, typeFilter]
+  );
 
   const filteredExpenses = useMemo(() => {
     let result = expenses;
