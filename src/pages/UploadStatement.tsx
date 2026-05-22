@@ -695,6 +695,7 @@ export default function UploadStatement() {
       // ── Stage 2b: AI transaction parsing (18% → 80%) ──
       setProgressMessage('🧠 AI is categorising your transactions...');
       const allTransactions: any[] = [];
+      const parseWarnings: string[] = [];
       const chunkProgressRange = 62; // 18% → 80%
 
       // Fetch learned mappings to pass as context hints to Gemini
@@ -743,10 +744,17 @@ export default function UploadStatement() {
         if (error) throw new ParseServiceError();
         const txns = data?.transactions || [];
         allTransactions.push(...txns);
+        if (Array.isArray(data?.warnings)) parseWarnings.push(...data.warnings);
         setProgress(18 + Math.round(((ci + 1) / textChunks.length) * chunkProgressRange));
       }
 
       if (allTransactions.length === 0) throw new NoTransactionsError();
+
+      // Surface server-side partial-parse warnings (chunks that failed inside the edge function)
+      if (parseWarnings.length > 0) {
+        toast.warning(`Some sections couldn't be parsed (${parseWarnings.length}). Review carefully — a few transactions may be missing.`);
+        console.warn('parse-statement warnings:', parseWarnings);
+      }
 
       // ── Stage 3: Build drafts with learned category pre-check (80% → 95%) ──
       setProgress(80);

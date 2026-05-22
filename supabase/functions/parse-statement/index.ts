@@ -283,37 +283,55 @@ serve(async (req) => {
 
     // ── Chunk extractedText to avoid the 150s edge-function idle timeout ──
     // Large statements can take Gemini >150s in one shot. Split by lines into
-    // ~12k-char chunks and process sequentially, merging the results.
-    const CHUNK_CHAR_LIMIT = 12000;
+    // ~22k-char chunks (well under Gemini Flash's comfort zone) and process
+    // with a small concurrency pool. Adjacent chunks overlap by ~200 chars so
+    // any transaction landing on a seam appears in both chunks; a server-side
+    // dedupe pass drops the duplicate before returning.
+    const CHUNK_CHAR_LIMIT = 22_000;
+    const CHUNK_OVERLAP = 200;
     const PER_CALL_TIMEOUT_MS = 110_000;
+    const CONCURRENCY = 2;
 
-    function chunkByLines(text: string, limit: number): string[] {
+    function chunkByLines(text: string, limit: number, overlap: number): string[] {
       const lines = text.split('\n');
-      const chunks: string[] = [];
+      const base: string[] = [];
       let current = '';
       for (const line of lines) {
         if (current.length + line.length + 1 > limit && current.length > 0) {
-          chunks.push(current);
+          base.push(current);
           current = '';
         }
         current += (current ? '\n' : '') + line;
       }
-      if (current) chunks.push(current);
-      return chunks.length > 0 ? chunks : [text];
+      if (current) base.push(current);
+      if (base.length === 0) return [text];
+      if (overlap <= 0 || base.length === 1) return base;
+
+      // Prepend the trailing `overlap` chars of chunk i-1 (snapped to line boundary) to chunk i.
+      const withOverlap: string[] = [base[0]];
+      for (let i = 1; i < base.length; i++) {
+        const prev = base[i - 1];
+        const tail = prev.length > overlap ? prev.slice(prev.length - overlap) : prev;
+        // Snap to line boundary so we don't ship a half line as context.
+        const nlIdx = tail.indexOf('\n');
+        const snapped = nlIdx === -1 ? tail : tail.slice(nlIdx + 1);
+        withOverlap.push((snapped ? snapped + '\n' : '') + base[i]);
+      }
+      return withOverlap;
     }
 
     const chunks = extractedText.length > CHUNK_CHAR_LIMIT
-      ? chunkByLines(extractedText, CHUNK_CHAR_LIMIT)
+      ? chunkByLines(extractedText, CHUNK_CHAR_LIMIT, CHUNK_OVERLAP)
       : [extractedText];
 
     const allowedSet = new Set([...debitCats, ...creditCats]);
     const fallbackDebit = debitCats.includes('Miscellaneous') ? 'Miscellaneous' : debitCats[debitCats.length - 1];
     const fallbackCredit = creditCats.includes('Other Income') ? 'Other Income' : creditCats[creditCats.length - 1];
 
-    const allTransactions: any[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkText = chunks[i];
-      const chunkLabel = chunks.length > 1 ? `CHUNK ${i + 1} of ${chunks.length} — extract transactions in this slice only.\n\n` : '';
+    type ChunkResult = { index: number; ok: true; transactions: any[] } | { index: number; ok: false; error: string };
+
+    async function processChunk(chunkText: string, i: number, n: number): Promise<ChunkResult> {
+      const chunkLabel = n > 1 ? `CHUNK ${i + 1} of ${n} — extract transactions in this slice only.\n\n` : '';
       const userPrompt = [
         formatHint ? `FORMAT_HINT: ${formatHint}\n` : '',
         learnedHint,
@@ -330,6 +348,7 @@ serve(async (req) => {
         },
       };
 
+      const t0 = Date.now();
       let geminiRes: Response;
       try {
         geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
@@ -339,13 +358,14 @@ serve(async (req) => {
           signal: AbortSignal.timeout(PER_CALL_TIMEOUT_MS),
         });
       } catch (e) {
-        console.error(`Gemini fetch failed on chunk ${i + 1}/${chunks.length}:`, e);
-        return new Response(JSON.stringify({ error: `Gemini request timed out on chunk ${i + 1}/${chunks.length}. Try a smaller statement.` }), { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        console.error(`Gemini fetch failed on chunk ${i + 1}/${n} after ${Date.now() - t0}ms:`, e);
+        return { index: i, ok: false, error: `Gemini request timed out on chunk ${i + 1}/${n}` };
       }
 
       if (!geminiRes.ok) {
         const err = await geminiRes.text();
-        return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        console.error(`Gemini API error on chunk ${i + 1}/${n}: ${err.slice(0, 200)}`);
+        return { index: i, ok: false, error: `Gemini API error on chunk ${i + 1}/${n}: HTTP ${geminiRes.status}` };
       }
 
       const geminiData = await geminiRes.json();
@@ -366,10 +386,78 @@ serve(async (req) => {
         }
         return t;
       });
-      allTransactions.push(...transactions);
+      console.log(`Chunk ${i + 1}/${n}: ${transactions.length} txns in ${Date.now() - t0}ms`);
+      return { index: i, ok: true, transactions };
     }
 
-    return new Response(JSON.stringify({ transactions: allTransactions }), {
+    // ── Bounded-concurrency runner: at most CONCURRENCY chunks in flight. ──
+    async function runWithConcurrency(items: string[], limit: number): Promise<ChunkResult[]> {
+      const results: ChunkResult[] = new Array(items.length);
+      let cursor = 0;
+      const worker = async () => {
+        while (true) {
+          const idx = cursor++;
+          if (idx >= items.length) return;
+          results[idx] = await processChunk(items[idx], idx, items.length);
+        }
+      };
+      const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+      await Promise.all(workers);
+      return results;
+    }
+
+    const chunkResults = await runWithConcurrency(chunks, CONCURRENCY);
+
+    // ── Merge in chunk order, collect warnings for failed chunks. ──
+    const merged: any[] = [];
+    const warnings: string[] = [];
+    let successCount = 0;
+    for (const r of chunkResults) {
+      if (r.ok) {
+        merged.push(...r.transactions);
+        successCount++;
+      } else {
+        warnings.push(r.error);
+      }
+    }
+
+    // If every chunk failed, return the same 5xx the previous code would have.
+    if (chunks.length > 0 && successCount === 0) {
+      return new Response(
+        JSON.stringify({ error: warnings[0] || 'All chunks failed to parse.', warnings }),
+        { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── Server-side dedupe: drop exact duplicates surfaced by chunk overlap. ──
+    const seen = new Set<string>();
+    const deduped: any[] = [];
+    let droppedDupes = 0;
+    for (const t of merged) {
+      const dedupeKey = [
+        t?.date ?? '',
+        String(t?.amount ?? ''),
+        String(t?.is_debit ?? ''),
+        String(t?.raw_description ?? t?.description ?? '')
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim(),
+      ].join('|');
+      if (seen.has(dedupeKey)) {
+        droppedDupes++;
+        continue;
+      }
+      seen.add(dedupeKey);
+      deduped.push(t);
+    }
+    if (droppedDupes > 0) {
+      console.log(`Deduped ${droppedDupes} cross-chunk duplicate transactions`);
+    }
+
+    const responseBody: { transactions: any[]; warnings?: string[] } = { transactions: deduped };
+    if (warnings.length > 0) responseBody.warnings = warnings;
+
+    return new Response(JSON.stringify(responseBody), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
