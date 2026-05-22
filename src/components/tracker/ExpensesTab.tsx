@@ -398,7 +398,6 @@ export default function ExpensesTab({
                   selectMode={isSelecting}
                   selected={selectedIds.has(expense.id)}
                   canModify={canModify}
-                  showDate={isAmountSort}
                   onSelect={toggleSelect}
                   onEdit={onEditExpense}
                   onDelete={(id) => deleteExpense.mutate(id)}

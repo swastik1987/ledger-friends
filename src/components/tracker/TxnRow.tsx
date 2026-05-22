@@ -1,6 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ArrowDownLeft, Check, Trash } from '@phosphor-icons/react';
-import { format, parseISO } from 'date-fns';
 import CategoryDot from '@/components/CategoryDot';
 import { Expense } from '@/types';
 import { formatAmountShort } from '@/lib/currencies';
@@ -15,9 +14,6 @@ interface Props {
   selectMode: boolean;
   selected: boolean;
   canModify: boolean;
-  /** When true, render an extra `d MMM` caption under the amount.
-   * Use when the surrounding list isn't grouped by date. */
-  showDate?: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -44,7 +40,7 @@ function paymentClass(method: string) {
 }
 
 export default function TxnRow({
-  expense, trackerCurrency, selectMode, selected, canModify, showDate = false,
+  expense, trackerCurrency, selectMode, selected, canModify,
   onSelect, onEdit, onDelete, onLongPressStart, onLongPressCancel,
 }: Props) {
   const isCredit = !expense.is_debit;
@@ -250,7 +246,7 @@ export default function TxnRow({
         }}
       >
         <div className="p-3">
-          {/* Top row: dot, merchant, amount */}
+          {/* Row 1: dot, merchant, amount */}
           <div className="flex items-center gap-3">
             {selectMode && (
               <span
@@ -276,72 +272,68 @@ export default function TxnRow({
                 {expense.merchant_name || expense.description}
               </p>
 
-              {/* Meta row: category · bank · payment · transfer */}
-              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-soft font-medium flex-wrap">
-                {cat && (
-                  <span className="inline-flex items-center gap-1">
-                    <span
-                      className="inline-block rounded-full"
-                      style={{ width: 6, height: 6, background: cat.color }}
-                    />
-                    {cat.name}
-                  </span>
-                )}
-                {expense.bank_name && (
-                  <>
-                    <span className="opacity-40">·</span>
-                    <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-chip text-ink">
-                      {expense.bank_name}
+              {/* Row 2: [category · transfer chip] ............ by FirstName */}
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink-soft font-medium">
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
+                  {cat && (
+                    <span className="inline-flex items-center gap-1">
+                      <span
+                        className="inline-block rounded-full"
+                        style={{ width: 6, height: 6, background: cat.color }}
+                      />
+                      {cat.name}
                     </span>
-                  </>
-                )}
-                {expense.payment_method && (
-                  <>
-                    <span className="opacity-40">·</span>
-                    <span
-                      className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold ${paymentClass(
-                        expense.payment_method,
-                      )}`}
-                    >
-                      {expense.payment_method}
-                    </span>
-                  </>
-                )}
-                {expense.is_transfer && (
-                  <>
-                    <span className="opacity-40">·</span>
-                    <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-warn/15 text-warn">
-                      ↔ Transfer
-                    </span>
-                  </>
-                )}
+                  )}
+                  {expense.is_transfer && (
+                    <>
+                      <span className="opacity-40">·</span>
+                      <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-warn/15 text-warn">
+                        ↔ Transfer
+                      </span>
+                    </>
+                  )}
+                </div>
+                <span className="text-[10.5px] text-ink-faint font-medium shrink-0">
+                  {expense.created_by_profile?.full_name?.split(' ')[0] ||
+                    expense.created_by_name?.split(' ')[0] ||
+                    'Deleted'}
+                </span>
               </div>
             </div>
 
-            <div className="text-right shrink-0">
-              <div
-                className="inline-flex items-center justify-end gap-0.5 font-mono font-semibold text-[15px] tabular-nums"
-                style={{ color: amountColor }}
-              >
-                {isCredit && <ArrowDownLeft size={11} weight="bold" />}
-                {isCredit ? '+' : ''}
-                {formatAmountShort(expense.amount, trackerCurrency)}
-              </div>
-              <p className="text-[10.5px] text-ink-faint font-medium mt-0.5">
-                {expense.created_by_profile?.full_name?.split(' ')[0] ||
-                  expense.created_by_name?.split(' ')[0] ||
-                  'Deleted'}
-              </p>
-              {showDate && expense.date && (
-                <p className="text-[10px] text-ink-faint font-medium mt-0.5 tabular-nums">
-                  {format(parseISO(expense.date), 'd MMM')}
-                </p>
-              )}
+            <div
+              className="text-right shrink-0 inline-flex items-center justify-end gap-0.5 font-mono font-semibold text-[15px] tabular-nums"
+              style={{ color: amountColor }}
+            >
+              {isCredit && <ArrowDownLeft size={11} weight="bold" />}
+              {isCredit ? '+' : ''}
+              {formatAmountShort(expense.amount, trackerCurrency)}
             </div>
           </div>
 
-          {/* Bottom block: description / conversion / notes — always when present */}
-          {!selectMode && (hasDistinctDescription || expense.conversion_note || expense.notes) && (
+          {/* Row 3: bank pill · payment chip. Only renders when at least one is present. */}
+          {(expense.bank_name || expense.payment_method) && (
+            <div className="mt-1.5 pl-[52px] flex items-center gap-1.5 flex-wrap">
+              {expense.bank_name && (
+                <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-chip text-ink">
+                  {expense.bank_name}
+                </span>
+              )}
+              {expense.payment_method && (
+                <span
+                  className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold ${paymentClass(
+                    expense.payment_method,
+                  )}`}
+                >
+                  {expense.payment_method}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Bottom block: description and conversion note — notes intentionally
+              removed from the card per the latest spec; they still appear in the edit modal. */}
+          {!selectMode && (hasDistinctDescription || expense.conversion_note) && (
             <div className="mt-2 pl-[52px] space-y-0.5">
               {hasDistinctDescription && (
                 <p className="text-[13px] text-ink-soft text-left truncate">
@@ -351,11 +343,6 @@ export default function TxnRow({
               {expense.conversion_note && (
                 <p className="text-[11px] text-ink-faint text-left italic">
                   {expense.conversion_note}
-                </p>
-              )}
-              {expense.notes && (
-                <p className="text-[11px] text-ink-faint text-left line-clamp-2">
-                  {expense.notes}
                 </p>
               )}
             </div>

@@ -60,6 +60,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   const [amount, setAmount] = useState('');
   const [isDebit, setIsDebit] = useState(true);
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [merchantName, setMerchantName] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [notes, setNotes] = useState('');
@@ -77,6 +78,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setAmount(String(editExpense.amount));
       setIsDebit(editExpense.is_debit);
       setDate(editExpense.date);
+      setMerchantName(editExpense.merchant_name || '');
       setDescription(editExpense.description);
       setCategoryId(editExpense.category_id);
       setNotes(editExpense.notes || '');
@@ -89,6 +91,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       setAmount('');
       setIsDebit(true);
       setDate(format(new Date(), 'yyyy-MM-dd'));
+      setMerchantName('');
       setDescription('');
       setCategoryId('');
       setNotes('');
@@ -172,6 +175,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       amount: finalAmount,
       currency: trackerCurrency,
       date,
+      merchant_name: merchantName.trim() || null,
       description,
       notes: notes || null,
       is_debit: isDebit,
@@ -318,6 +322,17 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
             <div className="space-y-1.5">
               <Label>Date</Label>
               <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-11" />
+            </div>
+
+            {/* Merchant */}
+            <div className="space-y-1.5">
+              <Label>Merchant <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                value={merchantName}
+                onChange={e => setMerchantName(e.target.value)}
+                placeholder={isDebit ? 'e.g. Blue Tokai, Amazon' : 'e.g. Acme Corp'}
+                className="h-11"
+              />
             </div>
 
             {/* Description */}
