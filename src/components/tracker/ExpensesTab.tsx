@@ -108,8 +108,6 @@ export default function ExpensesTab({
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelecting, setIsSelecting] = useState(false);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressTriggeredRef = useRef(false);
 
   const [showBulkCategoryPicker, setShowBulkCategoryPicker] = useState(false);
   const [bulkCategorySearch, setBulkCategorySearch] = useState('');
@@ -196,20 +194,10 @@ export default function ExpensesTab({
     setFilterCategories(new Set());
   };
 
-  const handlePointerDown = useCallback((expenseId: string) => {
-    longPressTriggeredRef.current = false;
-    longPressTimerRef.current = setTimeout(() => {
-      longPressTriggeredRef.current = true;
-      setIsSelecting(true);
-      setSelectedIds(new Set([expenseId]));
-    }, 500);
-  }, []);
-
-  const handlePointerCancel = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
+  // TxnRow owns the long-press gesture timer internally; parent just reacts.
+  const handleEnterSelectMode = useCallback((expenseId: string) => {
+    setIsSelecting(true);
+    setSelectedIds(new Set([expenseId]));
   }, []);
 
   const toggleSelect = useCallback((expenseId: string) => {
@@ -229,11 +217,6 @@ export default function ExpensesTab({
     setSelectedIds(new Set());
     setIsSelecting(false);
   }, []);
-
-  const handleCardClick = useCallback((expense: Expense) => {
-    if (longPressTriggeredRef.current) return;
-    if (isSelecting) toggleSelect(expense.id);
-  }, [isSelecting, toggleSelect]);
 
   const sortedBulkCategories = (() => {
     const filtered = categories.filter(c => c.name.toLowerCase().includes(bulkCategorySearch.toLowerCase()));
@@ -390,9 +373,8 @@ export default function ExpensesTab({
                   onSelect={toggleSelect}
                   onEdit={onEditExpense}
                   onDelete={(id) => deleteExpense.mutate(id)}
-                  onLongPressStart={handlePointerDown}
-                  onLongPressCancel={handlePointerCancel}
-                  onClick={handleCardClick}
+                  onLongPressStart={handleEnterSelectMode}
+                  onLongPressCancel={() => { /* TxnRow handles cancellation internally */ }}
                 />
               );
             })}
