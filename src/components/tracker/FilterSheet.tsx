@@ -83,7 +83,7 @@ export default function FilterSheet({
                       {u.name.charAt(0).toUpperCase()}
                     </span>
                     {u.name.split(' ')[0]}
-                    {selected && <Check size={12} weight="bold" />}
+                    {selected && <Check size={12} strokeWidth={3} />}
                   </button>
                 );
               })}
