@@ -28,11 +28,17 @@ const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Ca
 
 const SORT_STORAGE_KEY = 'expensesync-sort-pref';
 
+const VALID_SORTS: ReadonlySet<SortOption> = new Set<SortOption>([
+  'date-desc', 'date-asc',
+  'category-asc', 'category-desc',
+  'amount-desc', 'amount-asc',
+]);
+
 function readSortPref(trackerId: string): SortOption {
   try {
     const data = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || '{}');
     const val = data[trackerId];
-    if (val === 'date-desc' || val === 'date-asc' || val === 'category-asc' || val === 'category-desc') return val;
+    if (VALID_SORTS.has(val)) return val as SortOption;
     return 'date-desc';
   } catch { return 'date-desc'; }
 }
@@ -73,6 +79,13 @@ function groupByCategory(expenses: Expense[], categories: Category[], ascending:
   return Object.entries(groups)
     .sort(([a], [b]) => ascending ? a.localeCompare(b) : b.localeCompare(a))
     .map(([key, items]) => [key, [...items].sort((a, b) => b.amount - a.amount)] as [string, Expense[]]);
+}
+
+// Amount sort renders as a single flat group — no per-day headers, but each row
+// surfaces its own date stamp via `showDate` on TxnRow.
+function sortByAmount(expenses: Expense[], ascending: boolean): [string, Expense[]][] {
+  const sorted = [...expenses].sort((a, b) => ascending ? a.amount - b.amount : b.amount - a.amount);
+  return [['__amount__', sorted]];
 }
 
 interface Props {
@@ -179,12 +192,14 @@ export default function ExpensesTab({
   }, [expenses, typeFilter, filterUsers, filterCategories]);
 
   const isCategorySort = sortBy === 'category-asc' || sortBy === 'category-desc';
-  const isAscending = sortBy === 'date-asc' || sortBy === 'category-asc';
+  const isAmountSort = sortBy === 'amount-asc' || sortBy === 'amount-desc';
+  const isAscending = sortBy === 'date-asc' || sortBy === 'category-asc' || sortBy === 'amount-asc';
 
   const groups = useMemo(() => {
+    if (isAmountSort) return sortByAmount(filteredExpenses, isAscending);
     if (isCategorySort) return groupByCategory(filteredExpenses, categories, isAscending);
     return groupByDate(filteredExpenses, isAscending);
-  }, [filteredExpenses, sortBy, categories, isCategorySort, isAscending]);
+  }, [filteredExpenses, sortBy, categories, isCategorySort, isAmountSort, isAscending]);
 
   const toggleFilterUser = (uid: string) => {
     setFilterUsers(prev => {
@@ -366,7 +381,9 @@ export default function ExpensesTab({
           ? '—'
           : (net > 0 ? `+${symbol}${Math.round(Math.abs(net)).toLocaleString('en-IN')}` : `−${symbol}${Math.round(Math.abs(net)).toLocaleString('en-IN')}`);
         const groupCategory = isCategorySort ? categories.find(c => c.name === groupKey) || null : null;
-        const label = isCategorySort ? groupKey : formatDateHeader(groupKey);
+        const label = isAmountSort
+          ? `${items.length} txn${items.length !== 1 ? 's' : ''} · ${isAscending ? 'Lowest first' : 'Highest first'}`
+          : isCategorySort ? groupKey : formatDateHeader(groupKey);
 
         return (
           <div key={groupKey}>
@@ -381,6 +398,7 @@ export default function ExpensesTab({
                   selectMode={isSelecting}
                   selected={selectedIds.has(expense.id)}
                   canModify={canModify}
+                  showDate={isAmountSort}
                   onSelect={toggleSelect}
                   onEdit={onEditExpense}
                   onDelete={(id) => deleteExpense.mutate(id)}

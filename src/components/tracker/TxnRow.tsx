@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ArrowDownLeft, Check, Trash } from '@phosphor-icons/react';
+import { format, parseISO } from 'date-fns';
 import CategoryDot from '@/components/CategoryDot';
 import { Expense } from '@/types';
 import { formatAmountShort } from '@/lib/currencies';
@@ -14,6 +15,9 @@ interface Props {
   selectMode: boolean;
   selected: boolean;
   canModify: boolean;
+  /** When true, render an extra `d MMM` caption under the amount.
+   * Use when the surrounding list isn't grouped by date. */
+  showDate?: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -40,7 +44,7 @@ function paymentClass(method: string) {
 }
 
 export default function TxnRow({
-  expense, trackerCurrency, selectMode, selected, canModify,
+  expense, trackerCurrency, selectMode, selected, canModify, showDate = false,
   onSelect, onEdit, onDelete, onLongPressStart, onLongPressCancel,
 }: Props) {
   const isCredit = !expense.is_debit;
@@ -328,6 +332,11 @@ export default function TxnRow({
                   expense.created_by_name?.split(' ')[0] ||
                   'Deleted'}
               </p>
+              {showDate && expense.date && (
+                <p className="text-[10px] text-ink-faint font-medium mt-0.5 tabular-nums">
+                  {format(parseISO(expense.date), 'd MMM')}
+                </p>
+              )}
             </div>
           </div>
 

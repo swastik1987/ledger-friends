@@ -1,16 +1,36 @@
 import { useState } from 'react';
-import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, Check } from '@phosphor-icons/react';
+import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, ArrowUp, ArrowDown } from '@phosphor-icons/react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-export type SortOption = 'date-desc' | 'date-asc' | 'category-asc' | 'category-desc';
+export type SortField = 'date' | 'category' | 'amount';
+export type SortDirection = 'asc' | 'desc';
+export type SortOption = `${SortField}-${SortDirection}`;
 
-export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'date-desc', label: 'Date (Newest first)' },
-  { value: 'date-asc', label: 'Date (Oldest first)' },
-  { value: 'category-asc', label: 'Category (A → Z)' },
-  { value: 'category-desc', label: 'Category (Z → A)' },
+export const DEFAULT_SORT: SortOption = 'date-desc';
+
+const FIELD_OPTIONS: { id: SortField; label: string }[] = [
+  { id: 'date', label: 'Date' },
+  { id: 'category', label: 'Category' },
+  { id: 'amount', label: 'Amount' },
 ];
+
+// Phrasing for the current selection, shown as a single-line caption below the segments.
+export function sortLabel(opt: SortOption): string {
+  switch (opt) {
+    case 'date-desc': return 'Newest first';
+    case 'date-asc': return 'Oldest first';
+    case 'category-asc': return 'A → Z';
+    case 'category-desc': return 'Z → A';
+    case 'amount-desc': return 'Highest first';
+    case 'amount-asc': return 'Lowest first';
+  }
+}
+
+export function parseSort(opt: SortOption): { field: SortField; direction: SortDirection } {
+  const [field, direction] = opt.split('-') as [SortField, SortDirection];
+  return { field, direction };
+}
 
 interface Props {
   monthLabel: string;
@@ -105,24 +125,14 @@ export default function TrackerToolBar({
         <PopoverTrigger asChild>
           <button
             className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-line bg-card text-ink"
-            style={sort !== 'date-desc' ? { color: 'hsl(var(--ember))', borderColor: 'hsl(var(--ember))' } : undefined}
+            style={sort !== DEFAULT_SORT ? { color: 'hsl(var(--ember))', borderColor: 'hsl(var(--ember))' } : undefined}
             aria-label="Sort"
           >
             <ArrowsDownUp size={17} />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={6} className="w-56 p-1">
-          {SORT_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => { onSortChange(opt.value); setSortOpen(false); }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-muted text-foreground"
-              style={sort === opt.value ? { background: 'hsl(var(--ember) / 0.10)', color: 'hsl(var(--ember))', fontWeight: 600 } : undefined}
-            >
-              <span className="flex-1 text-left">{opt.label}</span>
-              {sort === opt.value && <Check size={14} color="hsl(var(--ember))" />}
-            </button>
-          ))}
+        <PopoverContent align="end" sideOffset={6} className="w-64 p-3 space-y-3">
+          <SortControls value={sort} onChange={onSortChange} />
         </PopoverContent>
       </Popover>
 
@@ -151,6 +161,85 @@ export default function TrackerToolBar({
           </span>
         )}
       </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SortControls — field-pill row + direction-pill row.
+// Two segmented controls instead of a 6-row list. Selecting a field preserves
+// the current direction; switching direction keeps the current field.
+// ─────────────────────────────────────────────────────────────────────────────
+function SortControls({
+  value,
+  onChange,
+}: {
+  value: SortOption;
+  onChange: (v: SortOption) => void;
+}) {
+  const { field, direction } = parseSort(value);
+
+  const setField = (next: SortField) => onChange(`${next}-${direction}` as SortOption);
+  const setDirection = (next: SortDirection) => onChange(`${field}-${next}` as SortOption);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-faint mb-1.5">
+          Sort by
+        </div>
+        <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-surface-alt border border-line-soft">
+          {FIELD_OPTIONS.map(f => {
+            const active = f.id === field;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setField(f.id)}
+                className="py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
+                style={{
+                  background: active ? 'hsl(var(--ink))' : 'transparent',
+                  color: active ? 'hsl(var(--background))' : 'hsl(var(--ink-soft))',
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-faint mb-1.5">
+          Order
+        </div>
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-surface-alt border border-line-soft">
+          {([
+            { id: 'asc' as const, label: 'Asc', Icon: ArrowUp },
+            { id: 'desc' as const, label: 'Desc', Icon: ArrowDown },
+          ]).map(d => {
+            const active = d.id === direction;
+            return (
+              <button
+                key={d.id}
+                onClick={() => setDirection(d.id)}
+                className="py-1.5 rounded-lg text-[12px] font-semibold inline-flex items-center justify-center gap-1 transition-colors"
+                style={{
+                  background: active ? 'hsl(var(--ink))' : 'transparent',
+                  color: active ? 'hsl(var(--background))' : 'hsl(var(--ink-soft))',
+                }}
+              >
+                <d.Icon size={12} weight="bold" />
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="text-[11px] text-ink-faint text-center">
+        {sortLabel(value)}
+      </p>
     </div>
   );
 }
