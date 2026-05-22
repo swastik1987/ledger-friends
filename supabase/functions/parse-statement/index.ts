@@ -31,10 +31,10 @@ Row: "15/03  AMAZON RETAIL IND PVT  C 1,499.00"
 → { date: "2026-03-15", description: "Amazon Retail", merchant_name: "Amazon", amount: 1499, is_debit: true, category: "Shopping" }
 Reason: No "+" prefix, "C" is the rupee marker → purchase = debit.
 
-Example 2 — HDFC credit card, refund (the "+" sign is the only credit indicator):
+Example 2 — HDFC credit card, bill payment (the "+" sign is the only credit indicator):
 Row: "22/03  PAYMENT RECEIVED THANK YOU  + C 12,500.00"
-→ { date: "2026-03-22", description: "Payment Received", amount: 12500, is_debit: false, category: "Other Income", is_likely_transfer: true }
-Reason: "+" prefix → credit. "Payment Received" on a CC statement is a bill payment = transfer candidate.
+→ { date: "2026-03-22", description: "Bill payment", merchant_name: "HDFC CC", amount: 12500, is_debit: false, category: "Other Income", is_likely_transfer: true }
+Reason: "+" prefix → credit. CC bill payments take the issuing bank as merchant_name; description is the generic action.
 
 Example 3 — SBI passbook with Dr/Cr suffix:
 Row: "05/04/2026  UPI/SWIGGY/FOOD  225.00 Dr  4,512.00"
@@ -47,10 +47,10 @@ Row: "10-Apr-26  NEFT INWARD SALARY ACME CORP  -  85000.00  2,15,000.00"
 → { date: "2026-04-10", description: "NEFT Salary - Acme Corp", merchant_name: "Acme Corp", amount: 85000, is_debit: false, category: "Salary / Income", balance: 215000 }
 Reason: Amount appears in the Deposit column, Withdrawal is empty/dash → credit.
 
-Example 5 — Axis bank with signed amounts:
+Example 5 — Axis bank with signed amounts (no merchant):
 Row: "12/04/26  ATM WDL  CASH WITHDRAWAL  -2000.00  18,450.00"
-→ { date: "2026-04-12", description: "ATM Cash Withdrawal", amount: 2000, is_debit: true, category: "Miscellaneous", payment_mode: "Cash", balance: 18450 }
-Reason: Leading "-" sign → debit. Cash withdrawal = Miscellaneous (no specific cash category).
+→ { date: "2026-04-12", description: "Cash withdrawal", amount: 2000, is_debit: true, category: "Miscellaneous", payment_mode: "Cash", balance: 18450 }
+Reason: Leading "-" sign → debit. No counterparty exists, so merchant_name is omitted; description is the generic action label.
 
 Example 6 — Refund / reversal on a savings account:
 Row: "14/04/26  REFUND FLIPKART ORDER  +1,299.00  19,749.00"
@@ -88,15 +88,20 @@ ${FEW_SHOT_EXAMPLES}
 
 Rules:
 1. Discard everything that is not a transaction: account details, opening/closing balances, bank headers, footers, interest summaries, promotional content.
-2. For each transaction return: date (ISO format YYYY-MM-DD), description (clean payee name, max 60 chars), raw_description (the entire original description text exactly as it appears in the statement, preserving all details, codes, and reference info), raw_amount_text (the amount cell text exactly as it appeared, INCLUDING any sign, currency marker, or Dr/Cr suffix — used for client-side validation), merchant_name (if identifiable separately), amount (always a positive number regardless of direction), is_debit (boolean: true = money out / expense / withdrawal / purchase, false = money in / credit / deposit / refund / salary), reference_number (if present), balance (the running balance after this transaction, if visible in the source — number only, omit if not visible).
-3. For DEBIT transactions (is_debit=true), assign the best category from this allowed list ONLY: ${debitCats.join(', ')}.
-4. For CREDIT transactions (is_debit=false), assign the best category from this allowed list ONLY: ${creditCats.join(', ')}. NEVER use a debit category for a credit transaction — if no credit category fits, use "Other Income".
-5. Set confidence (0.0 to 1.0) for your category choice. Use >0.85 only when the merchant clearly matches the category. For ambiguous/unknown merchants, set confidence ≤ 0.6 so the user reviews it.
-6. Detect the currency used in this specific transaction. Look for currency symbols (₹, $, €, £, د.إ, S$, A$, C$, ¥, ﷼), ISO codes (INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY, SAR), or context. Include a "currency" field (ISO 3-letter code) on each transaction. If you cannot determine the currency, omit the field.
-7. Suggest internal-transfer candidates: set "is_likely_transfer" to true for transactions that look like money moving between the user's own accounts. This is a SUGGESTION ONLY — the user will review it. Examples: NEFT/IMPS/UPI transfers to/from self, credit card bill payments (AUTOPAY, CC BILL PAY), fixed/recurring deposit transfers, wallet top-ups (Paytm, PhonePe, Amazon Pay), loan EMI debits, mutual fund SIP purchases, and payment-received entries on credit card statements. When unsure, set to false.
-8. Detect payment mode for each transaction. Set "payment_mode" to one of: "UPI", "Credit Card", "Debit Card", "Online", "Cash", "Other". Detection rules: UPI keywords (UPI, PhonePe, GPay, Google Pay, Paytm, BHIM) → "UPI". NEFT, RTGS, IMPS, net banking, ECS, NACH, wire transfer → "Online". POS, swipe, tap, contactless on a savings/current account statement → "Debit Card". Any transaction on a credit card statement → "Credit Card". ATM withdrawal, cash → "Cash". If unsure, omit the field.
-9. Detect the bank or financial institution name that issued this statement. Look for it in headers, footers, account details, or logos. Return it as "bank_name" on each transaction. Use a short, recognizable name (e.g. "HDFC Bank" not "HDFC Bank Limited"). If you cannot determine the bank, omit the field.
-10. If the response_schema is supplied, conform to it strictly. Otherwise, return a raw JSON array only.`;
+2. For each transaction return these text fields with the following STRICT meanings:
+   • raw_description — the entire original narration cell, verbatim, preserving codes, reference numbers, channel prefixes (UPI-, POS-, NEFT-, IMPS-, REF-, etc.) and all details. Do NOT clean or trim it.
+   • merchant_name — the BRAND or counterparty. REQUIRED whenever a brand or counterparty is identifiable. Proper-cased, max 40 chars. Strip channel prefixes, UPI handles (e.g. user@bank), order/reference IDs, and corporate suffixes (Pvt, Ltd, Limited, Inc, Corp, Co.). Examples: "Swiggy", "Amazon", "Blue Tokai", "Uber", "Acme Corp", "Airtel". For credit card BILL PAYMENTS use the issuing-bank name as the merchant — e.g. "HDFC CC", "ICICI Card". Only omit merchant_name when truly no counterparty exists (e.g. bank interest credit, ATM cash withdrawal, generic charge).
+   • description — a short HUMAN-READABLE PHRASE describing WHAT the transaction is, NOT a copy of the merchant. Max 60 chars. Use the narration's purpose/context if present ("Pour-over + croissant", "May payroll", "Indiranagar → office", "Returned headphones", "May internet bill"). If nothing distinct exists beyond the merchant, set description to a short type label appropriate to the payment_mode: "UPI payment", "Card purchase", "POS purchase", "NEFT transfer", "IMPS transfer", "Auto-debit", "Cash withdrawal", "Refund", "Salary credit", "Interest credit", "Bill payment". NEVER duplicate the merchant_name verbatim into description.
+3. Also return: date (ISO format YYYY-MM-DD), raw_amount_text (the amount cell text exactly as it appeared, INCLUDING any sign, currency marker, or Dr/Cr suffix — used for client-side validation), amount (always a positive number regardless of direction), is_debit (boolean: true = money out / expense / withdrawal / purchase, false = money in / credit / deposit / refund / salary), reference_number (if present), balance (the running balance after this transaction, if visible in the source — number only, omit if not visible).
+4. CONSISTENCY: when the same merchant appears in MULTIPLE rows of this chunk, use the IDENTICAL merchant_name string for every row (same casing, same spelling). Don't return "Swiggy" on one row and "SWIGGY" or "Swiggy Limited" on the next.
+5. For DEBIT transactions (is_debit=true), assign the best category from this allowed list ONLY: ${debitCats.join(', ')}.
+6. For CREDIT transactions (is_debit=false), assign the best category from this allowed list ONLY: ${creditCats.join(', ')}. NEVER use a debit category for a credit transaction — if no credit category fits, use "Other Income".
+7. Set confidence (0.0 to 1.0) for your category choice. Use >0.85 only when the merchant clearly matches the category. For ambiguous/unknown merchants, set confidence ≤ 0.6 so the user reviews it.
+8. Detect the currency used in this specific transaction. Look for currency symbols (₹, $, €, £, د.إ, S$, A$, C$, ¥, ﷼), ISO codes (INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY, SAR), or context. Include a "currency" field (ISO 3-letter code) on each transaction. If you cannot determine the currency, omit the field.
+9. Suggest internal-transfer candidates: set "is_likely_transfer" to true for transactions that look like money moving between the user's own accounts. This is a SUGGESTION ONLY — the user will review it. Examples: NEFT/IMPS/UPI transfers to/from self, credit card bill payments (AUTOPAY, CC BILL PAY), fixed/recurring deposit transfers, wallet top-ups (Paytm, PhonePe, Amazon Pay), loan EMI debits, mutual fund SIP purchases, and payment-received entries on credit card statements. When unsure, set to false.
+10. Detect payment mode for each transaction. Set "payment_mode" to one of: "UPI", "Credit Card", "Debit Card", "Online", "Cash", "Other". Detection rules: UPI keywords (UPI, PhonePe, GPay, Google Pay, Paytm, BHIM) → "UPI". NEFT, RTGS, IMPS, net banking, ECS, NACH, wire transfer → "Online". POS, swipe, tap, contactless on a savings/current account statement → "Debit Card". Any transaction on a credit card statement → "Credit Card". ATM withdrawal, cash → "Cash". If unsure, omit the field.
+11. Detect the bank or financial institution name that issued this statement. Look for it in headers, footers, account details, or logos. Return it as "bank_name" on each transaction. Use a short, recognizable name (e.g. "HDFC Bank" not "HDFC Bank Limited"). If you cannot determine the bank, omit the field.
+12. If the response_schema is supplied, conform to it strictly. Otherwise, return a raw JSON array only.`;
 }
 
 // ── Metadata-extraction prompt (cheap first pass) ──

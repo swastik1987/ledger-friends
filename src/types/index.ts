@@ -48,6 +48,8 @@ export interface Expense {
   currency: string;
   date: string;
   description: string;
+  /** Original narration from the source statement (when uploaded). NULL for manual entries. */
+  raw_description?: string;
   merchant_name?: string;
   payment_method?: PaymentMethod;
   bank_name?: string;
@@ -72,6 +74,8 @@ export interface DraftExpense {
   temp_id: string;
   date: string;
   description: string;
+  /** Original statement narration, preserved through the review flow. */
+  raw_description?: string;
   merchant_name?: string;
   amount: number;
   is_debit: boolean;

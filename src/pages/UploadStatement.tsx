@@ -17,6 +17,12 @@ import { getCurrency, formatAmountShort } from '@/lib/currencies';
 import { fetchLearnedMappings, findLearnedCategory, recordCategoryLearning } from '@/lib/categoryLearning';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
 import { findMerchantCategory } from '@/lib/merchantDictionary';
+import {
+  normalizeMerchant,
+  extractMerchantFromRaw,
+  resolveDescription,
+  canonicalizeMerchants,
+} from '@/lib/merchantExtraction';
 import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
 import { useNudge } from '@/hooks/useNudge';
@@ -532,22 +538,38 @@ export default function UploadStatement() {
           const debitUncertain = typeVal === null;
           const amt = Math.round(Math.abs(parseFloat(String(r[columnMap.amount] || '0').replace(/[^0-9.\-]/g, ''))));
 
-          const description = (r[columnMap.description] || 'Unknown').trim();
+          const rawDescription = (r[columnMap.description] || 'Unknown').trim();
           const notes = columnMap.notes ? (r[columnMap.notes] || '').trim() : '';
-          const merchant = columnMap.merchant ? (r[columnMap.merchant] || '').trim() : '';
-          const suspectedTransfer = !!detectTransferByKeyword(description) || (!!merchant && !!detectTransferByKeyword(merchant));
+          const csvMerchant = columnMap.merchant ? (r[columnMap.merchant] || '').trim() : '';
+
+          // Apply the same merchant resolution as the AI path.
+          // If the CSV had a merchant column, normalise it. Otherwise extract.
+          let merchantName = normalizeMerchant(csvMerchant);
+          if (!merchantName) merchantName = extractMerchantFromRaw(rawDescription);
+
+          const description = resolveDescription({
+            aiDescription: rawDescription,
+            merchantName,
+            isDebit,
+            categoryName: matchedCat?.name,
+          });
+
+          const suspectedTransfer =
+            !!detectTransferByKeyword(rawDescription) ||
+            (!!merchantName && !!detectTransferByKeyword(merchantName));
 
           return {
             temp_id: `bulk-${i}`,
             date: parseDateValue(r[columnMap.date] || ''),
-            description: description.length > 25 ? description.slice(0, 25).trim() + '...' : description,
-            merchant_name: merchant || undefined,
+            description,
+            raw_description: rawDescription,
+            merchant_name: merchantName || undefined,
             amount: amt,
             is_debit: isDebit,
             suggested_category_id: matchedCat?.id || miscCategory?.id || '',
             suggested_category_name: matchedCat?.name || 'Miscellaneous',
             confidence: matchedCat ? 1.0 : 0.5,
-            notes: (notes || (description.length > 25 ? description : '')) || undefined,
+            notes: notes || undefined,
             needs_review: debitUncertain || !matchedCat,
             review_status: 'pending' as const,
             suspected_transfer: suspectedTransfer,
@@ -875,33 +897,56 @@ export default function UploadStatement() {
         const isMiscellaneous = finalCategoryName === 'Miscellaneous';
         const needsReview = finalConfidence < 0.75 || debitUncertain || isMiscellaneous;
 
-        const fullDesc = t.raw_description || t.description || 'Unknown';
-        const shortDesc = (t.description || 'Unknown').length > 25
-          ? (t.description || 'Unknown').slice(0, 25).trim() + '...'
-          : (t.description || 'Unknown');
+        const rawDescription = (t.raw_description || t.description || '').trim() || 'Unknown';
+
+        // ── Merchant resolution ──
+        // 1. Normalize whatever AI returned. Strips channel prefixes, corporate
+        //    suffixes, UPI handles, trailing reference IDs.
+        // 2. If AI gave nothing (or normalization wiped it), backfill from raw_description.
+        let merchantName = normalizeMerchant(t.merchant_name);
+        if (!merchantName) {
+          merchantName = extractMerchantFromRaw(rawDescription);
+        }
+
+        // ── Description resolution ──
+        // Cleans the AI's description, strips redundant channel prefixes when a
+        // merchant has been identified, falls back to a generic phrase
+        // (e.g. "UPI payment") when description ends up empty or equals merchant.
+        const description = resolveDescription({
+          aiDescription: t.description,
+          rawDescription,
+          merchantName,
+          paymentMethod: t.payment_mode,
+          isDebit,
+          categoryName: finalCategoryName,
+          isTransfer: t.is_likely_transfer === true,
+        });
 
         // Transfer suspicion: keyword match on description/raw_description, or AI flag.
-        const transferKeyword = detectTransferByKeyword(fullDesc) || detectTransferByKeyword(shortDesc);
+        const transferKeyword = detectTransferByKeyword(rawDescription) || detectTransferByKeyword(description);
         const aiTransferFlag = t.is_likely_transfer === true;
         const suspectedTransfer = !!(transferKeyword || aiTransferFlag);
 
         // Reference number normalisation: prefer AI-extracted, else scrape from raw description.
         const refNumber = (typeof t.reference_number === 'string' && t.reference_number.trim())
           ? t.reference_number.trim()
-          : extractReferenceNumber(fullDesc);
+          : extractReferenceNumber(rawDescription);
 
         return {
           temp_id: `draft-${i}`,
           date: t.date || new Date().toISOString().split('T')[0],
-          description: shortDesc,
-          merchant_name: t.merchant_name,
+          description,
+          raw_description: rawDescription,
+          merchant_name: merchantName || undefined,
           amount: Math.round(Math.abs(Number(t.amount) || 0)),
           is_debit: isDebit,
           suggested_category_id: finalCategoryId,
           suggested_category_name: finalCategoryName,
           confidence: finalConfidence,
           reference_number: refNumber || undefined,
-          notes: fullDesc !== shortDesc ? fullDesc : null,
+          // Notes left empty here — raw_description is preserved on its own column.
+          // Existing notes from the AI (rare) would land here if we ever pipe them through.
+          notes: undefined,
           needs_review: needsReview,
           review_status: 'pending' as const,
           detected_currency: t.currency || undefined,
@@ -928,6 +973,34 @@ export default function UploadStatement() {
 
       // Strip the temporary `balance` field — it's not part of DraftExpense or the DB schema.
       for (const d of draftExpenses) delete (d as any).balance;
+
+      // ── Intra-batch merchant canonicalisation ──
+      // Cluster similar merchant_names within this upload (same lowercase prefix)
+      // and pick the cleanest most-common surface form, so 5 Swiggy rows always
+      // render with the identical merchant_name string.
+      const canonicalized = canonicalizeMerchants(draftExpenses);
+      // Re-resolve description in case canonicalisation made it equal merchant_name
+      // (rare, but possible when AI returned the same string for both).
+      for (let i = 0; i < canonicalized.length; i++) {
+        if (
+          canonicalized[i].merchant_name &&
+          canonicalized[i].description &&
+          canonicalized[i].description.toLowerCase() === canonicalized[i].merchant_name!.toLowerCase()
+        ) {
+          canonicalized[i] = {
+            ...canonicalized[i],
+            description: resolveDescription({
+              aiDescription: '',
+              merchantName: canonicalized[i].merchant_name,
+              paymentMethod: canonicalized[i].payment_method,
+              isDebit: canonicalized[i].is_debit,
+              categoryName: canonicalized[i].suggested_category_name,
+              isTransfer: canonicalized[i].suspected_transfer,
+            }),
+          };
+        }
+      }
+      draftExpenses.splice(0, draftExpenses.length, ...canonicalized);
 
       // ── Stage 4: Done (95% → 100%) ──
       setProgress(95);
@@ -1007,6 +1080,7 @@ export default function UploadStatement() {
         currency: trackerCurrency,
         date: d.date,
         description: d.description,
+        raw_description: d.raw_description || null,
         merchant_name: d.merchant_name || null,
         is_debit: d.is_debit,
         source: 'statement_upload' as const,

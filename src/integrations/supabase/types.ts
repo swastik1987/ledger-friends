@@ -118,6 +118,7 @@ export type Database = {
           original_amount: number | null
           original_currency: string | null
           payment_method: string | null
+          raw_description: string | null
           reference_number: string | null
           source: string
           suspected_transfer: boolean
@@ -145,6 +146,7 @@ export type Database = {
           original_amount?: number | null
           original_currency?: string | null
           payment_method?: string | null
+          raw_description?: string | null
           reference_number?: string | null
           source: string
           suspected_transfer?: boolean
@@ -172,6 +174,7 @@ export type Database = {
           original_amount?: number | null
           original_currency?: string | null
           payment_method?: string | null
+          raw_description?: string | null
           reference_number?: string | null
           source?: string
           suspected_transfer?: boolean
