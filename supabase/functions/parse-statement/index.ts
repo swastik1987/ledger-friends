@@ -281,58 +281,95 @@ serve(async (req) => {
     const systemInstruction = buildSystemInstruction(debitCats, creditCats, statementMetadata);
     const transactionSchema = buildTransactionSchema(debitCats, creditCats);
 
-    const userPrompt = [
-      formatHint ? `FORMAT_HINT: ${formatHint}\n` : '',
-      learnedHint,
-      `Parse this statement:\n\n${extractedText}`,
-    ].filter(Boolean).join('\n');
+    // ── Chunk extractedText to avoid the 150s edge-function idle timeout ──
+    // Large statements can take Gemini >150s in one shot. Split by lines into
+    // ~12k-char chunks and process sequentially, merging the results.
+    const CHUNK_CHAR_LIMIT = 12000;
+    const PER_CALL_TIMEOUT_MS = 110_000;
 
-    const geminiBody = {
-      system_instruction: { parts: [{ text: systemInstruction }] },
-      contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: 'application/json',
-        responseSchema: transactionSchema,
-      },
-    };
-
-    const geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiBody),
-    });
-
-    if (!geminiRes.ok) {
-      const err = await geminiRes.text();
-      return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    function chunkByLines(text: string, limit: number): string[] {
+      const lines = text.split('\n');
+      const chunks: string[] = [];
+      let current = '';
+      for (const line of lines) {
+        if (current.length + line.length + 1 > limit && current.length > 0) {
+          chunks.push(current);
+          current = '';
+        }
+        current += (current ? '\n' : '') + line;
+      }
+      if (current) chunks.push(current);
+      return chunks.length > 0 ? chunks : [text];
     }
 
-    const geminiData = await geminiRes.json();
-    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
-    const cleaned = rawText.replace(/```json|```/gi, '').trim();
-    let transactions: any[];
-    try {
-      transactions = JSON.parse(cleaned);
-    } catch {
-      // Gemini occasionally returns trailing text; try to salvage the JSON array
-      const match = cleaned.match(/\[[\s\S]*\]/);
-      transactions = match ? JSON.parse(match[0]) : [];
-    }
+    const chunks = extractedText.length > CHUNK_CHAR_LIMIT
+      ? chunkByLines(extractedText, CHUNK_CHAR_LIMIT)
+      : [extractedText];
 
-    // Server-side category enum validation — clamp to the allowed list as a final safety net
     const allowedSet = new Set([...debitCats, ...creditCats]);
     const fallbackDebit = debitCats.includes('Miscellaneous') ? 'Miscellaneous' : debitCats[debitCats.length - 1];
     const fallbackCredit = creditCats.includes('Other Income') ? 'Other Income' : creditCats[creditCats.length - 1];
-    transactions = transactions.map((t: any) => {
-      if (typeof t?.category !== 'string' || !allowedSet.has(t.category)) {
-        t.category = t?.is_debit ? fallbackDebit : fallbackCredit;
-        t.confidence = Math.min(t?.confidence ?? 0.5, 0.5);
-      }
-      return t;
-    });
 
-    return new Response(JSON.stringify({ transactions }), {
+    const allTransactions: any[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkText = chunks[i];
+      const chunkLabel = chunks.length > 1 ? `CHUNK ${i + 1} of ${chunks.length} — extract transactions in this slice only.\n\n` : '';
+      const userPrompt = [
+        formatHint ? `FORMAT_HINT: ${formatHint}\n` : '',
+        learnedHint,
+        `${chunkLabel}Parse this statement:\n\n${chunkText}`,
+      ].filter(Boolean).join('\n');
+
+      const geminiBody = {
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ parts: [{ text: userPrompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseSchema: transactionSchema,
+        },
+      };
+
+      let geminiRes: Response;
+      try {
+        geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(geminiBody),
+          signal: AbortSignal.timeout(PER_CALL_TIMEOUT_MS),
+        });
+      } catch (e) {
+        console.error(`Gemini fetch failed on chunk ${i + 1}/${chunks.length}:`, e);
+        return new Response(JSON.stringify({ error: `Gemini request timed out on chunk ${i + 1}/${chunks.length}. Try a smaller statement.` }), { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      if (!geminiRes.ok) {
+        const err = await geminiRes.text();
+        return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      const geminiData = await geminiRes.json();
+      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+      const cleaned = rawText.replace(/```json|```/gi, '').trim();
+      let transactions: any[];
+      try {
+        transactions = JSON.parse(cleaned);
+      } catch {
+        const match = cleaned.match(/\[[\s\S]*\]/);
+        transactions = match ? JSON.parse(match[0]) : [];
+      }
+
+      transactions = transactions.map((t: any) => {
+        if (typeof t?.category !== 'string' || !allowedSet.has(t.category)) {
+          t.category = t?.is_debit ? fallbackDebit : fallbackCredit;
+          t.confidence = Math.min(t?.confidence ?? 0.5, 0.5);
+        }
+        return t;
+      });
+      allTransactions.push(...transactions);
+    }
+
+    return new Response(JSON.stringify({ transactions: allTransactions }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
