@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
-import { Check } from '@phosphor-icons/react';
+import { Check } from 'lucide-react';
 import CategoryDot from '@/components/CategoryDot';
 import { Category, Expense } from '@/types';
 
