@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, Minus, ArrowDownLeft, ArrowUpRight } from '@phosphor-icons/react';
-import { Loader2 } from 'lucide-react';
+import { Check, X, Minus, ArrowDownLeft, ArrowUpRight, CircleNotch } from '@phosphor-icons/react';
 import {
   Sheet,
   SheetContent,
@@ -214,7 +213,7 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
               style={hasChanges ? { boxShadow: '0 6px 18px hsl(var(--ember) / 0.40)' } : undefined}
             >
               {resolve.isPending
-                ? <Loader2 className="h-4 w-4 animate-spin" />
+                ? <CircleNotch className="h-4 w-4 animate-spin" />
                 : hasChanges
                   ? `Save (${counts.transfer + counts.not_transfer} changes)`
                   : 'Nothing to save'}

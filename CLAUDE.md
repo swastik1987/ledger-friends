@@ -24,13 +24,13 @@ The tracker page received a full visual + interaction revamp in May 2026 — "Sa
 | AI | Gemini 2.5 Flash (via Supabase Edge Function) |
 | Charts | hand-rolled SVG sparkline (Recharts removed from Dashboard) |
 | Toasts | Sonner 1.7.4 |
-| Icons | `@phosphor-icons/react` (regular weight — monoline) + scattered `lucide-react` |
+| Icons | `@phosphor-icons/react` (regular weight — monoline) everywhere in app code; `lucide-react` remains only inside vendored shadcn `ui/*` primitives |
 | Dates | date-fns 3.6.0 |
 | Fonts | **Bricolage Grotesque** (display/headers), **Manrope** (UI body), **JetBrains Mono** (amounts) |
 
 Dev server runs on `localhost:8080` via `npm run dev`.
 
-**TypeScript strictness:** `strict: false` and `noImplicitAny: false` in both `tsconfig.json` and `tsconfig.app.json`. Undeclared identifiers silently become `any` — they pass `tsc --noEmit` but blow up at runtime. Be careful when refactoring imports: a stale `<Foo />` reference whose import was removed will compile and crash in production. Lifting `strict` to `true` is a worthwhile future cleanup; many existing files will need adjustment.
+**TypeScript strictness:** `strict: true` + `noImplicitAny: true` in both `tsconfig.json` and `tsconfig.app.json` (flipped May 2026). `tsc --noEmit` is clean — undeclared identifiers no longer slip through silently. Keep new code strict.
 
 ---
 
@@ -77,7 +77,6 @@ ledger-friends/
 │   │   ├── FloatingAdd.tsx                   # Ember ember FAB (on Home + Expenses)
 │   │   ├── CategoryDot.tsx                   # Colored disc + Phosphor line icon
 │   │   ├── CategoryIcon.tsx                  # Phosphor regular weight render
-│   │   ├── MonthSelector.tsx                 # ⚠ no longer used (was the indigo pill)
 │   │   ├── Nudge.tsx
 │   │   ├── NavLink.tsx
 │   │   ├── tracker/
@@ -94,9 +93,7 @@ ledger-friends/
 │   │   │   ├── SettingsTab.tsx               # iOS-style grouped lists + danger zone
 │   │   │   ├── AddExpenseSheet.tsx           # Manual create/edit with optional Merchant field
 │   │   │   ├── TransferReviewModal.tsx       # Ember-styled popup
-│   │   │   ├── TransferReviewSheet.tsx       # Bottom-sheet review with tri-state controls
-│   │   │   ├── NetBalanceBanner.tsx          # ⚠ no longer used (replaced by HeroSummary)
-│   │   │   └── TransactionTypeFilter.tsx     # ⚠ no longer used (replaced by TypeSegment)
+│   │   │   └── TransferReviewSheet.tsx       # Bottom-sheet review with tri-state controls
 │   │   └── ui/                               # shadcn/ui primitives
 │   │
 │   ├── lib/
@@ -133,8 +130,6 @@ ledger-friends/
 ├── tsconfig.json / tsconfig.app.json         # strict: false
 └── package.json
 ```
-
-Files marked **⚠ no longer used** are kept on disk for git-archaeology but are not imported anywhere. Safe to delete in a future cleanup pass.
 
 ---
 
@@ -274,7 +269,7 @@ Unchanged from baseline: two-tab UI, `supabase.auth.signInWithPassword()` / `sup
 - BottomNav (`Home / Trackers / You`) at bottom — Trackers deep-links to `activeTrackerId` when set
 
 ### Tracker Detail
-A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back · tracker name + member dot · upload) sticks at `top: 0`, and `TrackerTabBar` (Transactions / Dashboard / Settings, dark-pill active state) sticks at `top: 57px` (height of TrackerTopBar). Both have `bg-background/95 backdrop-blur-md` so content scrolls translucent underneath.
+A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back · tracker name + member dot · upload) sticks at `top: 0`, and `TrackerTabBar` (Transactions / Dashboard / Settings, dark-pill active state) sticks at `top: var(--tracker-topbar-h)`. TrackerTopBar measures itself with a `ResizeObserver` and publishes its height to `--tracker-topbar-h` on `<html>`; the TabBar consumes that variable with a 57px fallback. Both have `bg-background/95 backdrop-blur-md` so content scrolls translucent underneath.
 
 **Expenses Tab:**
 - `HeroSummary` dark ink card: big label "Net outgo this month", big number = total month debits, sub-chips "Total In" (credits) and "Net Savings" (In − Out, signed and color-tinted green/coral). All three values are filter-aware: the `Out` filter zeros earn; the `In` filter zeros spend.
@@ -292,7 +287,7 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 - Hero spend card: total month spend (or income, filter-aware) + percentage change vs previous month + average per day + transaction count + hand-rolled SVG sparkline.
 - "Where it went" combined block: stacked-share bar across the top, then a category list per row with `CategoryDot`, name, count, percentage, mono amount, and MoM change (color-coded for direction). Tap a row to jump to that category in Expenses.
 - "Biggest this month" list (top 5 by amount).
-- Compare button is currently a visual stub.
+- Compare button opens `CompareSheet` — month-A vs month-B comparison with delta strip and per-category dual progress bars sharing one scale. Hidden when month is "All".
 - Drops the prior dual-pie + summary-card + breakdown trio entirely (Recharts is no longer imported here).
 
 **Settings Tab:**
@@ -561,11 +556,7 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## KNOWN QUIRKS & FUTURE WORK
 
-- **`strict: false`** in tsconfig. Undeclared identifiers slip through; lint and Vite catch most missing imports but runtime crashes can still occur (one was the `Check`-from-`@phosphor-icons/react` regression that shipped briefly in May 2026). Tightening this is worthwhile but will require fixing many existing files.
-- **Mixed icon libraries.** `@phosphor-icons/react` is the primary set, but `lucide-react` is still imported in a few places (chrome icons, the FilterSheet Check icon). Pick one and stop importing the other in new code.
-- **Unused legacy files** kept on disk: `NetBalanceBanner.tsx`, `TransactionTypeFilter.tsx`, `MonthSelector.tsx`. Safe to delete once you're confident no rebases will resurrect references to them.
 - **Edge function token cost.** Each chunk re-sends the full ~4 KB system prompt. For very long statements, parallelising further beyond `CONCURRENCY = 2` could help wall-clock but would amplify rate-limit risk.
-- **Compare button** on the Dashboard's "Where it went" block is a visual stub — no comparison view is rendered yet.
 - **Notifications row** in Settings → Preferences is a placeholder; tapping toasts "Notifications are not yet wired up".
-- **Sticky bars** use a hard-coded `top: 57px` for the TabBar. If the TopBar's height changes, the TabBar's offset must change with it. Worth refactoring to a measured-height approach if more chrome rows get added.
 - **3-tab BottomNav** uses `activeTrackerId` from `AppContext` to deep-link the Trackers tab. If a user has zero trackers, the tab falls back to `/`.
+- **lucide-react remains as a transitive icon dep** for the vendored shadcn `ui/*` primitives (dialog/X, command/Search, etc.). All non-primitive code uses Phosphor. Don't import lucide from anywhere outside `src/components/ui/`.

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { X } from '@phosphor-icons/react';
 
 type NudgePosition = 'top' | 'bottom' | 'left' | 'right';
 

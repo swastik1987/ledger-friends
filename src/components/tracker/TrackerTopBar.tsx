@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, UploadSimple } from '@phosphor-icons/react';
 
@@ -7,10 +8,36 @@ interface Props {
   memberCount: number;
 }
 
+/**
+ * Publishes the measured height to `--tracker-topbar-h` on documentElement so the
+ * sibling sticky TabBar can offset against it without a hard-coded magic number.
+ * The CSS var is cleared on unmount to avoid bleeding into other routes.
+ */
+function useTopBarHeight(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = (h: number) => {
+      document.documentElement.style.setProperty('--tracker-topbar-h', `${Math.round(h)}px`);
+    };
+    apply(el.getBoundingClientRect().height);
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) apply(entry.contentRect.height);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty('--tracker-topbar-h');
+    };
+  }, [ref]);
+}
+
 export default function TrackerTopBar({ trackerId, trackerName, memberCount }: Props) {
   const navigate = useNavigate();
+  const barRef = useRef<HTMLDivElement | null>(null);
+  useTopBarHeight(barRef);
   return (
-    <div className="sticky top-0 z-20 px-4 py-2.5 bg-background/95 backdrop-blur-md border-b border-line-soft">
+    <div ref={barRef} className="sticky top-0 z-20 px-4 py-2.5 bg-background/95 backdrop-blur-md border-b border-line-soft">
       <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
         <button
           aria-label="Back"

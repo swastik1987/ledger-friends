@@ -1,8 +1,7 @@
 import { Expense, Category } from '@/types';
 import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday } from 'date-fns';
-import { Receipt, X, MagnifyingGlass, Tag, ArrowsLeftRight, Trash, ArrowsClockwise } from '@phosphor-icons/react';
-import { Loader2 } from 'lucide-react';
+import { Receipt, X, MagnifyingGlass, Tag, ArrowsLeftRight, Trash, ArrowsClockwise, CircleNotch } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
@@ -431,7 +430,7 @@ export default function ExpensesTab({
                 disabled={isBulkPending}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-[12px] font-semibold text-ink"
               >
-                {bulkMoveExpenses.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowsClockwise size={14} />}
+                {bulkMoveExpenses.isPending ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <ArrowsClockwise size={14} />}
                 Move
               </button>
             )}
@@ -440,7 +439,7 @@ export default function ExpensesTab({
               disabled={isBulkPending}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-spend text-[12px] font-semibold text-spend"
             >
-              {bulkDeleteExpenses.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash size={14} />}
+              {bulkDeleteExpenses.isPending ? <CircleNotch className="h-3.5 w-3.5 animate-spin" /> : <Trash size={14} />}
               Delete
             </button>
           </div>

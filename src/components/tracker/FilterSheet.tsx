@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
-import { Check } from 'lucide-react';
+import { Check } from '@phosphor-icons/react';
 import CategoryDot from '@/components/CategoryDot';
 import { Category, Expense } from '@/types';
 
@@ -83,7 +83,7 @@ export default function FilterSheet({
                       {u.name.charAt(0).toUpperCase()}
                     </span>
                     {u.name.split(' ')[0]}
-                    {selected && <Check size={12} strokeWidth={3} />}
+                    {selected && <Check size={12} weight="bold" />}
                   </button>
                 );
               })}

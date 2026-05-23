@@ -8,9 +8,9 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import {
-  ArrowLeft, LogOut, Trash2, Download, Shield, Users, Crown,
-  Loader2, AlertTriangle, ChevronRight, CheckCircle2,
-} from 'lucide-react';
+  ArrowLeft, SignOut, Trash, DownloadSimple, Shield, Users, Crown,
+  CircleNotch, Warning, CaretRight, CheckCircle,
+} from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -271,11 +271,11 @@ export default function ProfilePage() {
           </div>
           <div className="mt-4 flex gap-2">
             <Button variant="outline" className="flex-1 h-10" onClick={handleExportData} disabled={exporting}>
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+              {exporting ? <CircleNotch className="h-4 w-4 animate-spin mr-2" /> : <DownloadSimple className="h-4 w-4 mr-2" />}
               Export My Data
             </Button>
             <Button variant="outline" className="h-10" onClick={() => { signOut(); navigate('/auth'); }}>
-              <LogOut className="h-4 w-4 mr-2" /> Sign Out
+              <SignOut className="h-4 w-4 mr-2" /> Sign Out
             </Button>
           </div>
         </div>
@@ -291,7 +291,7 @@ export default function ProfilePage() {
                 className="h-8 text-xs"
                 onClick={() => setShowDeleteTrackersDialog(true)}
               >
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                <Trash className="h-3.5 w-3.5 mr-1" />
                 Remove {selectedTrackerIds.size} selected
               </Button>
             )}
@@ -343,7 +343,7 @@ export default function ProfilePage() {
                   onClick={() => { setActiveTrackerId(tracker.id); navigate(`/tracker/${tracker.id}`); }}
                   className="p-1 text-muted-foreground hover:text-foreground"
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <CaretRight className="h-4 w-4" />
                 </button>
               </div>
             );
@@ -357,7 +357,7 @@ export default function ProfilePage() {
         {/* ─── Section 3: Danger Zone ──────────────────── */}
         <div className="rounded-2xl border-2 border-destructive/30 p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
+            <Warning className="h-5 w-5 text-destructive" />
             <h2 className="font-semibold text-base text-destructive">Danger Zone</h2>
           </div>
 
@@ -383,9 +383,9 @@ export default function ProfilePage() {
             disabled={checkingBlockers}
           >
             {checkingBlockers ? (
-              <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Checking...</>
+              <><CircleNotch className="h-4 w-4 animate-spin mr-2" /> Checking...</>
             ) : (
-              <><Trash2 className="h-4 w-4 mr-2" /> Delete My Account</>
+              <><Trash className="h-4 w-4 mr-2" /> Delete My Account</>
             )}
           </Button>
         </div>
@@ -448,7 +448,7 @@ export default function ProfilePage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <Warning className="h-5 w-5 text-destructive" />
               Delete your account?
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -456,18 +456,18 @@ export default function ProfilePage() {
                 <p className="text-sm">This action is <strong>permanent and irreversible</strong>. The following will be deleted:</p>
                 <ul className="text-xs space-y-1.5">
                   <li className="flex items-start gap-2">
-                    <Trash2 className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
+                    <Trash className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
                     Your profile and authentication data
                   </li>
                   {myAdminTrackers.length > 0 && (
                     <li className="flex items-start gap-2">
-                      <Trash2 className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
+                      <Trash className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
                       {myAdminTrackers.length} tracker(s) you own and all their transactions
                     </li>
                   )}
                   {myMemberTrackers.length > 0 && (
                     <li className="flex items-start gap-2">
-                      <Trash2 className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
+                      <Trash className="h-3.5 w-3.5 mt-0.5 text-destructive flex-shrink-0" />
                       Your membership in {myMemberTrackers.length} shared tracker(s)
                     </li>
                   )}

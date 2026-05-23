@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload as UploadIcon, FileText, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Upload as UploadIcon, FileText, CircleNotch, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -1310,7 +1310,7 @@ export default function UploadStatement() {
 
             <div className="sticky bottom-4">
               <Button onClick={handleSaveAll} className="w-full h-12 shadow-lg" disabled={bulkCreate.isPending || approvedDrafts.length === 0}>
-                {bulkCreate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Save ${approvedDrafts.length} Transactions to Tracker`}
+                {bulkCreate.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : `Save ${approvedDrafts.length} Transactions to Tracker`}
               </Button>
             </div>
           </div>

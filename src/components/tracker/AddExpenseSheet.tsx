@@ -9,7 +9,7 @@ import { Expense, Category, Tracker, PaymentMethod } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCreateExpense, useUpdateExpense, useDeleteExpense, useDuplicateCheck } from '@/hooks/useExpenses';
 import { format } from 'date-fns';
-import { Loader2, AlertTriangle, Search, ArrowUpRight, ArrowDownLeft, Upload, PenLine, Check, RefreshCw } from 'lucide-react';
+import { CircleNotch, Warning, MagnifyingGlass, ArrowUpRight, ArrowDownLeft, Upload, PencilSimple, Check, ArrowsClockwise } from '@phosphor-icons/react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
@@ -175,14 +175,14 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       amount: finalAmount,
       currency: trackerCurrency,
       date,
-      merchant_name: merchantName.trim() || null,
+      merchant_name: merchantName.trim() || undefined,
       description,
-      notes: notes || null,
+      notes: notes || undefined,
       is_debit: isDebit,
       is_transfer: isTransfer,
       suspected_transfer: suspectedTransfer,
-      payment_method: (paymentMethod || null) as PaymentMethod | undefined,
-      bank_name: bankName || null,
+      payment_method: (paymentMethod || undefined) as PaymentMethod | undefined,
+      bank_name: bankName || undefined,
       source: 'manual' as const,
       ...conversionFields,
     };
@@ -211,7 +211,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   disabled={isPending || !amount || !description || !categoryId}
                   className="h-9 px-3 gap-1.5"
                 >
-                  {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  {isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   {isEdit ? 'Update' : 'Save'}
                 </Button>
               )}
@@ -239,7 +239,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
                 >
                   <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                    <PenLine className="h-6 w-6 text-primary" />
+                    <PencilSimple className="h-6 w-6 text-primary" />
                   </div>
                   <div className="text-left">
                     <p className="font-semibold text-sm">Add Manually</p>
@@ -280,7 +280,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                   </Select>
                   {expenseCurrency !== trackerCurrency && (
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <RefreshCw className="h-3 w-3" />
+                      <ArrowsClockwise className="h-3 w-3" />
                       Will convert to {getCurrency(trackerCurrency).symbol} {trackerCurrency}
                     </span>
                   )}
@@ -439,7 +439,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
             {/* Duplicate warning */}
             {duplicate && (
               <div className="rounded-xl border border-warning/50 bg-warning/10 p-3 flex items-start gap-2">
-                <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
+                <Warning className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <p className="text-sm font-medium">Similar transaction found</p>
                   <p className="text-xs text-muted-foreground">"{duplicate.description}" on {duplicate.date} for {formatAmountShort(duplicate.amount, trackerCurrency)}</p>
@@ -487,7 +487,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
           </SheetHeader>
           <div className="py-3 space-y-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 value={categorySearch}
                 onChange={e => setCategorySearch(e.target.value)}

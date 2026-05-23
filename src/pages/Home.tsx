@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTrackers, useCreateTracker, useInviteMember } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
 import { format, parseISO } from 'date-fns';
-import { ChevronRight, FolderOpen, Loader2, UserPlus, X } from 'lucide-react';
+import { CaretRight, FolderOpen, CircleNotch, UserPlus, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -149,7 +149,7 @@ export default function HomePage() {
                 {tracker.date_range ? ` between ${format(parseISO(tracker.date_range.min), 'MMM yyyy')}${tracker.date_range.min.slice(0, 7) !== tracker.date_range.max.slice(0, 7) ? ` – ${format(parseISO(tracker.date_range.max), 'MMM yyyy')}` : ''}` : ''}
               </p>
             </div>
-            <ChevronRight className="h-5 w-5 text-ink-faint flex-shrink-0" />
+            <CaretRight className="h-5 w-5 text-ink-faint flex-shrink-0" />
           </button>
         ))}
 
@@ -222,7 +222,7 @@ export default function HomePage() {
               )}
             </div>
             <Button onClick={handleCreate} className="w-full h-11" disabled={createTracker.isPending || !newName.trim()}>
-              {createTracker.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create Tracker'}
+              {createTracker.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : 'Create Tracker'}
             </Button>
           </div>
         </SheetContent>

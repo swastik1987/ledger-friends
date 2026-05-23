@@ -13,7 +13,9 @@ export default function TrackerTabBar({ active, onChange }: Props) {
   return (
     <div
       className="sticky z-10 px-4 pt-2 pb-2 bg-background/95 backdrop-blur-md"
-      style={{ top: 57 }}  // height of TrackerTopBar (py-2.5 + h-9 button + 1px border)
+      // TrackerTopBar publishes its measured height to --tracker-topbar-h on
+      // <html>; we fall back to the historical 57px while it's still mounting.
+      style={{ top: 'var(--tracker-topbar-h, 57px)' }}
     >
       <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl bg-surface-alt border border-line">
         {TABS.map(t => {

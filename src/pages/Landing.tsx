@@ -1,9 +1,9 @@
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
-  FileUp, PenLine, Users, BarChart3, ArrowRight,
-  Shield, CloudOff, Sparkles, ChevronRight,
-} from 'lucide-react';
+  FileArrowUp, PencilSimple, Users, ChartBar, ArrowRight,
+  Shield, CloudSlash, Sparkle, CaretRight,
+} from '@phosphor-icons/react';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -40,7 +40,7 @@ export default function LandingPage() {
 
         <div className="relative max-w-5xl mx-auto px-4 pt-16 pb-20 sm:pt-24 sm:pb-28 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
-            <Sparkles className="h-3.5 w-3.5" />
+            <Sparkle className="h-3.5 w-3.5" />
             AI-powered expense tracking
           </div>
 
@@ -85,7 +85,7 @@ export default function LandingPage() {
             {/* Feature 1: Statement Upload */}
             <div className="group rounded-2xl border border-border bg-card p-6 sm:p-8 hover:shadow-lg hover:border-primary/30 transition-all duration-300">
               <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
-                <FileUp className="h-6 w-6 text-primary" />
+                <FileArrowUp className="h-6 w-6 text-primary" />
               </div>
               <h3 className="text-lg font-semibold mb-2">Smart Statement Upload</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -103,7 +103,7 @@ export default function LandingPage() {
             {/* Feature 2: Manual Tracking */}
             <div className="group rounded-2xl border border-border bg-card p-6 sm:p-8 hover:shadow-lg hover:border-primary/30 transition-all duration-300">
               <div className="h-12 w-12 rounded-xl bg-accent/10 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
-                <PenLine className="h-6 w-6 text-accent" />
+                <PencilSimple className="h-6 w-6 text-accent" />
               </div>
               <h3 className="text-lg font-semibold mb-2">Quick Manual Tracking</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -137,7 +137,7 @@ export default function LandingPage() {
             {/* Feature 4: Insights & Export */}
             <div className="group rounded-2xl border border-border bg-card p-6 sm:p-8 hover:shadow-lg hover:border-primary/30 transition-all duration-300">
               <div className="h-12 w-12 rounded-xl bg-violet-100 dark:bg-violet-500/10 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
-                <BarChart3 className="h-6 w-6 text-violet-500" />
+                <ChartBar className="h-6 w-6 text-violet-500" />
               </div>
               <h3 className="text-lg font-semibold mb-2">Insights & Export</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -167,7 +167,7 @@ export default function LandingPage() {
             <div className="relative text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-start gap-3 mb-4">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-sm shrink-0">1</span>
-                <ChevronRight className="hidden sm:block h-5 w-5 text-muted-foreground/40 absolute right-0 top-3" />
+                <CaretRight className="hidden sm:block h-5 w-5 text-muted-foreground/40 absolute right-0 top-3" />
               </div>
               <h3 className="font-semibold text-base mb-2">Create a Tracker</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -180,7 +180,7 @@ export default function LandingPage() {
             <div className="relative text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-start gap-3 mb-4">
                 <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-sm shrink-0">2</span>
-                <ChevronRight className="hidden sm:block h-5 w-5 text-muted-foreground/40 absolute right-0 top-3" />
+                <CaretRight className="hidden sm:block h-5 w-5 text-muted-foreground/40 absolute right-0 top-3" />
               </div>
               <h3 className="font-semibold text-base mb-2">Add Transactions</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -222,7 +222,7 @@ export default function LandingPage() {
 
             <div className="flex items-start gap-4">
               <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                <CloudOff className="h-5 w-5 text-primary" />
+                <CloudSlash className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="font-semibold text-sm">Files Never Stored</p>
@@ -234,7 +234,7 @@ export default function LandingPage() {
 
             <div className="flex items-start gap-4">
               <div className="h-10 w-10 rounded-xl bg-violet-100 dark:bg-violet-500/10 flex items-center justify-center shrink-0">
-                <Sparkles className="h-5 w-5 text-violet-500" />
+                <Sparkle className="h-5 w-5 text-violet-500" />
               </div>
               <div>
                 <p className="font-semibold text-sm">Free Forever</p>

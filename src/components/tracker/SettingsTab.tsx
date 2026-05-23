@@ -12,8 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { House, Pencil, Check, X, Trash, DotsThree, Plus, Sparkle, CaretDown, MagnifyingGlass, Tag, DownloadSimple, Bell, FunnelSimple, Money, CaretRight } from '@phosphor-icons/react';
-import { Loader2 } from 'lucide-react';
+import { House, Pencil, Check, X, Trash, DotsThree, Plus, Sparkle, CaretDown, MagnifyingGlass, Tag, DownloadSimple, Bell, FunnelSimple, Money, CaretRight, CircleNotch } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { CURRENCIES, getCurrency } from '@/lib/currencies';
@@ -455,7 +454,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
             disabled={bulkRegenerating}
             className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-soft disabled:opacity-50"
           >
-            {bulkRegenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkle size={13} />} Auto-assign icons
+            {bulkRegenerating ? <CircleNotch className="h-3 w-3 animate-spin" /> : <Sparkle size={13} />} Auto-assign icons
           </button>
         </div>
         {showSystemCats && (
@@ -539,7 +538,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
               autoFocus
             />
             <Button onClick={handleInvite} disabled={inviteMember.isPending || !inviteEmail.trim()} className="w-full h-11 bg-ember hover:bg-ember/90 text-white">
-              {inviteMember.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add to tracker'}
+              {inviteMember.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : 'Add to tracker'}
             </Button>
           </div>
         </SheetContent>
@@ -614,7 +613,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1" onClick={() => setDeletingCategory(null)}>Cancel</Button>
                   <Button className="flex-1 bg-spend text-white hover:bg-spend/90" onClick={handleDeleteCategoryNoTxns} disabled={deleteCategory.isPending}>
-                    {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Category'}
+                    {deleteCategory.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : 'Delete Category'}
                   </Button>
                 </div>
               </>
@@ -651,7 +650,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
                       <AlertDialogAction onClick={handleDeleteCategoryWithTransactions} className="bg-spend text-white hover:bg-spend/90">
-                        {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete All'}
+                        {deleteCategory.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : 'Delete All'}
                       </AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
@@ -687,7 +686,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
                 <div className="flex gap-2 pt-2">
                   <Button variant="outline" className="flex-1" onClick={() => setDeleteCatStep('choose')}>Back</Button>
                   <Button className="flex-1 bg-ember hover:bg-ember/90 text-white" disabled={!reassignCategoryId || deleteCategory.isPending} onClick={handleDeleteCategoryReassign}>
-                    {deleteCategory.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Move & Delete'}
+                    {deleteCategory.isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : 'Move & Delete'}
                   </Button>
                 </div>
               </>
@@ -711,7 +710,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
               disabled={convertCurrency.isPending}
               className="w-full bg-ember hover:bg-ember/90 text-white"
             >
-              {convertCurrency.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {convertCurrency.isPending ? <CircleNotch className="h-4 w-4 animate-spin mr-2" /> : null}
               Yes, convert amounts
             </Button>
             <Button
@@ -751,7 +750,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
               <Label className="flex items-center gap-1.5">
                 <Sparkle size={13} color="hsl(var(--ember))" />
                 Suggested Icons
-                {aiLoading && <Loader2 className="h-3 w-3 animate-spin text-ink-faint" />}
+                {aiLoading && <CircleNotch className="h-3 w-3 animate-spin text-ink-faint" />}
               </Label>
               {aiIcons.length > 0 ? (
                 <div className="flex gap-2">
@@ -849,7 +848,7 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
 
             <Button onClick={handleSaveCategory} className="w-full h-11 bg-ember hover:bg-ember/90 text-white" disabled={!catName.trim() || isSaving}>
               {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <CircleNotch className="h-4 w-4 animate-spin" />
               ) : editingCategory ? (
                 editingCategory.is_system ? 'Create Custom Version' : 'Save Changes'
               ) : (
