@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, Minus, ArrowDownLeft, ArrowUpRight, CircleNotch } from '@phosphor-icons/react';
+import { Check, X, Minus, ArrowDownLeft, ArrowUpRight, CircleNotch, ArrowsLeftRight } from '@phosphor-icons/react';
 import {
   Sheet,
   SheetContent,
@@ -28,9 +28,11 @@ interface Props {
   trackerId: string;
   trackerCurrency: string;
   suspectedExpenses: Expense[];
+  /** IDs of rows that surfaced via the debit/credit pair heuristic (see useSuspectedTransfers). */
+  pairedIds?: Set<string>;
 }
 
-export default function TransferReviewSheet({ open, onOpenChange, trackerId, trackerCurrency, suspectedExpenses }: Props) {
+export default function TransferReviewSheet({ open, onOpenChange, trackerId, trackerCurrency, suspectedExpenses, pairedIds }: Props) {
   const resolve = useBulkResolveTransfers();
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -163,9 +165,20 @@ export default function TransferReviewSheet({ open, onOpenChange, trackerId, tra
                   <div className="flex items-start gap-3">
                     <CategoryDot icon={cat?.icon || 'Tag'} color={cat?.color || 'hsl(var(--ember))'} size={36} />
                     <div className="flex-1 min-w-0">
-                      <p className="font-display font-semibold text-[14px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
-                        {exp.merchant_name || exp.description}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-display font-semibold text-[14px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
+                          {exp.merchant_name || exp.description}
+                        </p>
+                        {pairedIds?.has(exp.id) && (
+                          <span
+                            className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9.5px] font-bold uppercase tracking-wider"
+                            style={{ background: 'hsl(var(--warn) / 0.15)', color: 'hsl(var(--warn))' }}
+                            title="Matched with an opposite-direction transaction of similar amount within ±1 day"
+                          >
+                            <ArrowsLeftRight size={9} weight="bold" /> Pair
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 text-[11.5px] text-ink-soft mt-0.5 font-medium">
                         <span>{format(parseISO(exp.date), 'd MMM yyyy')}</span>
                         {exp.bank_name && <span>· {exp.bank_name}</span>}

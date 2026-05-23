@@ -62,15 +62,24 @@ export default function TrackerToolBar({
 
   return (
     <div className="mx-4 mb-3 flex items-center gap-2">
-      {/* Month dropdown */}
+      {/* Month dropdown — styled like the active TabBar pill (ink fill) so the current
+          month feels like a primary selection, not just a chrome control. */}
       <Popover open={monthOpen} onOpenChange={setMonthOpen}>
         <PopoverTrigger asChild>
-          <button className="flex-1 min-w-0 px-3.5 h-[42px] rounded-xl border border-line bg-card text-ink inline-flex items-center justify-between gap-2 font-semibold text-[14px]">
+          <button
+            className="flex-1 min-w-0 px-3.5 h-[42px] rounded-xl inline-flex items-center justify-between gap-2 font-semibold text-[14px] transition-colors"
+            style={{
+              background: 'hsl(var(--ink))',
+              color: 'hsl(var(--background))',
+              border: '1px solid hsl(var(--ink))',
+              letterSpacing: '-0.01em',
+            }}
+          >
             <span className="inline-flex items-center gap-2 min-w-0">
-              <Calendar size={15} color="hsl(var(--ink-soft))" />
+              <Calendar size={15} color="hsl(var(--background))" />
               <span className="truncate">{monthLabel}</span>
             </span>
-            <CaretDown size={14} color="hsl(var(--ink-faint))" />
+            <CaretDown size={14} color="hsl(var(--background) / 0.7)" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={6} className="w-56 p-1">

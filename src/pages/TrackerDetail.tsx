@@ -42,7 +42,9 @@ export default function TrackerDetail() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
-  const { data: suspectedTransfers } = useSuspectedTransfers(trackerId!);
+  const { data: suspectedData } = useSuspectedTransfers(trackerId!);
+  const suspectedTransfers = suspectedData?.all;
+  const pairedTransferIds = suspectedData?.pairedIds ?? new Set<string>();
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showTransferSheet, setShowTransferSheet] = useState(false);
 
@@ -192,6 +194,7 @@ export default function TrackerDetail() {
         trackerId={trackerId!}
         trackerCurrency={tracker.currency || 'INR'}
         suspectedExpenses={suspectedTransfers || []}
+        pairedIds={pairedTransferIds}
       />
 
       <BottomNav />

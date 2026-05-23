@@ -290,27 +290,83 @@ export function useBulkMoveExpenses() {
 }
 
 /**
- * Fetch all open suspected transfers for a tracker (suspected_transfer=true AND is_transfer=false).
- * Used by the tracker page popup + review sheet.
+ * Pair-match heuristic: for each debit, find a credit within ±1 day where the
+ * amounts match within 1%. Greedy "best match" by smallest amount delta.
+ * Returns the set of expense IDs that participate in any pair.
+ *
+ * Pairs are matched cross-user — a transfer is often initiated by one member
+ * (debit on a personal card) and the receiving credit can land on a shared
+ * account belonging to another member.
+ */
+function findTransferPairs(rows: Expense[]): Set<string> {
+  const paired = new Set<string>();
+  const debits = rows.filter(r => r.is_debit);
+  const credits = rows.filter(r => !r.is_debit);
+  const usedCredits = new Set<string>();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  for (const d of debits) {
+    if (d.amount <= 0) continue;
+    const dDate = parseISO(d.date).getTime();
+    let bestC: Expense | null = null;
+    let bestDelta = Infinity;
+    for (const c of credits) {
+      if (usedCredits.has(c.id)) continue;
+      if (c.amount <= 0) continue;
+      const cDate = parseISO(c.date).getTime();
+      const dayDiff = Math.abs(dDate - cDate) / DAY_MS;
+      if (dayDiff > 1) continue;
+      const max = Math.max(d.amount, c.amount);
+      const amtDelta = Math.abs(d.amount - c.amount) / max;
+      if (amtDelta > 0.01) continue;
+      if (amtDelta < bestDelta) {
+        bestDelta = amtDelta;
+        bestC = c;
+      }
+    }
+    if (bestC) {
+      paired.add(d.id);
+      paired.add(bestC.id);
+      usedCredits.add(bestC.id);
+    }
+  }
+  return paired;
+}
+
+/**
+ * Fetch all open suspected transfers for a tracker. Augments two sources:
+ *   1. Rows where the server-side keyword/AI detector set suspected_transfer=true
+ *   2. Pair-matched rows: debit+credit within ±1 day, amounts within 1%
+ * Both are filtered to is_transfer=false.
+ *
+ * Returns `{ all, pairedIds }` so the review sheet can show a pair hint chip.
  */
 export function useSuspectedTransfers(trackerId: string) {
   return useQuery({
     queryKey: ['suspected-transfers', trackerId],
     queryFn: async () => {
+      // Pull every non-transfer row for the tracker. We need the full pool to
+      // compute pair matches across the whole history (a real transfer's two
+      // legs may straddle a month boundary).
       const { data, error } = await supabase
         .from('expenses')
         .select('*, category:categories(*)')
         .eq('tracker_id', trackerId)
-        .eq('suspected_transfer', true)
         .eq('is_transfer', false)
         .order('date', { ascending: false });
 
       if (error) throw error;
-      return (data || []).map(e => ({
+      const rows = (data || []).map(e => ({
         ...e,
         amount: Number(e.amount),
         category: e.category as unknown as Category,
       })) as Expense[];
+
+      const pairedIds = findTransferPairs(rows);
+      const keywordIds = new Set(rows.filter(r => r.suspected_transfer).map(r => r.id));
+      const candidateIds = new Set<string>([...keywordIds, ...pairedIds]);
+      const all = rows.filter(r => candidateIds.has(r.id));
+      return { all, pairedIds };
     },
     enabled: !!trackerId,
     staleTime: 30_000,

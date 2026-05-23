@@ -19,7 +19,8 @@ import TypeSegment from './TypeSegment';
 import TrackerToolBar, { SortOption } from './TrackerToolBar';
 import DayHeader from './DayHeader';
 import TxnRow from './TxnRow';
-import FilterSheet from './FilterSheet';
+import FilterSheet, { UNSPECIFIED } from './FilterSheet';
+import { useMonthSwipe } from '@/hooks/useMonthSwipe';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
 
@@ -126,6 +127,9 @@ export default function ExpensesTab({
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [showMoveTrackerPicker, setShowMoveTrackerPicker] = useState(false);
 
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useMonthSwipe(rootRef, months, month, onMonthChange);
+
   const [sortBy, setSortBy] = useState<SortOption>(() => readSortPref(trackerId));
   const handleSortChange = (value: SortOption) => {
     setSortBy(value);
@@ -133,6 +137,8 @@ export default function ExpensesTab({
   };
 
   const [filterUsers, setFilterUsers] = useState<Set<string>>(new Set());
+  const [filterBanks, setFilterBanks] = useState<Set<string>>(new Set());
+  const [filterPaymentMethods, setFilterPaymentMethods] = useState<Set<string>>(new Set());
   const [filterCategories, setFilterCategories] = useState<Set<string>>(new Set());
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -152,7 +158,7 @@ export default function ExpensesTab({
   }, [searchParams, setSearchParams]);
 
   const monthLabel = months.find(m => m.value === month)?.label || month;
-  const activeFilterCount = filterUsers.size + filterCategories.size;
+  const activeFilterCount = filterUsers.size + filterBanks.size + filterPaymentMethods.size + filterCategories.size;
 
   useEffect(() => {
     setSelectedIds(new Set());
@@ -184,11 +190,23 @@ export default function ExpensesTab({
         return filterUsers.has(key);
       });
     }
+    if (filterBanks.size > 0) {
+      result = result.filter(e => {
+        const v = e.bank_name?.trim();
+        return v ? filterBanks.has(v) : filterBanks.has(UNSPECIFIED);
+      });
+    }
+    if (filterPaymentMethods.size > 0) {
+      result = result.filter(e => {
+        const v = e.payment_method?.trim();
+        return v ? filterPaymentMethods.has(v) : filterPaymentMethods.has(UNSPECIFIED);
+      });
+    }
     if (filterCategories.size > 0) {
       result = result.filter(e => filterCategories.has(e.category_id));
     }
     return result;
-  }, [expenses, typeFilter, filterUsers, filterCategories]);
+  }, [expenses, typeFilter, filterUsers, filterBanks, filterPaymentMethods, filterCategories]);
 
   const isCategorySort = sortBy === 'category-asc' || sortBy === 'category-desc';
   const isAmountSort = sortBy === 'amount-asc' || sortBy === 'amount-desc';
@@ -214,8 +232,24 @@ export default function ExpensesTab({
       return next;
     });
   };
+  const toggleFilterBank = (bank: string) => {
+    setFilterBanks(prev => {
+      const next = new Set(prev);
+      if (next.has(bank)) next.delete(bank); else next.add(bank);
+      return next;
+    });
+  };
+  const toggleFilterPaymentMethod = (pm: string) => {
+    setFilterPaymentMethods(prev => {
+      const next = new Set(prev);
+      if (next.has(pm)) next.delete(pm); else next.add(pm);
+      return next;
+    });
+  };
   const clearAllFilters = () => {
     setFilterUsers(new Set());
+    setFilterBanks(new Set());
+    setFilterPaymentMethods(new Set());
     setFilterCategories(new Set());
   };
 
@@ -289,7 +323,7 @@ export default function ExpensesTab({
   const symbol = getCurrency(trackerCurrency).symbol;
 
   return (
-    <div className="pb-4">
+    <div ref={rootRef} className="pb-4">
       {/* Selection header */}
       {isSelecting && (
         <div className="mx-4 mt-1 mb-3 px-3 py-2.5 rounded-2xl flex items-center gap-3" style={{ background: 'hsl(var(--ink))', color: 'hsl(var(--background))' }}>
@@ -454,8 +488,12 @@ export default function ExpensesTab({
         matchingCount={filteredExpenses.length}
         categories={categories}
         selectedUsers={filterUsers}
+        selectedBanks={filterBanks}
+        selectedPaymentMethods={filterPaymentMethods}
         selectedCategories={filterCategories}
         onToggleUser={toggleFilterUser}
+        onToggleBank={toggleFilterBank}
+        onTogglePaymentMethod={toggleFilterPaymentMethod}
         onToggleCategory={toggleFilterCategory}
         onClearAll={clearAllFilters}
       />

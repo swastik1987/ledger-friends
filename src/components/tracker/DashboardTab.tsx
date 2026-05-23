@@ -1,7 +1,8 @@
 import { Expense, Category } from '@/types';
 import { subMonths, format, parse } from 'date-fns';
 import { ArrowUp, ArrowDown, ArrowsLeftRight, Receipt as ReceiptIcon } from '@phosphor-icons/react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useMonthSwipe } from '@/hooks/useMonthSwipe';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import TrackerToolBar, { SortOption } from './TrackerToolBar';
@@ -72,6 +73,8 @@ export default function DashboardTab({
   const symbol = getCurrency(trackerCurrency).symbol;
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [compareOpen, setCompareOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useMonthSwipe(rootRef, months, month, onMonthChange);
 
   const isAllMonths = month === 'all';
   const prevMonth = isAllMonths ? '' : format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
@@ -164,7 +167,7 @@ export default function DashboardTab({
   }
 
   return (
-    <div className="pb-4">
+    <div ref={rootRef} className="pb-4">
       <TrackerToolBar
         monthLabel={monthLabel}
         months={months}

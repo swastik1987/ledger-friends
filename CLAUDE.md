@@ -273,11 +273,11 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 
 **Expenses Tab:**
 - `HeroSummary` dark ink card: big label "Net outgo this month", big number = total month debits, sub-chips "Total In" (credits) and "Net Savings" (In − Out, signed and color-tinted green/coral). All three values are filter-aware: the `Out` filter zeros earn; the `In` filter zeros spend.
-- `TrackerToolBar`: month dropdown · transfer-review button (warn-coloured with count badge, both Expenses + Dashboard tabs) · sort button · filter button (with badge).
+- `TrackerToolBar`: month dropdown (ink-filled pill — matches the active TabBar style so the current month feels like a primary selection) · transfer-review button (warn-coloured with count badge, both Expenses + Dashboard tabs) · sort button · filter button (with badge). The Expenses + Dashboard bodies also accept horizontal swipe to step through months via `useMonthSwipe` (bounded — no wrap).
 - `TypeSegment`: All / Out / In segmented control — replaces the old `TransactionTypeFilter`.
 - Day group headers show net delta `+₹X` / `−₹X` color-coded.
 - `TxnRow` letter-receipt cards (see gesture model below).
-- `FilterSheet` bottom sheet: people multi-select + category multi-select + ember "Show N matching" CTA. Filter applied client-side.
+- `FilterSheet` bottom sheet: **People → Banks → Payment Modes → Categories**, each multi-select. Banks and Payment Modes include an "Unspecified" chip when at least one row in the current view has no value for that field (matched via the exported `UNSPECIFIED` sentinel). Ember "Show N matching" CTA. Filter applied client-side.
 - Multi-select: dark header at top + floating action bar bottom-anchored with Category / Move / Delete.
 - Sort UI: see "Sort UI" section below.
 - `FloatingAdd` opens `AddExpenseSheet`.
@@ -358,9 +358,9 @@ Sort preference persists in localStorage per tracker via `expensesync-sort-pref`
 ### Transfer review flow
 
 Three pieces:
-- A *suspected-transfer* count badge on the toolbar (Expenses + Dashboard), warn-colored, count from `useSuspectedTransfers(trackerId)`.
+- A *suspected-transfer* count badge on the toolbar (Expenses + Dashboard), warn-colored. `useSuspectedTransfers(trackerId)` returns `{ all, pairedIds }` — the union of (a) rows with `suspected_transfer=true` (server-side keyword/AI flag), and (b) **pair-matched rows**: debit↔credit pairs across the tracker where dates are within ±1 day and amounts match within 1%. Pairs match cross-user so a transfer initiated by one member and received by another still surfaces. `is_transfer=true` rows are excluded.
 - `TransferReviewModal` — ember-styled popup that auto-opens once per session per tracker when suspected transfers exist (dismissible).
-- `TransferReviewSheet` — bottom sheet for the actual review. Letter-receipt rows with tri-state segmented control per row (Transfer / Not Transfer / Skip), bulk-action chips, ember save button. Discard-changes confirmation dialog when the user closes mid-review.
+- `TransferReviewSheet` — bottom sheet for the actual review. Letter-receipt rows with tri-state segmented control per row (Transfer / Not Transfer / Skip). Rows surfaced via the pair heuristic get a small warn-coloured "Pair" chip next to the merchant name. Bulk-action chips, ember save button. Discard-changes confirmation dialog when the user closes mid-review.
 
 ### Category Learning
 - `category_learning` table maps `normalized_description → category_id`.
@@ -376,7 +376,7 @@ Three pieces:
 
 ### Transfer Detection
 - `is_transfer` (user-confirmed) and `suspected_transfer` (heuristic) booleans on expenses.
-- Detected via `transferDetector.ts` keyword patterns; AI also flags candidates during parsing.
+- Two detection sources: (a) `transferDetector.ts` keyword patterns on entry/upload + AI flagging during parsing, persisted in the `suspected_transfer` column; (b) client-side **pair matching** in `useSuspectedTransfers` — pairs debit and credit rows within ±1 day and 1% amount tolerance, cross-user, excluding `is_transfer=true`. The two are unioned in the Review sheet.
 
 ---
 
@@ -390,7 +390,7 @@ Three pieces:
 - `useBulkResolveTransfers()` — confirm/reject suspected transfers in bulk
 - `useExpenseRealtime(trackerId)` — realtime subscription
 - `useDuplicateCheck(trackerId)` — Levenshtein-based duplicate detection
-- `useSuspectedTransfers(trackerId)` — pending suspected transfers
+- `useSuspectedTransfers(trackerId)` — returns `{ all, pairedIds }` (keyword flags ∪ pair-matched rows; see Transfer Detection)
 
 ### useTrackers.ts
 - `useTrackers()` — all user trackers (via `get_tracker_stats` RPC)

@@ -188,7 +188,10 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
     };
 
     if (isEdit) {
-      await updateExpense.mutateAsync({ id: editExpense!.id, ...expenseData });
+      // Preserve the original creator. Stripping these keeps the "Added by"
+      // attribution stable even when a different member edits the row.
+      const { created_by_id, created_by_name, ...editPayload } = expenseData;
+      await updateExpense.mutateAsync({ id: editExpense!.id, ...editPayload });
     } else {
       await createExpense.mutateAsync(expenseData);
     }
