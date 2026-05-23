@@ -156,37 +156,36 @@ export default function DashboardTab({
 
   return (
     <div ref={rootRef} className="pb-4">
-      {/* Hero: Net Outgo + Total In + Net Savings, matching the Transactions
-          tab's HeroSummary visual language. The sparkline + avg/day + pct
-          change sit inside the same card so everything is one glance. */}
-      <div className="relative mx-4 mt-2 mb-3 rounded-3xl hero-card p-5">
+      {/* Hero: Net Outgo + Total In + Net Savings on the cream card surface
+          so it visually rhymes with "Where it went" + "Biggest" below.
+          The Transactions tab keeps the dark ink HeroSummary — that's the
+          high-impact moment; here we want a calm overview. */}
+      <div className="relative mx-4 mt-2 mb-3 rounded-3xl bg-card border border-line-soft p-5 overflow-hidden">
         <MonthNavChevrons
-          tone="dark"
+          tone="light"
           onPrev={olderMonth ? () => onMonthChange(olderMonth) : undefined}
           onNext={newerMonth ? () => onMonthChange(newerMonth) : undefined}
         />
 
-        {/* Decorative dots — same treatment as HeroSummary so the two ink
-            cards feel like a family. */}
-        <div
-          className="absolute pointer-events-none"
-          style={{ right: -40, top: -40, width: 140, height: 140, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.18 }}
-        />
-        <div
-          className="absolute pointer-events-none"
-          style={{ right: 16, top: 16, width: 64, height: 64, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.40 }}
-        />
-
-        <div className="relative flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider opacity-65">
-          <span>Net outgo this month</span>
-          <span className="inline-flex items-center gap-1">
+        <div className="relative flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+            Net outgo this month
+          </span>
+          {/* Ember-tinted pill — primary affordance on the lighter card. */}
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold uppercase tracking-wider"
+            style={{
+              background: 'hsl(var(--ember) / 0.12)',
+              color: 'hsl(var(--ember))',
+            }}
+          >
             <Calendar size={11} weight="bold" /> {monthLabel}
           </span>
         </div>
 
         <div className="relative flex items-baseline gap-2.5 mt-1.5">
           <div
-            className="font-display tabular-nums"
+            className="font-display tabular-nums text-ink"
             style={{ fontSize: 44, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.05 }}
           >
             {symbol}{Math.round(totalDebits).toLocaleString('en-IN')}
@@ -196,11 +195,11 @@ export default function DashboardTab({
               className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold"
               style={{
                 background: pctChange === 0
-                  ? 'rgba(255,255,255,0.10)'
-                  : pctChange > 0 ? 'rgba(242,182,168,0.18)' : 'rgba(157,223,179,0.18)',
+                  ? 'hsl(var(--chip-bg))'
+                  : pctChange > 0 ? 'hsl(var(--spend-bg))' : 'hsl(var(--earn-bg))',
                 color: pctChange === 0
-                  ? 'rgba(255,255,255,0.65)'
-                  : pctChange > 0 ? '#F2B6A8' : '#9DDFB3',
+                  ? 'hsl(var(--ink-soft))'
+                  : pctChange > 0 ? 'hsl(var(--spend))' : 'hsl(var(--earn))',
               }}
             >
               {pctChange !== 0 && (pctChange > 0
@@ -212,28 +211,28 @@ export default function DashboardTab({
           )}
         </div>
 
-        <div className="relative mt-2 text-[12px] font-medium opacity-75">
+        <div className="relative mt-2 text-[12px] font-medium text-ink-soft">
           Avg {symbol}{avgPerDay.toLocaleString('en-IN')} / day · {debits.length} transaction{debits.length !== 1 ? 's' : ''}
         </div>
 
         {sparkValues.length >= 2 && (
           <div className="relative mt-3 -mx-1">
-            <Sparkline values={sparkValues} color="#F2B6A8" width={320} height={40} />
+            <Sparkline values={sparkValues} color="hsl(var(--ember))" width={320} height={40} />
           </div>
         )}
 
         <div className="relative mt-3.5 grid grid-cols-2 gap-2.5">
-          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-            <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Total In</span>
-            <span className="font-mono font-semibold text-[13px]">
+          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5 bg-surface-alt border border-line-soft">
+            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Total In</span>
+            <span className="font-mono font-semibold text-[13px] text-ink">
               {formatAmountShort(totalCredits, trackerCurrency)}
             </span>
           </div>
-          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-            <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Net Savings</span>
+          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5 bg-surface-alt border border-line-soft">
+            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Net Savings</span>
             <span
               className="font-mono font-semibold text-[13px]"
-              style={{ color: savingsPositive ? '#9DDFB3' : '#F2B6A8' }}
+              style={{ color: savingsPositive ? 'hsl(var(--earn))' : 'hsl(var(--spend))' }}
             >
               {savingsPositive ? '+' : '−'}{formatAmountShort(Math.abs(savings), trackerCurrency)}
             </span>
