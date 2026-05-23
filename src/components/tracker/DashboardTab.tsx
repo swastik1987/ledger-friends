@@ -9,6 +9,7 @@ import TypeSegment from './TypeSegment';
 import CategoryDot from '@/components/CategoryDot';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
+import CompareSheet from './CompareSheet';
 
 interface Props {
   trackerId: string;
@@ -70,6 +71,7 @@ export default function DashboardTab({
   const navigate = useNavigate();
   const symbol = getCurrency(trackerCurrency).symbol;
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
+  const [compareOpen, setCompareOpen] = useState(false);
 
   const isAllMonths = month === 'all';
   const prevMonth = isAllMonths ? '' : format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
@@ -228,9 +230,14 @@ export default function DashboardTab({
             <h3 className="font-display font-semibold text-[16px] text-ink" style={{ letterSpacing: '-0.02em' }}>
               {isSpendingView ? 'Where it went' : 'Where it came from'}
             </h3>
-            <button className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-soft">
-              <ArrowsLeftRight size={13} /> Compare
-            </button>
+            {!isAllMonths && (
+              <button
+                onClick={() => setCompareOpen(true)}
+                className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-soft hover:text-ember transition-colors"
+              >
+                <ArrowsLeftRight size={13} /> Compare
+              </button>
+            )}
           </div>
 
           <StackedShareBar slices={categoryBreakdown.map(c => ({ id: c.cat.id, value: c.value, color: c.cat.color }))} />
@@ -323,6 +330,18 @@ export default function DashboardTab({
             );
           })}
         </div>
+      )}
+
+      {!isAllMonths && (
+        <CompareSheet
+          open={compareOpen}
+          onOpenChange={setCompareOpen}
+          trackerId={trackerId}
+          trackerCurrency={trackerCurrency}
+          categories={categories}
+          monthA={month}
+          isSpendingView={isSpendingView}
+        />
       )}
 
       {/* Empty fallback */}
