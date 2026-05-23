@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Bank } from '@phosphor-icons/react';
-import { bankLogoUrl, bankHashColor, bankMonogram } from '@/lib/bankBrand';
+import { bankLogoUrl, bankBrandColor, bankMonogram } from '@/lib/bankBrand';
 
 interface Props {
   /** Raw bank name as stored on the expense (e.g. "HDFC Bank", "Scapia"). */
@@ -67,8 +67,9 @@ export default function BankBadge({ name, size = 22, unspecified = false }: Prop
     );
   }
 
-  // Fallback: monogram disc.
-  const color = bankHashColor(name);
+  // Fallback: monogram disc tinted with the bank's primary brand color
+  // (curated map; falls back to a stable hashed palette pick for unknowns).
+  const color = bankBrandColor(name);
   return (
     <span
       className="inline-flex items-center justify-center rounded-md font-bold shrink-0"
