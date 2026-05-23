@@ -1,6 +1,9 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ArrowDownLeft, Check, Trash } from '@phosphor-icons/react';
 import CategoryDot from '@/components/CategoryDot';
+import BankBadge from '@/components/BankBadge';
+import PaymentBadge from '@/components/PaymentBadge';
+import { paymentMeta } from '@/lib/paymentMethodMeta';
 import { Expense } from '@/types';
 import { formatAmountShort } from '@/lib/currencies';
 import {
@@ -28,16 +31,6 @@ const SCROLL_LOCK_Y = 12;      // px — vertical movement past this aborts hori
 const SWIPE_THRESHOLD = 0.40;  // fraction of card width — past this fires delete
 const SWIPE_VISUAL_CAP = 140;  // px — clamp visual translateX
 
-function paymentClass(method: string) {
-  switch (method) {
-    case 'UPI': return 'bg-[hsl(var(--ember)/0.10)] text-ember';
-    case 'Credit Card': return 'bg-[hsl(var(--earn)/0.10)] text-earn';
-    case 'Debit Card': return 'bg-[hsl(var(--earn)/0.08)] text-earn';
-    case 'Online': return 'bg-[hsl(var(--warn)/0.12)] text-warn';
-    case 'Cash': return 'bg-chip text-ink';
-    default: return 'bg-chip text-ink-soft';
-  }
-}
 
 export default function TxnRow({
   expense, trackerCurrency, selectMode, selected, canModify,
@@ -311,23 +304,31 @@ export default function TxnRow({
             </div>
           </div>
 
-          {/* Row 3: bank pill · payment chip. Only renders when at least one is present. */}
+          {/* Row 3: bank badge + name · payment badge + name. Each chip pairs the
+              small colored badge from the filter sheet with its label, so the
+              same visual language carries from filter → card. */}
           {(expense.bank_name || expense.payment_method) && (
             <div className="mt-1.5 pl-[52px] flex items-center gap-1.5 flex-wrap">
               {expense.bank_name && (
-                <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold bg-chip text-ink">
+                <span
+                  className="inline-flex items-center gap-1 pl-0.5 pr-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-chip text-ink"
+                >
+                  <BankBadge name={expense.bank_name} size={14} />
                   {expense.bank_name}
                 </span>
               )}
-              {expense.payment_method && (
-                <span
-                  className={`inline-flex items-center px-1.5 py-0 rounded text-[10px] font-semibold ${paymentClass(
-                    expense.payment_method,
-                  )}`}
-                >
-                  {expense.payment_method}
-                </span>
-              )}
+              {expense.payment_method && (() => {
+                const meta = paymentMeta(expense.payment_method);
+                return (
+                  <span
+                    className="inline-flex items-center gap-1 pl-0.5 pr-1.5 py-0.5 rounded-md text-[10.5px] font-semibold"
+                    style={{ background: meta.bg, color: meta.color }}
+                  >
+                    <PaymentBadge method={expense.payment_method} size={14} />
+                    {expense.payment_method}
+                  </span>
+                );
+              })()}
             </div>
           )}
 

@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
-import { Check, Bank, CreditCard } from '@phosphor-icons/react';
+import { Check } from '@phosphor-icons/react';
 import CategoryDot from '@/components/CategoryDot';
+import BankBadge from '@/components/BankBadge';
+import PaymentBadge from '@/components/PaymentBadge';
 import { Category, Expense } from '@/types';
 
 // Sentinel chip id used to filter for rows where a given field is blank.
@@ -163,7 +165,7 @@ export default function FilterSheet({
                     selected={selectedBanks.has(b)}
                     onToggle={() => onToggleBank(b)}
                     label={b === UNSPECIFIED ? 'Unspecified' : b}
-                    leading={<Bank size={13} weight="regular" />}
+                    leading={<BankBadge name={b === UNSPECIFIED ? null : b} unspecified={b === UNSPECIFIED} size={18} />}
                   />
                 ))}
               </div>
@@ -181,7 +183,7 @@ export default function FilterSheet({
                     selected={selectedPaymentMethods.has(p)}
                     onToggle={() => onTogglePaymentMethod(p)}
                     label={p === UNSPECIFIED ? 'Unspecified' : p}
-                    leading={<CreditCard size={13} weight="regular" />}
+                    leading={<PaymentBadge method={p === UNSPECIFIED ? null : p} unspecified={p === UNSPECIFIED} size={18} />}
                   />
                 ))}
               </div>

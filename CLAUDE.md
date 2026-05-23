@@ -77,6 +77,8 @@ ledger-friends/
 │   │   ├── FloatingAdd.tsx                   # Ember ember FAB (on Home + Expenses)
 │   │   ├── CategoryDot.tsx                   # Colored disc + Phosphor line icon
 │   │   ├── CategoryIcon.tsx                  # Phosphor regular weight render
+│   │   ├── BankBadge.tsx                     # Real bank logo via Clearbit + monogram fallback
+│   │   ├── PaymentBadge.tsx                  # Per-method icon + tinted disc
 │   │   ├── Nudge.tsx
 │   │   ├── NavLink.tsx
 │   │   ├── tracker/
@@ -102,6 +104,8 @@ ledger-friends/
 │   │   ├── transferDetector.ts               # Internal-transfer keyword detection
 │   │   ├── merchantDictionary.ts             # Curated merchant→category rules
 │   │   ├── merchantExtraction.ts             # NEW: merchant/description normalisation pipeline
+│   │   ├── bankBrand.ts                      # Bank name → domain (Clearbit logo URL) + hash color + monogram
+│   │   ├── paymentMethodMeta.ts              # Payment method → Phosphor icon + tinted color
 │   │   ├── phosphorIcons.ts                  # Icon name → Phosphor component map + heuristic picker
 │   │   └── utils.ts
 │   │
@@ -277,7 +281,7 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 - `TypeSegment`: All / Out / In segmented control — replaces the old `TransactionTypeFilter`.
 - Day group headers show net delta `+₹X` / `−₹X` color-coded.
 - `TxnRow` letter-receipt cards (see gesture model below).
-- `FilterSheet` bottom sheet: **People → Banks → Payment Modes → Categories**, each multi-select. Banks and Payment Modes include an "Unspecified" chip when at least one row in the current view has no value for that field (matched via the exported `UNSPECIFIED` sentinel). Ember "Show N matching" CTA. Filter applied client-side.
+- `FilterSheet` bottom sheet: **People → Banks → Payment Modes → Categories**, each multi-select. Banks and Payment Modes include an "Unspecified" chip when at least one row in the current view has no value for that field (matched via the exported `UNSPECIFIED` sentinel). Bank chips show the real brand logo via `BankBadge` (Clearbit logo CDN with onError fallback to a hash-colored monogram disc); payment chips use `PaymentBadge` (Phosphor icon + per-method tinted disc). Ember "Show N matching" CTA. Filter applied client-side.
 - Multi-select: dark header at top + floating action bar bottom-anchored with Category / Move / Delete.
 - Sort UI: see "Sort UI" section below.
 - `FloatingAdd` opens `AddExpenseSheet`.
