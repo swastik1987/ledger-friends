@@ -99,6 +99,20 @@ export default function CompareSheet({
   const labelA = monthsList.find(m => m.value === monthA)?.label || monthA;
   const labelB = monthsList.find(m => m.value === monthB)?.label || monthB;
 
+  // Short MMM'YY form used inline in the per-category dual bars and on the
+  // drill-down action buttons. Keeps each row legible at a glance without a
+  // legend (the bottom "A = ... · B = ..." caption was retired).
+  const shortLabel = (m: string) => {
+    try {
+      const d = parse(m, 'yyyy-MM', new Date());
+      return `${format(d, 'MMM')}'${format(d, 'yy')}`;
+    } catch {
+      return m;
+    }
+  };
+  const shortA = shortLabel(monthA);
+  const shortB = shortLabel(monthB);
+
   const delta = aggA.total - aggB.total;
   const pctDelta = aggB.total > 0 ? Math.round((delta / aggB.total) * 100) : (aggA.total > 0 ? 100 : 0);
   // "Bad direction" = more spending or less income.
@@ -307,7 +321,7 @@ export default function CompareSheet({
                         <div className="space-y-1.5">
                           {/* Month A bar */}
                           <div className="flex items-center gap-2">
-                            <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">A</div>
+                            <div className="w-[52px] text-[10.5px] font-semibold text-ink-faint shrink-0 tabular-nums">{shortA}</div>
                             <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
                               <div
                                 className="h-full rounded-full"
@@ -320,7 +334,7 @@ export default function CompareSheet({
                           </div>
                           {/* Month B bar */}
                           <div className="flex items-center gap-2">
-                            <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">B</div>
+                            <div className="w-[52px] text-[10.5px] font-semibold text-ink-faint shrink-0 tabular-nums">{shortB}</div>
                             <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
                               <div
                                 className="h-full rounded-full"
@@ -347,7 +361,7 @@ export default function CompareSheet({
                               color: 'hsl(var(--background))',
                             }}
                           >
-                            Open {labelA} <ArrowRight size={12} weight="bold" />
+                            Open {shortA} <ArrowRight size={12} weight="bold" />
                           </button>
                           <button
                             type="button"
@@ -360,16 +374,13 @@ export default function CompareSheet({
                               border: '1px solid hsl(var(--line))',
                             }}
                           >
-                            Open {labelB} <ArrowRight size={12} weight="bold" />
+                            Open {shortB} <ArrowRight size={12} weight="bold" />
                           </button>
                         </div>
                       )}
                     </div>
                   );
                 })}
-              </div>
-              <div className="text-[10.5px] text-ink-faint mt-2 px-1">
-                A = {labelA} · B = {labelB}
               </div>
             </>
           )}
