@@ -4,7 +4,7 @@
 
 **ExpenseSync** is a production-grade, mobile-first collaborative expense tracking Progressive Web App. It features AI-powered bank statement parsing (Gemini 2.5 Flash), real-time multi-user collaboration, category learning, multi-currency support, and Excel export. The app is fully functional and deployed.
 
-The tracker page received a full visual + interaction revamp in May 2026 — "Sand & Ember" — moving from an indigo/violet palette + emoji icons to a warm cream/ink design with monoline Phosphor icons, gesture-driven cards, and an iOS-style grouped settings layout. The statement-upload pipeline was hardened with server-side chunking and a dedicated client-side merchant-extraction library.
+The tracker page received a full visual + interaction revamp in May 2026 — "Sand & Ember" — moving from an indigo/violet palette + emoji icons to a warm cream/ink design with monoline Phosphor icons, gesture-driven cards, and an iOS-style grouped settings layout. The statement-upload pipeline was hardened with server-side chunking and a dedicated client-side merchant-extraction library. Later in May 2026 the codebase was tightened to TypeScript `strict: true`, lucide-react was retired from app code (still used inside vendored shadcn primitives), the device back gesture became overlay-aware, bank chips gained real logos with brand-color fallbacks, the Dashboard was simplified to a single net-outgo view, and a month-vs-month Compare sheet with drill-down was added.
 
 ---
 
@@ -66,10 +66,12 @@ ledger-friends/
 │   │   └── AppContext.tsx
 │   │
 │   ├── hooks/
-│   │   ├── useExpenses.ts                    # CRUD + bulk + realtime + duplicate + suspected-transfers
+│   │   ├── useExpenses.ts                    # CRUD + bulk + realtime + duplicate + suspected-transfers (incl. pair matching)
 │   │   ├── useTrackers.ts
 │   │   ├── useTransactionTypeFilter.ts       # URL + localStorage synced
 │   │   ├── useNudge.ts
+│   │   ├── useMonthSwipe.ts                  # Horizontal-swipe month nav + adjacentMonths(months, current)
+│   │   ├── useOverlayBack.ts                 # Module-level stack + popstate listener; drives back-closes-overlay
 │   │   └── use-mobile.tsx
 │   │
 │   ├── components/
@@ -77,34 +79,36 @@ ledger-friends/
 │   │   ├── FloatingAdd.tsx                   # Ember ember FAB (on Home + Expenses)
 │   │   ├── CategoryDot.tsx                   # Colored disc + Phosphor line icon
 │   │   ├── CategoryIcon.tsx                  # Phosphor regular weight render
-│   │   ├── BankBadge.tsx                     # Real bank logo via Clearbit + monogram fallback
-│   │   ├── PaymentBadge.tsx                  # Per-method icon + tinted disc
+│   │   ├── BankBadge.tsx                     # Real bank logo via Google favicons + brand-color monogram fallback
+│   │   ├── PaymentBadge.tsx                  # Per-method Phosphor icon + tinted disc
 │   │   ├── Nudge.tsx
 │   │   ├── NavLink.tsx
 │   │   ├── tracker/
-│   │   │   ├── TrackerTopBar.tsx             # Sticky top: back · name · upload
-│   │   │   ├── TrackerTabBar.tsx             # Sticky at top:57px, dark-pill active
-│   │   │   ├── HeroSummary.tsx               # Dark ink card: Net Outgo + In + Net Savings
-│   │   │   ├── TrackerToolBar.tsx            # Month dropdown + sort + filter + transfer
-│   │   │   ├── TypeSegment.tsx               # All / Out / In segmented control
+│   │   │   ├── TrackerTopBar.tsx             # Sticky top: back · name · upload (publishes height to --tracker-topbar-h)
+│   │   │   ├── TrackerTabBar.tsx             # Sticky at top:var(--tracker-topbar-h), dark-pill active
+│   │   │   ├── HeroSummary.tsx               # Dark ink card: Net Outgo + In + Net Savings (Transactions tab)
+│   │   │   ├── TrackerToolBar.tsx            # Ink-pill month dropdown + sort + filter + transfer-review
+│   │   │   ├── TypeSegment.tsx               # All / Out / In segmented control (Transactions tab only)
 │   │   │   ├── DayHeader.tsx                 # Day/category/amount-sort group header
 │   │   │   ├── TxnRow.tsx                    # Letter-receipt card with gestures
-│   │   │   ├── FilterSheet.tsx               # Bottom sheet: people + categories
+│   │   │   ├── FilterSheet.tsx               # Bottom sheet: People → Banks → Payment Modes → Categories
 │   │   │   ├── ExpensesTab.tsx               # Owns the list, gestures, multi-select
-│   │   │   ├── DashboardTab.tsx              # Hero spend + sparkline + share bar + biggest
+│   │   │   ├── DashboardTab.tsx              # Light hero (cream) + "where it went" + "biggest" + Compare
 │   │   │   ├── SettingsTab.tsx               # iOS-style grouped lists + danger zone
 │   │   │   ├── AddExpenseSheet.tsx           # Manual create/edit with optional Merchant field
+│   │   │   ├── CompareSheet.tsx              # Month-A vs Month-B comparison + per-row drill-down
+│   │   │   ├── MonthNavChevrons.tsx          # Subtle left/right hints on hero cards
 │   │   │   ├── TransferReviewModal.tsx       # Ember-styled popup
-│   │   │   └── TransferReviewSheet.tsx       # Bottom-sheet review with tri-state controls
-│   │   └── ui/                               # shadcn/ui primitives
+│   │   │   └── TransferReviewSheet.tsx       # Bottom-sheet review with tri-state controls + Pair chip
+│   │   └── ui/                               # shadcn/ui primitives (Root wrappers add useOverlayBack)
 │   │
 │   ├── lib/
 │   │   ├── categoryLearning.ts               # AI category memory
 │   │   ├── currencies.ts                     # 10-currency + formatAmount + formatAmountShort
 │   │   ├── transferDetector.ts               # Internal-transfer keyword detection
 │   │   ├── merchantDictionary.ts             # Curated merchant→category rules
-│   │   ├── merchantExtraction.ts             # NEW: merchant/description normalisation pipeline
-│   │   ├── bankBrand.ts                      # Bank name → domain (Clearbit logo URL) + hash color + monogram
+│   │   ├── merchantExtraction.ts             # Merchant/description normalisation pipeline
+│   │   ├── bankBrand.ts                      # Bank name → domain (Google favicon URL) + curated brand color + hash fallback + monogram
 │   │   ├── paymentMethodMeta.ts              # Payment method → Phosphor icon + tinted color
 │   │   ├── phosphorIcons.ts                  # Icon name → Phosphor component map + heuristic picker
 │   │   └── utils.ts
@@ -114,14 +118,14 @@ ledger-friends/
 │   │
 │   ├── integrations/supabase/
 │   │   ├── client.ts
-│   │   └── types.ts                          # Generated DB types (hand-edited for raw_description)
+│   │   └── types.ts                          # Generated DB types (hand-edited for raw_description + rejected_as_transfer)
 │   │
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── index.css                             # Sand & Ember CSS vars + utilities
 │
 ├── supabase/
-│   ├── migrations/                           # 19 migration files
+│   ├── migrations/                           # 20 migration files
 │   └── functions/
 │       ├── parse-statement/                  # Statement → transactions (chunked)
 │       ├── convert-currency/
@@ -131,7 +135,7 @@ ledger-friends/
 ├── public/                                   # Static assets
 ├── vite.config.ts                            # SWC + lovable-tagger, port 8080
 ├── tailwind.config.ts                        # Sand & Ember tokens + display/sans/mono fonts
-├── tsconfig.json / tsconfig.app.json         # strict: false
+├── tsconfig.json / tsconfig.app.json         # strict: true + noImplicitAny: true (use `tsc --noEmit -p tsconfig.app.json`)
 └── package.json
 ```
 
@@ -243,21 +247,24 @@ type ReviewStatus = 'pending' | 'approved' | 'discarded';
 interface Expense {
   // …existing fields…
   description: string;
-  raw_description?: string;     // NEW: original statement narration
+  raw_description?: string;        // original statement narration
   merchant_name?: string;
+  is_transfer: boolean;            // user-confirmed YES
+  suspected_transfer: boolean;     // heuristic / keyword flag
+  rejected_as_transfer: boolean;   // user-confirmed NO (mirror of is_transfer)
   // …
 }
 
 interface DraftExpense {
   // …
   description: string;
-  raw_description?: string;     // NEW: preserved through review
+  raw_description?: string;     // preserved through review
   merchant_name?: string;
   // …
 }
 ```
 
-**Casting tip:** with `strict: false` you can technically assign any string to a literal union type, but a runtime mismatch will still crash. Cast explicitly (`value as PaymentMethod`) for clarity.
+**Casting tip:** strict mode catches missing fields and undeclared identifiers at compile time. For literal union types (e.g. `PaymentMethod`), cast explicitly (`value as PaymentMethod`) when narrowing a `string` from an input — `tsc` will require it. Always run `npx tsc --noEmit -p tsconfig.app.json`; the root `tsconfig.json` has `files: []` and silently compiles nothing.
 
 ---
 
@@ -276,23 +283,23 @@ Unchanged from baseline: two-tab UI, `supabase.auth.signInWithPassword()` / `sup
 A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back · tracker name + member dot · upload) sticks at `top: 0`, and `TrackerTabBar` (Transactions / Dashboard / Settings, dark-pill active state) sticks at `top: var(--tracker-topbar-h)`. TrackerTopBar measures itself with a `ResizeObserver` and publishes its height to `--tracker-topbar-h` on `<html>`; the TabBar consumes that variable with a 57px fallback. Both have `bg-background/95 backdrop-blur-md` so content scrolls translucent underneath.
 
 **Expenses Tab:**
-- `HeroSummary` dark ink card: big label "Net outgo this month", big number = total month debits, sub-chips "Total In" (credits) and "Net Savings" (In − Out, signed and color-tinted green/coral). All three values are filter-aware: the `Out` filter zeros earn; the `In` filter zeros spend.
-- `TrackerToolBar`: month dropdown (ink-filled pill — matches the active TabBar style so the current month feels like a primary selection) · transfer-review button (warn-coloured with count badge, both Expenses + Dashboard tabs) · sort button · filter button (with badge). The Expenses + Dashboard bodies also accept horizontal swipe to step through months via `useMonthSwipe` (bounded — no wrap).
+- `HeroSummary` dark ink card: big label "Net outgo this month", big number = total month debits, sub-chips "Total In" (credits) and "Net Savings" (In − Out, signed and color-tinted green/coral). All three values are filter-aware: the `Out` filter zeros earn; the `In` filter zeros spend. `MonthNavChevrons` sit inside the card at the left/right edges (dark tone, low opacity) and disappear at boundaries.
+- `TrackerToolBar` (Transactions tab only): ink-pill month dropdown (matches the active TabBar style so the current month reads as a primary selection) · transfer-review button (warn-coloured with count badge) · sort button · filter button (with badge). Horizontal swipe on the tab body also steps months via `useMonthSwipe`, bounded — no wrap.
 - `TypeSegment`: All / Out / In segmented control — replaces the old `TransactionTypeFilter`.
 - Day group headers show net delta `+₹X` / `−₹X` color-coded.
 - `TxnRow` letter-receipt cards (see gesture model below).
-- `FilterSheet` bottom sheet: **People → Banks → Payment Modes → Categories**, each multi-select. Banks and Payment Modes include an "Unspecified" chip when at least one row in the current view has no value for that field (matched via the exported `UNSPECIFIED` sentinel). Bank chips show the real brand logo via `BankBadge` (Clearbit logo CDN with onError fallback to a hash-colored monogram disc); payment chips use `PaymentBadge` (Phosphor icon + per-method tinted disc). Ember "Show N matching" CTA. Filter applied client-side.
+- `FilterSheet` bottom sheet: **People → Banks → Payment Modes → Categories**, each multi-select. Banks and Payment Modes include an "Unspecified" chip when at least one row in the current view has no value for that field (matched via the exported `UNSPECIFIED` sentinel). Bank chips show the real brand favicon via `BankBadge` (Google's `s2/favicons` endpoint; Clearbit's free CDN retired in late 2024) with an `onError` fallback to a brand-color monogram disc — `bankBrandColor(name)` looks up a curated primary color (HDFC `#004C8F`, ICICI `#F38B23`, Axis `#97144D`, …) and falls back to a hashed palette pick for unknown banks. Payment chips use `PaymentBadge` (per-method Phosphor icon + tinted disc — UPI=violet/QrCode, Credit=blue, Debit=teal, Cash=amber, etc.). Ember "Show N matching" CTA. Filter applied client-side.
 - Multi-select: dark header at top + floating action bar bottom-anchored with Category / Move / Delete.
 - Sort UI: see "Sort UI" section below.
 - `FloatingAdd` opens `AddExpenseSheet`.
 - Realtime subscription invalidates the query on changes.
 
 **Dashboard Tab:**
-- No toolbar or All/Out/In segment. Month navigation is purely chevron-tap + horizontal swipe. The page is outgo-centric — there is no Type filter.
-- Hero ink card mirrors the Transactions tab's `HeroSummary`: big "Net outgo this month" total, pct-change chip vs previous month, avg/day + transaction count, daily-debit sparkline (coral), and `Total In` + `Net Savings` sub-chips. Decorative ember dots.
-- "Where it went": stacked-share bar across the top, then a debit-only category list. Each row shows `CategoryDot`, name, count, percentage, mono amount, and MoM change (red for up, green for down). Tap a row to jump to that category in Expenses with the category filter pre-applied.
+- No toolbar, no All/Out/In segment. Month navigation is purely `MonthNavChevrons` (subtle left/right hints on the hero edges) + horizontal swipe (`useMonthSwipe`). The page is outgo-centric — there is no Type filter.
+- Hero is a **cream `bg-card` surface** (not the dark ink treatment used on Transactions) so it visually rhymes with "Where it went" and "Biggest" below. Layout: big "Net outgo this month" total, pct-change chip vs previous month using `--spend-bg`/`--earn-bg` tokens, avg/day + transaction count, ember sparkline (daily debits), and `Total In` + `Net Savings` sub-chips on `bg-surface-alt`. The month indicator at top-right is an **ember-tinted pill** (`bg-ember/12 text-ember` with calendar icon) so it reads as a primary anchor on the lighter card.
+- "Where it went": stacked-share bar across the top, then a debit-only category list. Each row shows `CategoryDot`, name, count, percentage, mono amount, and MoM change (red for up = more spend, green for down). Tap a row to jump to Transactions tab with the category filter pre-applied.
 - "Biggest this month" list (top 5 debits).
-- Compare button opens `CompareSheet`. Inside the sheet, tap any category row to expand inline drill-down buttons (`Open <labelA>` / `Open <labelB>`) — tapping either navigates to the Transactions tab with that month + the category filter pre-applied (the disabled state covers months with zero spend in that category).
+- Compare button opens `CompareSheet`. The sheet pairs the current month (A) against a selectable month (B), with short inline labels in **MMM'YY** form (e.g. `Apr'26`, `Mar'26`) on every bar. Tap any category row to expand inline drill-down buttons — `Open Apr'26` / `Open Mar'26` — tapping either navigates to Transactions with that month + the category filter pre-applied. Months with zero spend in the row get a disabled button.
 
 **Settings Tab:**
 - Tracker header card (ember home icon, name, currency · members · since)
@@ -399,7 +406,7 @@ Three pieces:
 - `useBulkResolveTransfers()` — confirm/reject suspected transfers in bulk
 - `useExpenseRealtime(trackerId)` — realtime subscription
 - `useDuplicateCheck(trackerId)` — Levenshtein-based duplicate detection
-- `useSuspectedTransfers(trackerId)` — returns `{ all, pairedIds }` (keyword flags ∪ pair-matched rows; see Transfer Detection)
+- `useSuspectedTransfers(trackerId)` — returns `{ all, pairedIds }`. `all` is the union of rows where `suspected_transfer=true` and rows that participate in a debit↔credit pair (±1 day, amounts within 1%, cross-user). Both pools exclude `is_transfer=true` AND `rejected_as_transfer=true`. Internally calls `findTransferPairs(rows)` — see Transfer Detection.
 
 ### useTrackers.ts
 - `useTrackers()` — all user trackers (via `get_tracker_stats` RPC)
@@ -410,10 +417,17 @@ Three pieces:
 
 ### useTransactionTypeFilter.ts
 - `useTransactionTypeFilter(trackerId)` → `[filter, setFilter]`
-- Syncs to URL `?type=` param AND localStorage (per-tracker).
+- Syncs to URL `?type=` param AND localStorage (per-tracker). Only used by Transactions tab — Dashboard has no Type filter.
 
 ### useNudge.ts
 - `useNudge(key, delayMs)` → `{ show, dismiss }` — one-time localStorage-persisted nudge.
+
+### useMonthSwipe.ts
+- `useMonthSwipe(ref, months, currentMonth, onMonthChange)` — attaches horizontal-swipe handlers to a container ref; swipe-left → newer month, swipe-right → older. Filters out the `'all'` sentinel and bounds at the oldest/newest entries (no wrap). Wired into Expenses + Dashboard tab roots.
+- `adjacentMonths(months, current)` → `{ prev, next }` — companion helper that returns the same prev/next pair the swipe gesture would step to. Used by `MonthNavChevrons` so the on-card chevrons disappear at boundaries.
+
+### useOverlayBack.ts
+- `useOverlayBack(open, setOpen)` — called transparently inside every Radix Root wrapper in `src/components/ui/` (Sheet, AlertDialog, Dialog, Popover). On open, pushes a sentinel history entry; on `popstate`, pops the topmost handler from a module-level stack and invokes it. Programmatic close (X, ESC, outside-click) is detected via effect cleanup and pops the sentinel from history with a `suppressPop` guard. `pushState` is called without a URL argument so React Router never sees a navigation.
 
 ---
 
@@ -470,8 +484,8 @@ Tailwind exposes the CSS vars as utilities:
 - `bg-chip`
 
 ### Iconography
-- Single curated family: `@phosphor-icons/react`, `weight="regular"` (monoline). `CategoryIcon` always renders regular weight; `CategoryDot` is the colored-disc wrapper that pairs an icon with a soft-tinted background.
-- A few utility chrome icons still come from `lucide-react` (the project hasn't fully removed the lucide dependency). Mixing is OK if their visual weight matches.
+- Single curated family in app code: `@phosphor-icons/react`, `weight="regular"` (monoline). `CategoryIcon` always renders regular weight; `CategoryDot` is the colored-disc wrapper that pairs an icon with a soft-tinted background.
+- `lucide-react` is retained only inside the vendored shadcn `ui/*` primitives (dialog/X, command/Search, etc.) — never import it from outside `src/components/ui/`. Bank logos use real favicons via `BankBadge` (Google's `s2/favicons`), with a curated brand-color monogram disc as the offline fallback. Payment methods use `PaymentBadge` (per-method Phosphor icon + tinted disc).
 - Emoji is no longer used anywhere as an icon. Custom category creation uses the icon-picker UI (3-column AI suggestion + 6-column "Browse all" grid).
 
 ### Color conventions
