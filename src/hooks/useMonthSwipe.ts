@@ -17,6 +17,27 @@ const SWIPE_MAX_DURATION_MS = 600;
 
 interface Month { value: string; label: string }
 
+/**
+ * Return the month values immediately older (prev) and newer (next) than
+ * `currentMonth` in the same list used by `useMonthSwipe`. The `'all'`
+ * sentinel is filtered out so chevrons mirror swipe behaviour.
+ *
+ * Months are newest-first, so `prev` lives at idx+1 and `next` at idx-1.
+ * Either side returns undefined when the current month is at the boundary.
+ */
+export function adjacentMonths(
+  months: Month[],
+  currentMonth: string,
+): { prev?: string; next?: string } {
+  const list = months.filter(m => m.value !== 'all');
+  const idx = list.findIndex(m => m.value === currentMonth);
+  if (idx === -1) return {};
+  return {
+    prev: idx < list.length - 1 ? list[idx + 1].value : undefined,
+    next: idx > 0 ? list[idx - 1].value : undefined,
+  };
+}
+
 export function useMonthSwipe(
   ref: React.RefObject<HTMLElement | null>,
   months: Month[],

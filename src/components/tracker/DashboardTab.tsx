@@ -2,7 +2,8 @@ import { Expense, Category } from '@/types';
 import { subMonths, format, parse } from 'date-fns';
 import { ArrowUp, ArrowDown, ArrowsLeftRight, Receipt as ReceiptIcon } from '@phosphor-icons/react';
 import { useMemo, useRef, useState } from 'react';
-import { useMonthSwipe } from '@/hooks/useMonthSwipe';
+import { useMonthSwipe, adjacentMonths } from '@/hooks/useMonthSwipe';
+import MonthNavChevrons from './MonthNavChevrons';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import TrackerToolBar, { SortOption } from './TrackerToolBar';
@@ -75,6 +76,7 @@ export default function DashboardTab({
   const [compareOpen, setCompareOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   useMonthSwipe(rootRef, months, month, onMonthChange);
+  const { prev: olderMonth, next: newerMonth } = adjacentMonths(months, month);
 
   const isAllMonths = month === 'all';
   const prevMonth = isAllMonths ? '' : format(subMonths(parse(month, 'yyyy-MM', new Date()), 1), 'yyyy-MM');
@@ -184,7 +186,12 @@ export default function DashboardTab({
       <TypeSegment value={typeFilter} onChange={onTypeFilterChange} />
 
       {/* Hero: this month total + sparkline */}
-      <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
+      <div className="relative mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5 overflow-hidden">
+        <MonthNavChevrons
+          tone="light"
+          onPrev={olderMonth ? () => onMonthChange(olderMonth) : undefined}
+          onNext={newerMonth ? () => onMonthChange(newerMonth) : undefined}
+        />
         <div className="text-[11px] font-semibold tracking-wider uppercase text-ink-faint">
           {isSpendingView ? `You spent in ${monthLabel}` : `You earned in ${monthLabel}`}
         </div>

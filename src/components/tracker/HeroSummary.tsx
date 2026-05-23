@@ -1,14 +1,19 @@
 import { Calendar } from '@phosphor-icons/react';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
+import MonthNavChevrons from './MonthNavChevrons';
 
 interface Props {
   monthLabel: string;
   spend: number;
   earn: number;
   currencyCode: string;
+  /** Tap to move to the older month. Omit when current is the oldest. */
+  onPrevMonth?: () => void;
+  /** Tap to move to the newer month. Omit when current is the newest. */
+  onNextMonth?: () => void;
 }
 
-export default function HeroSummary({ monthLabel, spend, earn, currencyCode }: Props) {
+export default function HeroSummary({ monthLabel, spend, earn, currencyCode, onPrevMonth, onNextMonth }: Props) {
   const symbol = getCurrency(currencyCode).symbol;
   const savings = earn - spend;
   const savingsPositive = savings >= 0;
@@ -16,6 +21,9 @@ export default function HeroSummary({ monthLabel, spend, earn, currencyCode }: P
 
   return (
     <div className="mx-4 mb-3 rounded-3xl hero-card p-5">
+      {/* Month-nav chevron affordances — subtle hints for the swipe gesture. */}
+      <MonthNavChevrons onPrev={onPrevMonth} onNext={onNextMonth} tone="dark" />
+
       {/* Decorative dots */}
       <div
         className="absolute pointer-events-none"

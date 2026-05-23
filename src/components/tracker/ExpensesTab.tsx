@@ -20,7 +20,7 @@ import TrackerToolBar, { SortOption } from './TrackerToolBar';
 import DayHeader from './DayHeader';
 import TxnRow from './TxnRow';
 import FilterSheet, { UNSPECIFIED } from './FilterSheet';
-import { useMonthSwipe } from '@/hooks/useMonthSwipe';
+import { useMonthSwipe, adjacentMonths } from '@/hooks/useMonthSwipe';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
 
@@ -129,6 +129,7 @@ export default function ExpensesTab({
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   useMonthSwipe(rootRef, months, month, onMonthChange);
+  const { prev: prevMonth, next: nextMonth } = adjacentMonths(months, month);
 
   const [sortBy, setSortBy] = useState<SortOption>(() => readSortPref(trackerId));
   const handleSortChange = (value: SortOption) => {
@@ -347,6 +348,8 @@ export default function ExpensesTab({
             spend={monthSpend}
             earn={monthEarn}
             currencyCode={trackerCurrency}
+            onPrevMonth={prevMonth ? () => onMonthChange(prevMonth) : undefined}
+            onNextMonth={nextMonth ? () => onMonthChange(nextMonth) : undefined}
           />
 
           <TrackerToolBar
