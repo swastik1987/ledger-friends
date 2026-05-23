@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Expense, Category, Profile } from '@/types';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
-import { format, parse } from 'date-fns';
+import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
 
 /**
