@@ -300,8 +300,11 @@ export function useBulkMoveExpenses() {
  */
 function findTransferPairs(rows: Expense[]): Set<string> {
   const paired = new Set<string>();
-  const debits = rows.filter(r => r.is_debit);
-  const credits = rows.filter(r => !r.is_debit);
+  // Skip rows the user has explicitly rejected as transfers — otherwise they'd
+  // keep re-matching their counterparty on every refetch.
+  const eligible = rows.filter(r => !r.rejected_as_transfer);
+  const debits = eligible.filter(r => r.is_debit);
+  const credits = eligible.filter(r => !r.is_debit);
   const usedCredits = new Set<string>();
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -363,7 +366,11 @@ export function useSuspectedTransfers(trackerId: string) {
       })) as Expense[];
 
       const pairedIds = findTransferPairs(rows);
-      const keywordIds = new Set(rows.filter(r => r.suspected_transfer).map(r => r.id));
+      // Keyword-flagged rows still count — but if the user has already rejected
+      // one in a previous review, don't resurrect it.
+      const keywordIds = new Set(
+        rows.filter(r => r.suspected_transfer && !r.rejected_as_transfer).map(r => r.id),
+      );
       const candidateIds = new Set<string>([...keywordIds, ...pairedIds]);
       const all = rows.filter(r => candidateIds.has(r.id));
       return { all, pairedIds };
@@ -375,9 +382,13 @@ export function useSuspectedTransfers(trackerId: string) {
 
 /**
  * Resolve a batch of suspected transfers based on the user's tri-state review.
- * - confirmedIds: rows the user marked as IS a transfer → is_transfer=true, suspected_transfer=false
- * - rejectedIds: rows the user marked as NOT a transfer → suspected_transfer=false (is_transfer stays false)
- * - Rows the user left as "Skip" are not passed in and stay suspected_transfer=true.
+ * - confirmedIds: rows the user marked as IS a transfer → is_transfer=true,
+ *   suspected_transfer=false, rejected_as_transfer=false
+ * - rejectedIds: rows the user marked as NOT a transfer → suspected_transfer=false
+ *   AND rejected_as_transfer=true so the pair-match heuristic skips them on
+ *   future fetches (otherwise the rejected row would keep re-matching its
+ *   counterparty and reappear in the review sheet).
+ * - Rows the user left as "Skip" are not passed in and stay as they were.
  */
 export function useBulkResolveTransfers() {
   const queryClient = useQueryClient();
@@ -390,14 +401,14 @@ export function useBulkResolveTransfers() {
       if (confirmedIds.length > 0) {
         const { error } = await supabase
           .from('expenses')
-          .update({ is_transfer: true, suspected_transfer: false } as any)
+          .update({ is_transfer: true, suspected_transfer: false, rejected_as_transfer: false } as any)
           .in('id', confirmedIds);
         if (error) throw error;
       }
       if (rejectedIds.length > 0) {
         const { error } = await supabase
           .from('expenses')
-          .update({ suspected_transfer: false } as any)
+          .update({ suspected_transfer: false, rejected_as_transfer: true } as any)
           .in('id', rejectedIds);
         if (error) throw error;
       }

@@ -181,6 +181,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       is_debit: isDebit,
       is_transfer: isTransfer,
       suspected_transfer: suspectedTransfer,
+      rejected_as_transfer: false,
       payment_method: (paymentMethod || undefined) as PaymentMethod | undefined,
       bank_name: bankName || undefined,
       source: 'manual' as const,

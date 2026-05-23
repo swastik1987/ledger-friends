@@ -172,7 +172,7 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 - `category_id`, `amount`, `currency`, `date`
 - `description` (cleaned, human-readable phrase), `merchant_name` (normalised brand/payee), **`raw_description`** (verbatim original narration — NEW)
 - `payment_method`, `bank_name`, `notes`, `tags` (text[]), `reference_number`
-- `is_debit`, `source` ('manual' | 'statement_upload'), `is_transfer`, `suspected_transfer`
+- `is_debit`, `source` ('manual' | 'statement_upload'), `is_transfer`, `suspected_transfer`, `rejected_as_transfer`
 - `original_amount`, `original_currency`, `conversion_rate`, `conversion_note`
 - `created_at`, `updated_at` (auto-updated via trigger)
 
@@ -375,8 +375,9 @@ Three pieces:
 - Per-expense `original_amount`, `original_currency`, `conversion_rate`, `conversion_note`.
 
 ### Transfer Detection
-- `is_transfer` (user-confirmed) and `suspected_transfer` (heuristic) booleans on expenses.
-- Two detection sources: (a) `transferDetector.ts` keyword patterns on entry/upload + AI flagging during parsing, persisted in the `suspected_transfer` column; (b) client-side **pair matching** in `useSuspectedTransfers` — pairs debit and credit rows within ±1 day and 1% amount tolerance, cross-user, excluding `is_transfer=true`. The two are unioned in the Review sheet.
+- Three booleans on expenses: `is_transfer` (user confirmed YES), `rejected_as_transfer` (user confirmed NO via the Review sheet), `suspected_transfer` (keyword/AI heuristic flagged at insert time).
+- Two detection sources: (a) `transferDetector.ts` keyword patterns on entry/upload + AI flagging during parsing, persisted in `suspected_transfer`; (b) client-side **pair matching** in `useSuspectedTransfers` — pairs debit and credit rows within ±1 day and 1% amount tolerance, cross-user, excluding both `is_transfer=true` AND `rejected_as_transfer=true`. The two are unioned in the Review sheet.
+- The `rejected_as_transfer` flag is the mirror of `is_transfer`: any future detector that surfaces transfers must honour it, or rejected pairs will keep reappearing. `useBulkResolveTransfers` writes it on the "Not Transfer" path.
 
 ---
 
@@ -549,6 +550,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 17. `suspected_transfer` column addition
 18. System category icons migrated from emoji to Phosphor icon names (`20260410_update_system_category_icons.sql`)
 19. **`raw_description` column added to `expenses`** (`20260522_add_raw_description.sql`)
+20. **`rejected_as_transfer` column added to `expenses`** + partial index (`20260523_add_rejected_as_transfer.sql`) — fixes the "Not Transfer" bug where pair-matched rows re-surfaced on every refetch.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

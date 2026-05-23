@@ -60,6 +60,9 @@ export interface Expense {
   source: ExpenseSource;
   is_transfer: boolean;
   suspected_transfer: boolean;
+  /** User explicitly marked this row as NOT a transfer via the Review sheet.
+   *  The pair-match heuristic must skip these so rejected pairs don't reappear. */
+  rejected_as_transfer: boolean;
   original_amount?: number;
   original_currency?: string;
   conversion_rate?: number;

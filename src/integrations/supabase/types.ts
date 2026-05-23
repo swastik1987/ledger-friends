@@ -120,6 +120,7 @@ export type Database = {
           payment_method: string | null
           raw_description: string | null
           reference_number: string | null
+          rejected_as_transfer: boolean
           source: string
           suspected_transfer: boolean
           tags: string[] | null
@@ -148,6 +149,7 @@ export type Database = {
           payment_method?: string | null
           raw_description?: string | null
           reference_number?: string | null
+          rejected_as_transfer?: boolean
           source: string
           suspected_transfer?: boolean
           tags?: string[] | null
@@ -176,6 +178,7 @@ export type Database = {
           payment_method?: string | null
           raw_description?: string | null
           reference_number?: string | null
+          rejected_as_transfer?: boolean
           source?: string
           suspected_transfer?: boolean
           tags?: string[] | null
