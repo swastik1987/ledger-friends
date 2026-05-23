@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ArrowUp, ArrowDown, ArrowsLeftRight, CaretDown, Check, Minus } from '@phosphor-icons/react';
+import { ArrowUp, ArrowDown, ArrowsLeftRight, ArrowRight, CaretDown, Check, Minus } from '@phosphor-icons/react';
 import { format, parse, subMonths } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { Category, Expense } from '@/types';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
@@ -47,13 +48,27 @@ export default function CompareSheet({
   open, onOpenChange, trackerId, trackerCurrency, categories, monthA, isSpendingView,
 }: Props) {
   const symbol = getCurrency(trackerCurrency).symbol;
+  const navigate = useNavigate();
   const { data: monthsList = [] } = useExpenseMonths(trackerId);
   const [monthB, setMonthB] = useState<string>(() => prevMonthOf(monthA));
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Drill-down: which category row is currently showing the
+  // "Open <month>" action buttons. Null when collapsed.
+  const [expandedCatId, setExpandedCatId] = useState<string | null>(null);
+
+  const openMonthForCategory = (catMonth: string, catId: string) => {
+    onOpenChange(false);
+    navigate(`/tracker/${trackerId}?tab=expenses&month=${catMonth}&filterCategory=${catId}`);
+  };
 
   // Reset monthB when monthA changes or when the sheet reopens, defaulting to the prior month.
+  // Also collapse any expanded category row when the sheet opens, so we don't surprise the
+  // user with stale UI state from the previous open.
   useEffect(() => {
-    if (open) setMonthB(prevMonthOf(monthA));
+    if (open) {
+      setMonthB(prevMonthOf(monthA));
+      setExpandedCatId(null);
+    }
   }, [open, monthA]);
 
   const { data: expensesA = [], isLoading: loadingA } = useExpenses(trackerId, monthA);
@@ -258,58 +273,97 @@ export default function CompareSheet({
                         : 'hsl(var(--ink-faint))';
                   const widthA = (r.a / maxRowValue) * 100;
                   const widthB = (r.b / maxRowValue) * 100;
+                  const expanded = expandedCatId === r.cat.id;
                   return (
                     <div
                       key={r.cat.id}
-                      className="px-3.5 py-3"
                       style={{ borderTop: idx === 0 ? 'none' : '1px solid hsl(var(--line-soft))' }}
                     >
-                      <div className="flex items-center gap-2.5 mb-2">
-                        <CategoryDot icon={r.cat.icon} color={r.cat.color} size={26} />
-                        <div className="flex-1 min-w-0">
-                          <div className="font-display font-semibold text-[13.5px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
-                            {r.cat.name}
+                      {/* Tappable summary — toggles the inline drill-down picker below. */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedCatId(expanded ? null : r.cat.id)}
+                        className="w-full text-left px-3.5 py-3"
+                        aria-expanded={expanded}
+                      >
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <CategoryDot icon={r.cat.icon} color={r.cat.color} size={26} />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-display font-semibold text-[13.5px] text-ink truncate" style={{ letterSpacing: '-0.01em' }}>
+                              {r.cat.name}
+                            </div>
+                          </div>
+                          <div
+                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums"
+                            style={{ color: trendColor }}
+                          >
+                            {rowDelta !== 0 && (rowDelta > 0
+                              ? <ArrowUp size={10} weight="bold" />
+                              : <ArrowDown size={10} weight="bold" />)}
+                            {rowDelta === 0 ? 'flat' : `${Math.abs(rowPct)}%`}
                           </div>
                         </div>
-                        <div
-                          className="inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums"
-                          style={{ color: trendColor }}
-                        >
-                          {rowDelta !== 0 && (rowDelta > 0
-                            ? <ArrowUp size={10} weight="bold" />
-                            : <ArrowDown size={10} weight="bold" />)}
-                          {rowDelta === 0 ? 'flat' : `${Math.abs(rowPct)}%`}
-                        </div>
-                      </div>
 
-                      <div className="space-y-1.5">
-                        {/* Month A bar */}
-                        <div className="flex items-center gap-2">
-                          <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">A</div>
-                          <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{ width: `${widthA}%`, background: r.cat.color }}
-                            />
+                        <div className="space-y-1.5">
+                          {/* Month A bar */}
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">A</div>
+                            <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${widthA}%`, background: r.cat.color }}
+                              />
+                            </div>
+                            <div className="font-mono text-[11.5px] font-semibold text-ink tabular-nums shrink-0 w-[70px] text-right">
+                              {formatAmountShort(r.a, trackerCurrency)}
+                            </div>
                           </div>
-                          <div className="font-mono text-[11.5px] font-semibold text-ink tabular-nums shrink-0 w-[70px] text-right">
-                            {formatAmountShort(r.a, trackerCurrency)}
+                          {/* Month B bar */}
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">B</div>
+                            <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${widthB}%`, background: r.cat.color, opacity: 0.55 }}
+                              />
+                            </div>
+                            <div className="font-mono text-[11.5px] font-semibold text-ink-soft tabular-nums shrink-0 w-[70px] text-right">
+                              {formatAmountShort(r.b, trackerCurrency)}
+                            </div>
                           </div>
                         </div>
-                        {/* Month B bar */}
-                        <div className="flex items-center gap-2">
-                          <div className="w-9 text-[10px] font-semibold uppercase tracking-wider text-ink-faint shrink-0">B</div>
-                          <div className="flex-1 h-2 rounded-full bg-line-soft overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{ width: `${widthB}%`, background: r.cat.color, opacity: 0.55 }}
-                            />
-                          </div>
-                          <div className="font-mono text-[11.5px] font-semibold text-ink-soft tabular-nums shrink-0 w-[70px] text-right">
-                            {formatAmountShort(r.b, trackerCurrency)}
-                          </div>
+                      </button>
+
+                      {/* Inline drill-down: pick a month to open on Transactions tab. */}
+                      {expanded && (
+                        <div className="px-3.5 pb-3 -mt-1 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openMonthForCategory(monthA, r.cat.id); }}
+                            disabled={r.a === 0}
+                            className="inline-flex items-center justify-center gap-1.5 py-2 rounded-xl text-[12px] font-semibold transition-colors disabled:opacity-40"
+                            style={{
+                              background: 'hsl(var(--ink))',
+                              color: 'hsl(var(--background))',
+                            }}
+                          >
+                            Open {labelA} <ArrowRight size={12} weight="bold" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openMonthForCategory(monthB, r.cat.id); }}
+                            disabled={r.b === 0}
+                            className="inline-flex items-center justify-center gap-1.5 py-2 rounded-xl text-[12px] font-semibold transition-colors disabled:opacity-40"
+                            style={{
+                              background: 'hsl(var(--surface-alt))',
+                              color: 'hsl(var(--ink))',
+                              border: '1px solid hsl(var(--line))',
+                            }}
+                          >
+                            Open {labelB} <ArrowRight size={12} weight="bold" />
+                          </button>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}

@@ -1,15 +1,12 @@
 import { Expense, Category } from '@/types';
 import { subMonths, format, parse } from 'date-fns';
-import { ArrowUp, ArrowDown, ArrowsLeftRight, Receipt as ReceiptIcon } from '@phosphor-icons/react';
+import { ArrowUp, ArrowDown, ArrowsLeftRight, Receipt as ReceiptIcon, Calendar } from '@phosphor-icons/react';
 import { useMemo, useRef, useState } from 'react';
 import { useMonthSwipe, adjacentMonths } from '@/hooks/useMonthSwipe';
 import MonthNavChevrons from './MonthNavChevrons';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
-import TrackerToolBar, { SortOption } from './TrackerToolBar';
-import TypeSegment from './TypeSegment';
 import CategoryDot from '@/components/CategoryDot';
-import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
 import CompareSheet from './CompareSheet';
 
@@ -21,10 +18,6 @@ interface Props {
   month: string;
   onMonthChange: (m: string) => void;
   isLoading: boolean;
-  typeFilter: TransactionFilter;
-  onTypeFilterChange: (v: TransactionFilter) => void;
-  suspectedTransferCount: number;
-  onOpenTransferReview: () => void;
 }
 
 function Sparkline({ values, color, width = 320, height = 40 }: { values: number[]; color: string; width?: number; height?: number }) {
@@ -45,10 +38,10 @@ function Sparkline({ values, color, width = 320, height = 40 }: { values: number
   const area = d + ` L ${pts[pts.length - 1][0]} ${height} L ${pts[0][0]} ${height} Z`;
   return (
     <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-      <path d={area} fill={color} opacity={0.12} />
+      <path d={area} fill={color} opacity={0.18} />
       <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={last[0]} cy={last[1]} r="3.5" fill={color} />
-      <circle cx={last[0]} cy={last[1]} r="6" fill={color} opacity={0.18} />
+      <circle cx={last[0]} cy={last[1]} r="6" fill={color} opacity={0.25} />
     </svg>
   );
 }
@@ -66,13 +59,11 @@ function StackedShareBar({ slices }: { slices: { id: string; value: number; colo
 
 export default function DashboardTab({
   trackerId, trackerCurrency, expenses, categories,
-  month, onMonthChange, isLoading, typeFilter, onTypeFilterChange,
-  suspectedTransferCount, onOpenTransferReview,
+  month, onMonthChange, isLoading,
 }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const navigate = useNavigate();
   const symbol = getCurrency(trackerCurrency).symbol;
-  const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [compareOpen, setCompareOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   useMonthSwipe(rootRef, months, month, onMonthChange);
@@ -83,52 +74,46 @@ export default function DashboardTab({
   const { data: prevExpenses } = useExpenses(trackerId, prevMonth);
 
   const monthLabel = months.find(m => m.value === month)?.label || month;
-  const isSpendingView = typeFilter !== 'credit';
 
+  // Non-transfer expenses split into debits and credits. Dashboard is
+  // outgo-centric — debits drive the headline. Credits surface as the
+  // "Total In" + "Net Savings" sub-chips, the same shape as the
+  // Transactions tab's HeroSummary.
   const nonTransfer = useMemo(() => expenses.filter(e => !e.is_transfer), [expenses]);
   const debits = useMemo(() => nonTransfer.filter(e => e.is_debit), [nonTransfer]);
-  const credits = useMemo(() => nonTransfer.filter(e => !e.is_debit), [nonTransfer]);
-
   const totalDebits = debits.reduce((s, e) => s + e.amount, 0);
-  const totalCredits = credits.reduce((s, e) => s + e.amount, 0);
+  const totalCredits = useMemo(
+    () => nonTransfer.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0),
+    [nonTransfer],
+  );
 
   const prevNonTransfer = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer), [prevExpenses]);
   const prevTotalDebits = prevNonTransfer.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
-  const prevTotalCredits = prevNonTransfer.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0);
+  const pctChange = prevTotalDebits > 0
+    ? Math.round(((totalDebits - prevTotalDebits) / prevTotalDebits) * 100)
+    : null;
 
-  const heroTotal = isSpendingView ? totalDebits : totalCredits;
-  const prevHeroTotal = isSpendingView ? prevTotalDebits : prevTotalCredits;
-  const pctChange = prevHeroTotal > 0 ? Math.round(((heroTotal - prevHeroTotal) / prevHeroTotal) * 100) : null;
+  const savings = totalCredits - totalDebits;
+  const savingsPositive = savings >= 0;
 
-  const heroTxnCount = isSpendingView ? debits.length : credits.length;
-  // Average per day in the month (approximate)
+  // Average daily debit (over days that had at least one debit).
   const avgPerDay = useMemo(() => {
-    if (heroTotal === 0) return 0;
-    const dayKeys = new Set(nonTransfer.filter(e => isSpendingView ? e.is_debit : !e.is_debit).map(e => e.date));
-    return Math.round(heroTotal / Math.max(dayKeys.size, 1));
-  }, [heroTotal, nonTransfer, isSpendingView]);
+    if (totalDebits === 0) return 0;
+    const dayKeys = new Set(debits.map(e => e.date));
+    return Math.round(totalDebits / Math.max(dayKeys.size, 1));
+  }, [totalDebits, debits]);
 
-  // Sparkline values: daily totals for the month (by date asc)
+  // Sparkline values: daily debit totals across the month (ascending date).
   const sparkValues = useMemo(() => {
     const map = new Map<string, number>();
-    nonTransfer
-      .filter(e => isSpendingView ? e.is_debit : !e.is_debit)
-      .forEach(e => {
-        map.set(e.date, (map.get(e.date) || 0) + e.amount);
-      });
+    debits.forEach(e => map.set(e.date, (map.get(e.date) || 0) + e.amount));
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
-  }, [nonTransfer, isSpendingView]);
+  }, [debits]);
 
-  // Category aggregation for "Where it went" / "Where it came from"
-  const targetSet = isSpendingView ? debits : credits;
-  const prevTargetSet = useMemo(
-    () => prevNonTransfer.filter(e => isSpendingView ? e.is_debit : !e.is_debit),
-    [prevNonTransfer, isSpendingView]
-  );
-
+  // Per-category breakdown of debits (always debit — the Out/In toggle is gone).
   const categoryBreakdown = useMemo(() => {
     const agg = new Map<string, { value: number; count: number; cat: Category }>();
-    targetSet.forEach(e => {
+    debits.forEach(e => {
       const cat = categories.find(c => c.id === e.category_id);
       if (!cat) return;
       const entry = agg.get(cat.id) || { value: 0, count: 0, cat };
@@ -137,7 +122,7 @@ export default function DashboardTab({
       agg.set(cat.id, entry);
     });
     const prevAgg = new Map<string, number>();
-    prevTargetSet.forEach(e => {
+    prevNonTransfer.filter(e => e.is_debit).forEach(e => {
       prevAgg.set(e.category_id, (prevAgg.get(e.category_id) || 0) + e.amount);
     });
     return Array.from(agg.values())
@@ -147,20 +132,21 @@ export default function DashboardTab({
         return { ...item, change };
       })
       .sort((a, b) => b.value - a.value);
-  }, [targetSet, prevTargetSet, categories]);
+  }, [debits, prevNonTransfer, categories]);
 
   const totalBreakdown = categoryBreakdown.reduce((s, c) => s + c.value, 0);
+  const biggest = useMemo(() => [...debits].sort((a, b) => b.amount - a.amount).slice(0, 5), [debits]);
 
-  // Biggest transactions
-  const biggest = useMemo(() => [...targetSet].sort((a, b) => b.amount - a.amount).slice(0, 5), [targetSet]);
-
+  // Tapping a category card jumps to Transactions tab with the category
+  // filter pre-applied. We force the type back to 'all' since Dashboard
+  // no longer has a Type filter at all.
   const handleCategoryClick = (categoryId: string) => {
-    navigate(`/tracker/${trackerId}?tab=expenses&type=${typeFilter}&filterCategory=${categoryId}&month=${month}`);
+    navigate(`/tracker/${trackerId}?tab=expenses&type=all&filterCategory=${categoryId}&month=${month}`);
   };
 
   if (isLoading) {
     return (
-      <div className="space-y-3 px-4">
+      <div className="space-y-3 px-4 pt-2">
         {[1, 2, 3].map(i => (
           <div key={i} className="rounded-2xl bg-card border border-line-soft p-4 animate-pulse h-40" />
         ))}
@@ -170,49 +156,51 @@ export default function DashboardTab({
 
   return (
     <div ref={rootRef} className="pb-4">
-      <TrackerToolBar
-        monthLabel={monthLabel}
-        months={months}
-        currentMonth={month}
-        onMonthChange={onMonthChange}
-        sort={sortBy}
-        onSortChange={setSortBy}
-        filterCount={0}
-        onOpenFilter={() => { /* no-op on dashboard */ }}
-        transferCount={suspectedTransferCount}
-        onOpenTransferReview={onOpenTransferReview}
-      />
-
-      <TypeSegment value={typeFilter} onChange={onTypeFilterChange} />
-
-      {/* Hero: this month total + sparkline */}
-      <div className="relative mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5 overflow-hidden">
+      {/* Hero: Net Outgo + Total In + Net Savings, matching the Transactions
+          tab's HeroSummary visual language. The sparkline + avg/day + pct
+          change sit inside the same card so everything is one glance. */}
+      <div className="relative mx-4 mt-2 mb-3 rounded-3xl hero-card p-5">
         <MonthNavChevrons
-          tone="light"
+          tone="dark"
           onPrev={olderMonth ? () => onMonthChange(olderMonth) : undefined}
           onNext={newerMonth ? () => onMonthChange(newerMonth) : undefined}
         />
-        <div className="text-[11px] font-semibold tracking-wider uppercase text-ink-faint">
-          {isSpendingView ? `You spent in ${monthLabel}` : `You earned in ${monthLabel}`}
+
+        {/* Decorative dots — same treatment as HeroSummary so the two ink
+            cards feel like a family. */}
+        <div
+          className="absolute pointer-events-none"
+          style={{ right: -40, top: -40, width: 140, height: 140, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.18 }}
+        />
+        <div
+          className="absolute pointer-events-none"
+          style={{ right: 16, top: 16, width: 64, height: 64, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.40 }}
+        />
+
+        <div className="relative flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider opacity-65">
+          <span>Net outgo this month</span>
+          <span className="inline-flex items-center gap-1">
+            <Calendar size={11} weight="bold" /> {monthLabel}
+          </span>
         </div>
-        <div className="flex items-baseline gap-2.5 mt-1">
-          <div className="font-display tabular-nums text-ink" style={{ fontSize: 40, fontWeight: 500, letterSpacing: '-0.04em' }}>
-            {symbol}{Math.round(heroTotal).toLocaleString('en-IN')}
+
+        <div className="relative flex items-baseline gap-2.5 mt-1.5">
+          <div
+            className="font-display tabular-nums"
+            style={{ fontSize: 44, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.05 }}
+          >
+            {symbol}{Math.round(totalDebits).toLocaleString('en-IN')}
           </div>
           {pctChange !== null && (
             <span
               className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold"
               style={{
                 background: pctChange === 0
-                  ? 'hsl(var(--chip-bg))'
-                  : (isSpendingView ? pctChange > 0 : pctChange < 0)
-                    ? 'hsl(var(--spend-bg))'
-                    : 'hsl(var(--earn-bg))',
+                  ? 'rgba(255,255,255,0.10)'
+                  : pctChange > 0 ? 'rgba(242,182,168,0.18)' : 'rgba(157,223,179,0.18)',
                 color: pctChange === 0
-                  ? 'hsl(var(--ink-soft))'
-                  : (isSpendingView ? pctChange > 0 : pctChange < 0)
-                    ? 'hsl(var(--spend))'
-                    : 'hsl(var(--earn))',
+                  ? 'rgba(255,255,255,0.65)'
+                  : pctChange > 0 ? '#F2B6A8' : '#9DDFB3',
               }}
             >
               {pctChange !== 0 && (pctChange > 0
@@ -223,22 +211,42 @@ export default function DashboardTab({
             </span>
           )}
         </div>
-        <div className="mt-2 text-[12px] text-ink-soft font-medium">
-          Avg {symbol}{avgPerDay.toLocaleString('en-IN')} / day · {heroTxnCount} transaction{heroTxnCount !== 1 ? 's' : ''}
+
+        <div className="relative mt-2 text-[12px] font-medium opacity-75">
+          Avg {symbol}{avgPerDay.toLocaleString('en-IN')} / day · {debits.length} transaction{debits.length !== 1 ? 's' : ''}
         </div>
+
         {sparkValues.length >= 2 && (
-          <div className="mt-3 -mx-1">
-            <Sparkline values={sparkValues} color="hsl(var(--ember))" width={320} height={40} />
+          <div className="relative mt-3 -mx-1">
+            <Sparkline values={sparkValues} color="#F2B6A8" width={320} height={40} />
           </div>
         )}
+
+        <div className="relative mt-3.5 grid grid-cols-2 gap-2.5">
+          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Total In</span>
+            <span className="font-mono font-semibold text-[13px]">
+              {formatAmountShort(totalCredits, trackerCurrency)}
+            </span>
+          </div>
+          <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Net Savings</span>
+            <span
+              className="font-mono font-semibold text-[13px]"
+              style={{ color: savingsPositive ? '#9DDFB3' : '#F2B6A8' }}
+            >
+              {savingsPositive ? '+' : '−'}{formatAmountShort(Math.abs(savings), trackerCurrency)}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Where it went */}
+      {/* Where it went — always debit-based now. */}
       {categoryBreakdown.length > 0 && (
         <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
           <div className="flex items-baseline justify-between mb-3">
             <h3 className="font-display font-semibold text-[16px] text-ink" style={{ letterSpacing: '-0.02em' }}>
-              {isSpendingView ? 'Where it went' : 'Where it came from'}
+              Where it went
             </h3>
             {!isAllMonths && (
               <button
@@ -255,16 +263,12 @@ export default function DashboardTab({
           <div className="mt-3 flex flex-col">
             {categoryBreakdown.map((c, idx) => {
               const pct = totalBreakdown > 0 ? ((c.value / totalBreakdown) * 100).toFixed(1) : '0.0';
-              // "Bad" change depends on view: more spending is bad; more income is good
-              const isBad = isSpendingView ? c.change > 0 : c.change < 0;
-              const isGood = isSpendingView ? c.change < 0 : c.change > 0;
+              // For outgo, an UP arrow (more spend) is bad → spend-red.
               const trendColor = c.change === 0
                 ? 'hsl(var(--ink-faint))'
-                : isBad
+                : c.change > 0
                   ? 'hsl(var(--spend))'
-                  : isGood
-                    ? 'hsl(var(--earn))'
-                    : 'hsl(var(--ink-faint))';
+                  : 'hsl(var(--earn))';
               return (
                 <button
                   key={c.cat.id}
@@ -302,7 +306,7 @@ export default function DashboardTab({
         </div>
       )}
 
-      {/* Biggest */}
+      {/* Biggest debits */}
       {biggest.length > 0 && (
         <div className="mx-4 mb-3 rounded-3xl bg-card border border-line-soft p-5">
           <h3 className="font-display font-semibold text-[16px] text-ink mb-2" style={{ letterSpacing: '-0.02em' }}>
@@ -350,7 +354,7 @@ export default function DashboardTab({
           trackerCurrency={trackerCurrency}
           categories={categories}
           monthA={month}
-          isSpendingView={isSpendingView}
+          isSpendingView={true}
         />
       )}
 

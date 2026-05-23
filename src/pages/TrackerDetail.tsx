@@ -151,10 +151,6 @@ export default function TrackerDetail() {
             month={month}
             onMonthChange={setMonth}
             isLoading={expensesLoading}
-            typeFilter={typeFilter}
-            onTypeFilterChange={setTypeFilter}
-            suspectedTransferCount={transferCount}
-            onOpenTransferReview={() => setShowTransferSheet(true)}
           />
         )}
 

@@ -288,11 +288,11 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 - Realtime subscription invalidates the query on changes.
 
 **Dashboard Tab:**
-- Hero spend card: total month spend (or income, filter-aware) + percentage change vs previous month + average per day + transaction count + hand-rolled SVG sparkline.
-- "Where it went" combined block: stacked-share bar across the top, then a category list per row with `CategoryDot`, name, count, percentage, mono amount, and MoM change (color-coded for direction). Tap a row to jump to that category in Expenses.
-- "Biggest this month" list (top 5 by amount).
-- Compare button opens `CompareSheet` — month-A vs month-B comparison with delta strip and per-category dual progress bars sharing one scale. Hidden when month is "All".
-- Drops the prior dual-pie + summary-card + breakdown trio entirely (Recharts is no longer imported here).
+- No toolbar or All/Out/In segment. Month navigation is purely chevron-tap + horizontal swipe. The page is outgo-centric — there is no Type filter.
+- Hero ink card mirrors the Transactions tab's `HeroSummary`: big "Net outgo this month" total, pct-change chip vs previous month, avg/day + transaction count, daily-debit sparkline (coral), and `Total In` + `Net Savings` sub-chips. Decorative ember dots.
+- "Where it went": stacked-share bar across the top, then a debit-only category list. Each row shows `CategoryDot`, name, count, percentage, mono amount, and MoM change (red for up, green for down). Tap a row to jump to that category in Expenses with the category filter pre-applied.
+- "Biggest this month" list (top 5 debits).
+- Compare button opens `CompareSheet`. Inside the sheet, tap any category row to expand inline drill-down buttons (`Open <labelA>` / `Open <labelB>`) — tapping either navigates to the Transactions tab with that month + the category filter pre-applied (the disabled state covers months with zero spend in that category).
 
 **Settings Tab:**
 - Tracker header card (ember home icon, name, currency · members · since)
