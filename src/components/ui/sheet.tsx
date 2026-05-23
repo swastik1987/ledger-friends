@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { useOverlayBack } from "@/hooks/useOverlayBack";
 
 /**
  * Scroll the focused input into view when the mobile keyboard opens.
@@ -32,7 +33,15 @@ function useScrollInputIntoView(containerRef: React.RefObject<HTMLElement | null
   }, [containerRef]);
 }
 
-const Sheet = SheetPrimitive.Root;
+/**
+ * Wraps Radix's Dialog.Root so that pressing the device back gesture (or
+ * browser back) closes the sheet instead of navigating the underlying page.
+ * `useOverlayBack` is a no-op for uncontrolled instances (no `open` prop).
+ */
+const Sheet: React.FC<React.ComponentProps<typeof SheetPrimitive.Root>> = (props) => {
+  useOverlayBack(props.open, props.onOpenChange);
+  return <SheetPrimitive.Root {...props} />;
+};
 
 const SheetTrigger = SheetPrimitive.Trigger;
 

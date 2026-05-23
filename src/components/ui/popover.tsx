@@ -2,8 +2,18 @@ import * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 
 import { cn } from "@/lib/utils";
+import { useOverlayBack } from "@/hooks/useOverlayBack";
 
-const Popover = PopoverPrimitive.Root;
+/**
+ * Wraps Radix Popover.Root so device back / browser back closes an open
+ * popover (sort, month picker, etc.) instead of navigating. No-op when
+ * the consumer doesn't pass `open` (uncontrolled popovers manage their
+ * own state and the back gesture falls through).
+ */
+const Popover: React.FC<React.ComponentProps<typeof PopoverPrimitive.Root>> = (props) => {
+  useOverlayBack(props.open, props.onOpenChange);
+  return <PopoverPrimitive.Root {...props} />;
+};
 
 const PopoverTrigger = PopoverPrimitive.Trigger;
 

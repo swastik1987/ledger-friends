@@ -330,6 +330,10 @@ Lives in `src/lib/merchantExtraction.ts`. All pure functions, applied during the
 
 The previous **25-char hard truncation of description was removed** — descriptions now keep their full text and rely on CSS-ellipsis at the card level. `raw_description` is preserved on every draft and persists to the DB column.
 
+### Overlay back-button handling
+
+Every controlled overlay (Sheet / AlertDialog / Dialog / Popover) closes on the device back gesture / browser back instead of navigating the underlying page. Implemented in `useOverlayBack` (a module-level stack + a single `popstate` listener) and applied transparently inside the four Radix Root wrappers in `src/components/ui/{sheet,popover,alert-dialog,dialog}.tsx`. Stacked overlays close one layer at a time (inner first). pushState is called without a URL argument so React Router never sees a navigation.
+
 ### Gesture model (TxnRow)
 
 Each card owns its own pointer handling. Thresholds:

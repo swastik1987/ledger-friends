@@ -3,8 +3,16 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useOverlayBack } from "@/hooks/useOverlayBack";
 
-const Dialog = DialogPrimitive.Root;
+/**
+ * Wraps Radix Dialog.Root so the device back gesture closes the dialog
+ * instead of navigating the underlying page.
+ */
+const Dialog: React.FC<React.ComponentProps<typeof DialogPrimitive.Root>> = (props) => {
+  useOverlayBack(props.open, props.onOpenChange);
+  return <DialogPrimitive.Root {...props} />;
+};
 
 const DialogTrigger = DialogPrimitive.Trigger;
 

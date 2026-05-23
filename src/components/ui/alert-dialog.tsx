@@ -3,8 +3,17 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import { useOverlayBack } from "@/hooks/useOverlayBack";
 
-const AlertDialog = AlertDialogPrimitive.Root;
+/**
+ * Wraps Radix AlertDialog.Root so the device back gesture cancels the
+ * confirmation (closes the dialog without firing the action button)
+ * instead of navigating the underlying page.
+ */
+const AlertDialog: React.FC<React.ComponentProps<typeof AlertDialogPrimitive.Root>> = (props) => {
+  useOverlayBack(props.open, props.onOpenChange);
+  return <AlertDialogPrimitive.Root {...props} />;
+};
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
 
