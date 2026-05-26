@@ -292,12 +292,14 @@ serve(async (req) => {
     // with a small concurrency pool. Adjacent chunks overlap by ~200 chars so
     // any transaction landing on a seam appears in both chunks; a server-side
     // dedupe pass drops the duplicate before returning.
-    const CHUNK_CHAR_LIMIT = 12_000;
+    const CHUNK_CHAR_LIMIT = 8_000;
     const CHUNK_OVERLAP = 200;
-    const PER_CALL_TIMEOUT_MS = 55_000;
+    const PER_CALL_TIMEOUT_MS = 40_000;
     const CONCURRENCY = 4;
-    const OVERALL_BUDGET_MS = 140_000;
+    const RESPONSE_DEADLINE_MS = 125_000;
+    const START_DEADLINE_MS = RESPONSE_DEADLINE_MS - PER_CALL_TIMEOUT_MS - 5_000;
     const startedAt = Date.now();
+    const chunkControllers = new Set<AbortController>();
 
     function chunkByLines(text: string, limit: number, overlap: number): string[] {
       const lines = text.split('\n');
@@ -357,16 +359,22 @@ serve(async (req) => {
 
       const t0 = Date.now();
       let geminiRes: Response;
+      const controller = new AbortController();
+      chunkControllers.add(controller);
+      const timeoutId = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
       try {
         geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(geminiBody),
-          signal: AbortSignal.timeout(PER_CALL_TIMEOUT_MS),
+          signal: controller.signal,
         });
       } catch (e) {
         console.error(`Gemini fetch failed on chunk ${i + 1}/${n} after ${Date.now() - t0}ms:`, e);
         return { index: i, ok: false, error: `Gemini request timed out on chunk ${i + 1}/${n}` };
+      } finally {
+        clearTimeout(timeoutId);
+        chunkControllers.delete(controller);
       }
 
       if (!geminiRes.ok) {
@@ -405,16 +413,26 @@ serve(async (req) => {
         while (true) {
           const idx = cursor++;
           if (idx >= items.length) return;
-          if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
-            results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: time budget exceeded` };
+          if (Date.now() - startedAt > START_DEADLINE_MS) {
+            results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: response deadline reached` };
             continue;
           }
           results[idx] = await processChunk(items[idx], idx, items.length);
         }
       };
       const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-      await Promise.all(workers);
-      return results;
+      const deadline = new Promise<void>((resolve) => {
+        setTimeout(() => {
+          for (const controller of chunkControllers) controller.abort();
+          resolve();
+        }, RESPONSE_DEADLINE_MS);
+      });
+      await Promise.race([Promise.all(workers), deadline]);
+      return results.map((result, idx) => result ?? {
+        index: idx,
+        ok: false,
+        error: `Chunk ${idx + 1}/${items.length} skipped: response deadline reached`,
+      });
     }
 
     const chunkResults = await runWithConcurrency(chunks, CONCURRENCY);
