@@ -292,10 +292,12 @@ serve(async (req) => {
     // with a small concurrency pool. Adjacent chunks overlap by ~200 chars so
     // any transaction landing on a seam appears in both chunks; a server-side
     // dedupe pass drops the duplicate before returning.
-    const CHUNK_CHAR_LIMIT = 22_000;
+    const CHUNK_CHAR_LIMIT = 12_000;
     const CHUNK_OVERLAP = 200;
-    const PER_CALL_TIMEOUT_MS = 110_000;
-    const CONCURRENCY = 2;
+    const PER_CALL_TIMEOUT_MS = 55_000;
+    const CONCURRENCY = 4;
+    const OVERALL_BUDGET_MS = 140_000;
+    const startedAt = Date.now();
 
     function chunkByLines(text: string, limit: number, overlap: number): string[] {
       const lines = text.split('\n');
@@ -403,6 +405,10 @@ serve(async (req) => {
         while (true) {
           const idx = cursor++;
           if (idx >= items.length) return;
+          if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
+            results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: time budget exceeded` };
+            continue;
+          }
           results[idx] = await processChunk(items[idx], idx, items.length);
         }
       };
