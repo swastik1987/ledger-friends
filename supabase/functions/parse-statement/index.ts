@@ -421,13 +421,15 @@ serve(async (req) => {
         }
       };
       const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+      let deadlineTimer: number | undefined;
       const deadline = new Promise<void>((resolve) => {
-        setTimeout(() => {
+        deadlineTimer = setTimeout(() => {
           for (const controller of chunkControllers) controller.abort();
           resolve();
         }, RESPONSE_DEADLINE_MS);
       });
       await Promise.race([Promise.all(workers), deadline]);
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       return results.map((result, idx) => result ?? {
         index: idx,
         ok: false,
