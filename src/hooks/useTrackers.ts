@@ -53,12 +53,7 @@ export function useCreateTracker() {
         .single();
 
       if (error) throw error;
-
-      const { error: memErr } = await supabase
-        .from('tracker_members')
-        .insert({ tracker_id: tracker.id, user_id: user.id, role: 'admin' });
-
-      if (memErr) throw memErr;
+      // Admin membership row is auto-created by the add_tracker_admin_member trigger.
       return tracker;
     },
     onSuccess: () => {
