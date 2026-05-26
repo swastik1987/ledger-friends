@@ -219,11 +219,7 @@ serve(async (req) => {
         generationConfig: { temperature: 0.3, responseMimeType: 'application/json' },
       };
 
-      const geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiBody),
-      });
+      const geminiRes = await fetchGemini(geminiBody, 20_000);
 
       if (!geminiRes.ok) {
         const err = await geminiRes.text();
@@ -255,11 +251,13 @@ serve(async (req) => {
         },
       };
 
-      const geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiBody),
-      });
+      let geminiRes: Response;
+      try {
+        geminiRes = await fetchGemini(geminiBody, 20_000);
+      } catch (e) {
+        console.error('Metadata extraction timed out:', e);
+        return quickJson({ metadata: { statement_type: 'unknown', bank_name: null, base_currency: null, debit_credit_rule: null, column_semantics: null } });
+      }
 
       if (!geminiRes.ok) {
         const err = await geminiRes.text();
