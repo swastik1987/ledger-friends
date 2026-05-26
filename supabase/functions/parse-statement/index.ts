@@ -405,6 +405,10 @@ serve(async (req) => {
         while (true) {
           const idx = cursor++;
           if (idx >= items.length) return;
+          if (Date.now() - startedAt > OVERALL_BUDGET_MS) {
+            results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: time budget exceeded` };
+            continue;
+          }
           results[idx] = await processChunk(items[idx], idx, items.length);
         }
       };
