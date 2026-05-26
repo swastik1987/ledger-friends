@@ -343,14 +343,22 @@ export default function UploadStatement() {
   const bulkCreate = useBulkCreateExpenses();
   const queryClient = useQueryClient();
 
+  // Step machine:
+  // 1 = file select, 2 = password (PDF only, if locked), 3 = page select (PDF only),
+  // 4 = processing, 5 = review
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState('');
+  const [pwdRequired, setPwdRequired] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
   const [drafts, setDrafts] = useState<DraftExpense[]>([]);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [pdfThumbnails, setPdfThumbnails] = useState<{ pageNum: number; dataUrl: string }[]>([]);
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  const pdfDocRef = useRef<any>(null);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
   // AbortController to cancel in-flight API calls when user cancels or navigates away
@@ -370,18 +378,39 @@ export default function UploadStatement() {
     setProgressMessage('');
     setStep(1);
     setFile(null);
+    setPdfThumbnails([]);
+    setSelectedPages(new Set());
+    setPwdRequired(false);
+    setPassword('');
+    pdfDocRef.current = null;
   }, []);
+
+  // Dynamic step display: skip password step if not needed, skip page-select for non-PDFs
+  const isPdf = file?.name.toLowerCase().endsWith('.pdf') ?? false;
+  const stepSequence: number[] = (() => {
+    if (!isPdf) return [1, 4, 5];
+    return pwdRequired ? [1, 2, 3, 4, 5] : [1, 3, 4, 5];
+  })();
+  const displayStep = Math.max(1, stepSequence.indexOf(step) + 1);
+  const totalSteps = stepSequence.length;
 
   // Smart back navigation with guards for each step
   const handleBack = useCallback(() => {
     if (step === 1) {
       navigate(`/tracker/${trackerId}`);
-    } else if (step === 2) {
+    } else if (step === 2 || step === 3) {
+      // Password or page-select — go back to file picker
       setStep(1);
-    } else if (step === 3) {
+      setPdfThumbnails([]);
+      setSelectedPages(new Set());
+      setPwdRequired(false);
+      setPassword('');
+      pdfDocRef.current = null;
+      setFile(null);
+    } else if (step === 4) {
       // During processing — cancel and go back to Step 1
       cancelProcessing();
-    } else if (step === 4) {
+    } else if (step === 5) {
       // Review step — confirm if there are drafts
       if (drafts.length > 0) {
         setShowLeaveConfirm(true);
@@ -400,6 +429,43 @@ export default function UploadStatement() {
     setFile(f);
   };
 
+  // Load PDF document into memory. Returns whether a password is required.
+  const loadPdfDocument = async (pwd?: string): Promise<{ ok: boolean; needsPassword: boolean }> => {
+    if (!file) return { ok: false, needsPassword: false };
+    const pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+    const arrayBuffer = await file.arrayBuffer();
+    try {
+      const doc = await pdfjsLib.getDocument({ data: arrayBuffer, password: pwd || undefined }).promise;
+      pdfDocRef.current = doc;
+      return { ok: true, needsPassword: false };
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase();
+      if (msg.includes('password')) return { ok: false, needsPassword: true };
+      throw err;
+    }
+  };
+
+  // Render thumbnails for all pages of the loaded PDF. Select all by default.
+  const renderPdfThumbnails = async () => {
+    const doc = pdfDocRef.current;
+    if (!doc) return;
+    const thumbs: { pageNum: number; dataUrl: string }[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const viewport = page.getViewport({ scale: 0.6 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      thumbs.push({ pageNum: i, dataUrl: canvas.toDataURL('image/jpeg', 0.7) });
+    }
+    setPdfThumbnails(thumbs);
+    setSelectedPages(new Set(thumbs.map(t => t.pageNum)));
+  };
+
   const handleContinue = async () => {
     if (!file) return;
     const ext = file.name.split('.').pop()?.toLowerCase();
@@ -410,8 +476,55 @@ export default function UploadStatement() {
       if (isBulk) return; // Handled as bulk import
     }
 
-    if (ext === 'pdf') { setStep(2); } else { processFile(); }
+    if (ext === 'pdf') {
+      setLoadingPdf(true);
+      try {
+        const result = await loadPdfDocument();
+        if (result.needsPassword) {
+          setPwdRequired(true);
+          setStep(2);
+        } else if (result.ok) {
+          await renderPdfThumbnails();
+          setStep(3);
+        }
+      } catch {
+        toast.error("This PDF couldn't be opened. It may be corrupted.");
+      } finally {
+        setLoadingPdf(false);
+      }
+    } else {
+      processFile();
+    }
   };
+
+  const handlePasswordSubmit = async () => {
+    setLoadingPdf(true);
+    try {
+      const result = await loadPdfDocument(password);
+      if (result.ok) {
+        await renderPdfThumbnails();
+        setStep(3);
+      } else if (result.needsPassword) {
+        toast.error('Incorrect password. Please try again.');
+      }
+    } catch {
+      toast.error("This PDF couldn't be opened.");
+    } finally {
+      setLoadingPdf(false);
+    }
+  };
+
+  const togglePageSelection = (pageNum: number) => {
+    setSelectedPages(prev => {
+      const next = new Set(prev);
+      if (next.has(pageNum)) next.delete(pageNum);
+      else next.add(pageNum);
+      return next;
+    });
+  };
+
+  const selectAllPages = () => setSelectedPages(new Set(pdfThumbnails.map(t => t.pageNum)));
+  const deselectAllPages = () => setSelectedPages(new Set());
 
   // ──────────────────────────────────────────────────────────────────
   // Bulk Excel import — client-side parsing, no AI for transactions
@@ -446,7 +559,7 @@ export default function UploadStatement() {
     if (!columnMap) return false; // Not a bulk upload — fall through to AI parsing
 
     // It's a bulk upload — process it
-    setStep(3);
+    setStep(4);
     setProcessing(true);
     setProgress(0);
     setProgressMessage('📊 Reading your spreadsheet...');
@@ -583,7 +696,7 @@ export default function UploadStatement() {
         throw new EmptyFileError('No valid transaction rows found in this file.');
       }
 
-      setStep(4);
+      setStep(5);
 
       if (unmatchedNames.length > 0) {
         toast.success(`${unmatchedNames.length} new categor${unmatchedNames.length === 1 ? 'y' : 'ies'} created`);
@@ -608,7 +721,7 @@ export default function UploadStatement() {
     abortRef.current = new AbortController();
     const signal = abortRef.current.signal;
 
-    setStep(3);
+    setStep(4);
     setProcessing(true);
     setProgress(0);
     setProgressMessage('🔓 Reading your file...');
@@ -655,42 +768,33 @@ export default function UploadStatement() {
           textChunks.push([header, ...dataLines.slice(i, i + ROWS_PER_CHUNK)].join('\n'));
         }
       } else if (ext === 'pdf') {
-        const pdfjsLib = await import('pdfjs-dist');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+        // PDF doc was already loaded for the page-preview step. Reuse it.
+        const doc = pdfDocRef.current;
+        if (!doc) throw new FileUnreadableError();
 
-        let doc: any;
-        try {
-          doc = await pdfjsLib.getDocument({ data: arrayBuffer, password: password || undefined }).promise;
-        } catch (pdfErr: any) {
-          const msg = String(pdfErr?.message || '').toLowerCase();
-          if (msg.includes('password') && !password) {
-            throw new PasswordRequiredError();
-          } else if (msg.includes('password')) {
-            throw new WrongPasswordError();
-          } else if (msg.includes('invalid') || msg.includes('corrupt') || msg.includes('not a pdf')) {
-            throw new FileUnreadableError();
-          }
-          throw new FileUnreadableError();
-        }
-
-        const pages: string[] = [];
+        // Extract text for every page so the format-hint detector sees full context,
+        // but only feed selected pages to the AI to save tokens.
+        const allPages: string[] = [];
         for (let i = 1; i <= doc.numPages; i++) {
           const page = await doc.getPage(i);
           const content = await page.getTextContent();
-          pages.push(content.items.map((item: any) => item.str).join(' '));
+          allPages.push(content.items.map((item: any) => item.str).join(' '));
         }
 
-        const allText = pages.join(' ').trim();
+        const allText = allPages.join(' ').trim();
         if (!allText) throw new EmptyFileError('This PDF has no extractable text. It may be a scanned image. Try a CSV or Excel file instead.');
 
         formatHint = detectPdfFormatHint(allText);
 
-        // Header snippet for PDFs = first ~800 chars of the first page (catches bank header
-        // and column labels without bloating subsequent chunks)
-        headerSnippet = pages[0] ? pages[0].slice(0, 800) : null;
+        // Header snippet for PDFs = first ~800 chars of the first page — always, even
+        // if user deselected it, so the AI still has bank/column context.
+        headerSnippet = allPages[0] ? allPages[0].slice(0, 800) : null;
 
-        for (let i = 0; i < pages.length; i += PAGES_PER_CHUNK) {
-          textChunks.push(pages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
+        const pickedPages = allPages.filter((_, idx) => selectedPages.has(idx + 1));
+        if (pickedPages.length === 0) throw new EmptyFileError('No pages selected for analysis.');
+
+        for (let i = 0; i < pickedPages.length; i += PAGES_PER_CHUNK) {
+          textChunks.push(pickedPages.slice(i, i + PAGES_PER_CHUNK).join('\n'));
         }
       }
 
@@ -1008,7 +1112,7 @@ export default function UploadStatement() {
 
       setDrafts(draftExpenses);
       setProgress(100);
-      setStep(4);
+      setStep(5);
     } catch (err: any) {
       if (err instanceof PasswordRequiredError || err instanceof WrongPasswordError) {
         toast.error(err.message);
@@ -1028,6 +1132,9 @@ export default function UploadStatement() {
   const debitCount = approvedDrafts.filter(d => d.is_debit).length;
   const creditCount = approvedDrafts.filter(d => !d.is_debit).length;
   const needsReviewCount = drafts.filter(d => d.needs_review && d.review_status === 'pending').length;
+  const totalOut = approvedDrafts.filter(d => d.is_debit).reduce((s, d) => s + d.amount, 0);
+  const totalIn = approvedDrafts.filter(d => !d.is_debit).reduce((s, d) => s + d.amount, 0);
+  const netAmount = totalIn - totalOut;
 
   const handleSaveAll = async () => {
     if (!user || !profile || !trackerId) return;
@@ -1138,7 +1245,7 @@ export default function UploadStatement() {
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-lg mx-auto">
-          {step === 3 ? (
+          {step === 4 ? (
             /* During processing: show Cancel button instead of back arrow */
             <button onClick={cancelProcessing} className="p-1 text-destructive hover:text-destructive/80 flex items-center gap-1 text-sm font-medium">
               <X className="h-4 w-4" /> Cancel
@@ -1149,7 +1256,7 @@ export default function UploadStatement() {
             </button>
           )}
           <h1 className="font-semibold text-base">Upload Statement</h1>
-          <span className="ml-auto text-xs text-muted-foreground">Step {step} of 4</span>
+          <span className="ml-auto text-xs text-muted-foreground">Step {displayStep} of {totalSteps}</span>
         </div>
       </div>
 
@@ -1200,23 +1307,90 @@ export default function UploadStatement() {
                 </>
               )}
             </label>
-            <Button onClick={handleContinue} disabled={!file} className="w-full h-11">Continue &rarr;</Button>
+            <Button onClick={handleContinue} disabled={!file || loadingPdf} className="w-full h-11">
+              {loadingPdf ? <CircleNotch className="h-4 w-4 animate-spin" /> : <>Continue &rarr;</>}
+            </Button>
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-lg font-semibold">Password Protected?</h2>
-              <p className="text-sm text-muted-foreground mt-1">Some bank statements are password protected. Enter the password below, or skip if yours isn't.</p>
+              <h2 className="text-lg font-semibold">Password Protected PDF</h2>
+              <p className="text-sm text-muted-foreground mt-1">This PDF is password protected. Enter the password below to continue.</p>
             </div>
-            <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="PDF password" className="h-11" />
-            <Button onClick={processFile} className="w-full h-11">Unlock & Continue &rarr;</Button>
-            <button onClick={() => { setPassword(''); processFile(); }} className="w-full text-sm text-primary font-medium">Skip — No Password &rarr;</button>
+            <Input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && password && !loadingPdf) handlePasswordSubmit(); }}
+              placeholder="PDF password"
+              className="h-11"
+              autoFocus
+            />
+            <Button onClick={handlePasswordSubmit} disabled={!password || loadingPdf} className="w-full h-11">
+              {loadingPdf ? <CircleNotch className="h-4 w-4 animate-spin" /> : <>Unlock &rarr;</>}
+            </Button>
           </div>
         )}
 
         {step === 3 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Select pages to analyse</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Deselect pages that contain ads, terms, or other non-transaction content. Skipping them improves AI accuracy and reduces processing time.
+              </p>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                {selectedPages.size} of {pdfThumbnails.length} page{pdfThumbnails.length !== 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-3">
+                <button onClick={selectAllPages} className="text-primary font-medium">Select all</button>
+                <button onClick={deselectAllPages} className="text-muted-foreground font-medium">Clear</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {pdfThumbnails.map(t => {
+                const isSelected = selectedPages.has(t.pageNum);
+                return (
+                  <button
+                    key={t.pageNum}
+                    type="button"
+                    onClick={() => togglePageSelection(t.pageNum)}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-all bg-card ${
+                      isSelected ? 'border-primary shadow-sm' : 'border-border opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={t.dataUrl} alt={`Page ${t.pageNum}`} className="w-full h-auto block" />
+                    <div className="absolute top-2 right-2">
+                      <div className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                        isSelected ? 'bg-primary text-primary-foreground' : 'bg-background/80 border border-border text-muted-foreground'
+                      }`}>
+                        {isSelected ? '✓' : ''}
+                      </div>
+                    </div>
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent text-white text-xs font-medium py-1 text-center">
+                      Page {t.pageNum}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="sticky bottom-4">
+              <Button
+                onClick={processFile}
+                disabled={selectedPages.size === 0}
+                className="w-full h-12 shadow-lg"
+              >
+                Analyse {selectedPages.size} page{selectedPages.size !== 1 ? 's' : ''} &rarr;
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
           <div className="flex flex-col items-center justify-center py-20 space-y-6">
             <p className="text-lg font-medium text-center transition-opacity duration-300">
               {progressMessage}
@@ -1233,13 +1407,30 @@ export default function UploadStatement() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="space-y-4">
             <div>
               <h2 className="text-lg font-semibold">Review Transactions</h2>
               <p className="text-sm text-muted-foreground">
                 {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''}{needsReviewCount > 0 ? ` · ${needsReviewCount} need review` : ''}
               </p>
+            </div>
+
+            <div className="rounded-2xl bg-card border border-border p-3 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total Out</p>
+                <p className="font-mono text-sm font-semibold mt-0.5">{formatAmountShort(totalOut, trackerCurrency)}</p>
+              </div>
+              <div className="border-x border-border">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total In</p>
+                <p className="font-mono text-sm font-semibold text-emerald-600 mt-0.5">+{formatAmountShort(totalIn, trackerCurrency)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Net</p>
+                <p className={`font-mono text-sm font-semibold mt-0.5 ${netAmount >= 0 ? 'text-emerald-600' : ''}`}>
+                  {netAmount >= 0 ? '+' : '−'}{formatAmountShort(Math.abs(netAmount), trackerCurrency)}
+                </p>
+              </div>
             </div>
 
             <div className="space-y-2">
