@@ -125,7 +125,7 @@ ledger-friends/
 │   └── index.css                             # Sand & Ember CSS vars + utilities
 │
 ├── supabase/
-│   ├── migrations/                           # 20 migration files
+│   ├── migrations/                           # 21 migration files
 │   └── functions/
 │       ├── parse-statement/                  # Statement → transactions (chunked)
 │       ├── convert-currency/
@@ -189,8 +189,11 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 
 ### RLS Policies
 - Tracker-scoped data is restricted by tracker membership
+- **`profiles` SELECT** is scoped to self + users who share a tracker with the caller (tightened May 26 2026 — was previously any authenticated user). Stops user enumeration.
 - System categories readable by all authenticated users
 - Only admins update/delete trackers and manage members
+- **`tracker_members` INSERT** is admin-only. The creator's admin row is auto-added by the `add_tracker_admin_member` `SECURITY DEFINER` trigger on `trackers` INSERT — `useCreateTracker` no longer inserts a member row.
+- EXECUTE on internal `SECURITY DEFINER` helpers (`is_tracker_member`, `is_tracker_admin`, `get_tracker_stats`, `handle_new_user`, `update_updated_at_column`, `add_tracker_admin_member`) is revoked from `anon`/`public`; only `authenticated` retains the three callable from app code.
 - Expense edit/delete: creator OR tracker admin
 - Category learning is globally shared
 
@@ -204,6 +207,8 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 ---
 
 ## EDGE FUNCTIONS (4)
+
+**All edge functions are JWT-gated** (as of May 26 2026). Each function calls `supa.auth.getUser()` on the bound `Authorization` header and returns 401 to unauthenticated callers. Anonymous invocation of `parse-statement` / `convert-currency` / `suggest-emojis` is no longer possible — protects Gemini token budget.
 
 ### parse-statement
 - **Purpose:** Extract and categorize transactions from bank/credit-card statement text.
@@ -321,7 +326,9 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
    - Client-side learned-category lookup → `merchantDictionary` lookup → AI suggestion fallback
    - Duplicate check against existing tracker expenses
    - Server-side `warnings` (if any) surfaced via `toast.warning`
-4. **Review:** three accordion sections — Potential Duplicates / Needs Review / Ready to Save. Bulk insert on save. Category corrections write to `category_learning`.
+4. **Review:** review header shows a `BankBadge` + statement bank name (pre-filled from the AI metadata pass, falls back to the most-frequent per-row `bank_name` across drafts, editable inline) and a Total Out / Total In / Net summary card. Three accordion sections follow — Potential Duplicates / Needs Review / Ready to Save. Bulk insert on save. **On save, the confirmed statement bank overrides `bank_name` on every approved draft** — every row in a single statement belongs to the same bank, so the per-row AI guess is discarded in favour of the user-confirmed value. Category corrections write to `category_learning`.
+
+The Statement Upload step machine is dynamic: 1 = file select, 2 = password (PDF only, when the file is actually locked — detected by attempting to open without one), 3 = page-preview (PDF only — 2-column thumbnail grid where the user deselects ads/T&Cs pages before AI parsing), 4 = processing, 5 = review. The displayed "Step X of N" reflects only the steps that actually run.
 
 ### Merchant / description pipeline (client-side)
 
@@ -573,6 +580,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 18. System category icons migrated from emoji to Phosphor icon names (`20260410_update_system_category_icons.sql`)
 19. **`raw_description` column added to `expenses`** (`20260522_add_raw_description.sql`)
 20. **`rejected_as_transfer` column added to `expenses`** + partial index (`20260523_add_rejected_as_transfer.sql`) — fixes the "Not Transfer" bug where pair-matched rows re-surfaced on every refetch.
+21. **Security hardening** (`20260526085546_...sql`) — `profiles` SELECT narrowed to self + shared-tracker members; `tracker_members` self-insert removed in favour of an `add_tracker_admin_member` `SECURITY DEFINER` trigger; EXECUTE revoked from `anon`/`public` on the internal helpers (only `authenticated` keeps `is_tracker_member`, `is_tracker_admin`, `get_tracker_stats`).
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

@@ -25,6 +25,7 @@ import {
 } from '@/lib/merchantExtraction';
 import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
+import BankBadge from '@/components/BankBadge';
 import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
@@ -358,6 +359,11 @@ export default function UploadStatement() {
   const [pdfThumbnails, setPdfThumbnails] = useState<{ pageNum: number; dataUrl: string }[]>([]);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
   const [loadingPdf, setLoadingPdf] = useState(false);
+  // Bank name confirmed by the user for this statement. Pre-filled from the
+  // AI metadata pass; the user can edit it on the review screen. On save,
+  // overrides bank_name on every approved draft.
+  const [statementBank, setStatementBank] = useState<string>('');
+  const [editingBank, setEditingBank] = useState(false);
   const pdfDocRef = useRef<any>(null);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
@@ -382,6 +388,8 @@ export default function UploadStatement() {
     setSelectedPages(new Set());
     setPwdRequired(false);
     setPassword('');
+    setStatementBank('');
+    setEditingBank(false);
     pdfDocRef.current = null;
   }, []);
 
@@ -811,6 +819,9 @@ export default function UploadStatement() {
         });
         if (metaData?.metadata) {
           statementMetadata = metaData.metadata;
+          if (typeof statementMetadata?.bank_name === 'string' && statementMetadata.bank_name.trim()) {
+            setStatementBank(statementMetadata.bank_name.trim());
+          }
         }
       } catch {
         // Metadata pass is best-effort — fall through and let per-chunk extraction handle it
@@ -1110,6 +1121,24 @@ export default function UploadStatement() {
       setProgress(95);
       setProgressMessage('✅ Almost done...');
 
+      // Bank-name fallback: if metadata didn't surface a bank, pick the most-frequent
+      // per-row bank_name from drafts so the review header still has something to show.
+      // The user can always edit it on the review screen.
+      if (!statementMetadata?.bank_name) {
+        const counts = new Map<string, number>();
+        for (const d of draftExpenses) {
+          const b = (d.bank_name || '').trim();
+          if (!b) continue;
+          counts.set(b, (counts.get(b) || 0) + 1);
+        }
+        let top: string | null = null;
+        let topCount = 0;
+        for (const [b, c] of counts) {
+          if (c > topCount) { top = b; topCount = c; }
+        }
+        if (top) setStatementBank(top);
+      }
+
       setDrafts(draftExpenses);
       setProgress(100);
       setStep(5);
@@ -1194,7 +1223,10 @@ export default function UploadStatement() {
         is_transfer: false,
         suspected_transfer: d.suspected_transfer || false,
         payment_method: d.payment_method || null,
-        bank_name: d.bank_name || null,
+        // Statement-level bank overrides any per-row bank guess from the AI — every
+        // row in this upload belongs to the same statement / bank. Falls back to
+        // the per-row value only when the user hasn't confirmed a statement bank.
+        bank_name: statementBank.trim() || d.bank_name || null,
         reference_number: d.reference_number || null,
         notes: d.notes || null,
         ...(conv ? {
@@ -1414,6 +1446,35 @@ export default function UploadStatement() {
               <p className="text-sm text-muted-foreground">
                 {debitCount} debit{debitCount !== 1 ? 's' : ''} · {creditCount} credit{creditCount !== 1 ? 's' : ''}{needsReviewCount > 0 ? ` · ${needsReviewCount} need review` : ''}
               </p>
+            </div>
+
+            {/* Statement bank — applied to every row on save. Editable inline. */}
+            <div className="rounded-2xl bg-card border border-border p-3 flex items-center gap-3">
+              <BankBadge name={statementBank || undefined} unspecified={!statementBank} size={32} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Bank</p>
+                {editingBank ? (
+                  <Input
+                    autoFocus
+                    value={statementBank}
+                    onChange={e => setStatementBank(e.target.value)}
+                    onBlur={() => setEditingBank(false)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingBank(false); }}
+                    placeholder="e.g. HDFC Bank, Axis Bank, Scapia"
+                    className="h-7 mt-0.5 text-sm"
+                  />
+                ) : (
+                  <p className="text-sm font-medium truncate mt-0.5">
+                    {statementBank || <span className="text-muted-foreground italic font-normal">No bank tag — tap edit to add</span>}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setEditingBank(v => !v)}
+                className="text-xs font-medium text-primary shrink-0 px-2 py-1"
+              >
+                {editingBank ? 'Done' : (statementBank ? 'Edit' : 'Add')}
+              </button>
             </div>
 
             <div className="rounded-2xl bg-card border border-border p-3 grid grid-cols-3 gap-2 text-center">
