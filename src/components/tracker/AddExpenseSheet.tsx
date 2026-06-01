@@ -204,25 +204,15 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   return (
     <>
       <Sheet open={open && !showCategoryPicker} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[85dvh]">
-          <SheetHeader>
-            <div className="flex items-center justify-between">
-              <SheetTitle>{isEdit ? 'Edit Transaction' : 'Add Transaction'}</SheetTitle>
-              {(isEdit || showManualForm) && (
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={isPending || !amount || !description || !categoryId}
-                  className="h-9 px-3 gap-1.5"
-                >
-                  {isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  {isEdit ? 'Update' : 'Save'}
-                </Button>
-              )}
-            </div>
+        <SheetContent
+          side="bottom"
+          className="h-[100dvh] max-h-[100dvh] w-full rounded-none border-0 p-0 gap-0 flex flex-col overflow-hidden"
+        >
+          <SheetHeader className="shrink-0 border-b border-border px-4 pt-4 pb-3 text-left">
+            <SheetTitle>{isEdit ? 'Edit Transaction' : 'Add Transaction'}</SheetTitle>
           </SheetHeader>
 
-          <div className="py-4 space-y-5">
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
             {/* Entry mode selector (add mode only) */}
             {!isEdit && !showManualForm && (
               <div className="space-y-3">
@@ -480,16 +470,36 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
             )}
             </>}
           </div>
+
+          {/* Sticky bottom CTA */}
+          {(isEdit || showManualForm) && (
+            <div
+              className="shrink-0 border-t border-border bg-background px-4 py-3"
+              style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+            >
+              <Button
+                onClick={handleSave}
+                disabled={isPending || !amount || !description || !categoryId}
+                className="w-full h-12 gap-2 shadow-lg"
+              >
+                {isPending ? <CircleNotch className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {isEdit ? 'Update Transaction' : 'Save Transaction'}
+              </Button>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 
       {/* Category Picker */}
       <Sheet open={showCategoryPicker} onOpenChange={setShowCategoryPicker}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[80dvh]">
-          <SheetHeader>
+        <SheetContent
+          side="bottom"
+          className="h-[100dvh] max-h-[100dvh] w-full rounded-none border-0 p-0 gap-0 flex flex-col overflow-hidden"
+        >
+          <SheetHeader className="shrink-0 border-b border-border px-4 pt-4 pb-3 text-left">
             <SheetTitle>Select Category</SheetTitle>
           </SheetHeader>
-          <div className="py-3 space-y-3">
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             <div className="relative">
               <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
