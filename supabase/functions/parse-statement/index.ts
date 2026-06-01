@@ -243,7 +243,12 @@ serve(async (req) => {
       const geminiBody = {
         system_instruction: { parts: [{ text: EMOJI_INSTRUCTION }] },
         contents: [{ parts: [{ text: `Suggest emojis for these categories:\n${categoryNames.join('\n')}` }] }],
-        generationConfig: { temperature: 0.3, responseMimeType: 'application/json' },
+        generationConfig: {
+          temperature: 0.3,
+          responseMimeType: 'application/json',
+          maxOutputTokens: 2048,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       };
 
       const geminiRes = await fetchGemini(geminiBody, 20_000);
@@ -275,6 +280,11 @@ serve(async (req) => {
           temperature: 0.0,
           responseMimeType: 'application/json',
           responseSchema: METADATA_SCHEMA,
+          maxOutputTokens: 1024,
+          // Disable Gemini 2.5 Flash "thinking" tokens — they silently eat the
+          // output budget and often leave structured-output workflows with
+          // zero tokens to emit the actual JSON.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       };
 
@@ -398,6 +408,14 @@ serve(async (req) => {
           temperature: 0.1,
           responseMimeType: 'application/json',
           responseSchema: transactionSchema,
+          // 32k output tokens easily covers 100+ structured transactions
+          // (~120 tokens each) with headroom for the verbose schema.
+          maxOutputTokens: 32_768,
+          // Disable Gemini 2.5 Flash "thinking" tokens. With thinking on, the
+          // model spends most of its output budget on invisible reasoning and
+          // often returns empty or truncated JSON for moderately sized inputs.
+          // Disabling makes structured output reliable AND faster.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       };
 
@@ -428,14 +446,28 @@ serve(async (req) => {
       }
 
       const geminiData = await geminiRes.json();
-      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+      const finishReason = geminiData.candidates?.[0]?.finishReason;
+      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       const cleaned = rawText.replace(/```json|```/gi, '').trim();
+
+      // If Gemini hit a stop condition that aborted output (token budget, safety,
+      // recitation, etc.), surface it as a chunk failure so the client can retry.
+      if (!cleaned && finishReason && finishReason !== 'STOP') {
+        console.error(`Chunk ${i + 1}/${n}: Gemini stopped with finishReason=${finishReason}, no text returned`);
+        return { index: i, ok: false, error: `Gemini stopped early on chunk ${i + 1}/${n} (${finishReason})` };
+      }
+
       let transactions: any[];
       try {
-        transactions = JSON.parse(cleaned);
-      } catch {
+        transactions = JSON.parse(cleaned || '[]');
+      } catch (parseErr) {
         const match = cleaned.match(/\[[\s\S]*\]/);
-        transactions = match ? JSON.parse(match[0]) : [];
+        try {
+          transactions = match ? JSON.parse(match[0]) : [];
+        } catch {
+          console.error(`Chunk ${i + 1}/${n}: JSON.parse failed (finishReason=${finishReason}, len=${cleaned.length}, head=${cleaned.slice(0, 120)})`, parseErr);
+          return { index: i, ok: false, error: `Gemini returned malformed JSON on chunk ${i + 1}/${n}` };
+        }
       }
 
       transactions = transactions.map((t: any) => {
@@ -461,7 +493,14 @@ serve(async (req) => {
             results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: response deadline reached` };
             continue;
           }
-          results[idx] = await processChunk(items[idx], idx, items.length);
+          // One retry on transient Gemini failures (5xx, malformed JSON, early
+          // finishReason). Only retry once and only if we still have deadline budget.
+          let attempt = await processChunk(items[idx], idx, items.length);
+          if (!attempt.ok && Date.now() - startedAt < START_DEADLINE_MS) {
+            console.warn(`Chunk ${idx + 1}/${items.length} failed once (${attempt.error}); retrying`);
+            attempt = await processChunk(items[idx], idx, items.length);
+          }
+          results[idx] = attempt;
         }
       };
       const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());

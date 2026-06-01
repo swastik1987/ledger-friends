@@ -741,8 +741,12 @@ export default function UploadStatement() {
       const arrayBuffer = await file.arrayBuffer();
 
       const textChunks: string[] = [];
-      const PAGES_PER_CHUNK = 2;
-      const ROWS_PER_CHUNK = 40;
+      // Bigger client chunks = fewer round-trips for small/medium statements.
+      // The edge function chunks again internally (8000-char limit, concurrency 4),
+      // so we can safely bundle more pages per call. A typical 3-page statement
+      // now travels in a single call; a 12-page statement takes ~2.
+      const PAGES_PER_CHUNK = 6;
+      const ROWS_PER_CHUNK = 80;
 
       // ── Stage 1: Extract text (0% → 12%) ──
       if (ext === 'csv') {
@@ -858,27 +862,46 @@ export default function UploadStatement() {
           ? textChunks[ci]
           : `[STATEMENT HEADER FOR CONTEXT — repeated from page 1]\n${headerSnippet}\n[END HEADER]\n\n${textChunks[ci]}`;
 
+        // Retry-once wrapper: a single transient Gemini hiccup shouldn't abort the
+        // whole upload. We attempt twice; the second attempt is delayed slightly so
+        // a Gemini-side rate-limit window can lapse.
         let data: any;
         let error: any;
-        try {
-          const result = await supabase.functions.invoke('parse-statement', {
-            body: {
-              extractedText: chunk,
-              formatHint,
-              learnedMappings: learnedMappingsForPrompt.length > 0 ? learnedMappingsForPrompt : undefined,
-              allowedDebitCategories,
-              allowedCreditCategories,
-              statementMetadata,
-            },
-          });
-          data = result.data;
-          error = result.error;
-        } catch {
+        let lastErrDetail = '';
+        for (let attempt = 0; attempt < 2; attempt++) {
           if (signal.aborted) return;
-          throw new ParseServiceError();
+          try {
+            const result = await supabase.functions.invoke('parse-statement', {
+              body: {
+                extractedText: chunk,
+                formatHint,
+                learnedMappings: learnedMappingsForPrompt.length > 0 ? learnedMappingsForPrompt : undefined,
+                allowedDebitCategories,
+                allowedCreditCategories,
+                statementMetadata,
+              },
+            });
+            data = result.data;
+            error = result.error;
+          } catch (e: any) {
+            data = undefined;
+            error = e;
+          }
+          if (signal.aborted) return;
+          // Treat as success if we have any transactions OR the call returned without error.
+          // Warnings on a successful response are fine and surfaced separately.
+          if (!error && data) break;
+          lastErrDetail = error?.message || error?.context?.statusText || String(error || 'unknown');
+          if (attempt === 0) {
+            console.warn(`parse-statement chunk ${ci + 1}/${textChunks.length} failed (${lastErrDetail}); retrying once`);
+            await new Promise(r => setTimeout(r, 1500));
+          }
         }
         if (signal.aborted) return;
-        if (error) throw new ParseServiceError();
+        if (error) {
+          console.error(`parse-statement chunk ${ci + 1}/${textChunks.length} failed after retry: ${lastErrDetail}`);
+          throw new ParseServiceError(`Statement parsing failed (${lastErrDetail || 'no detail'}). Please try again.`);
+        }
         const txns = data?.transactions || [];
         allTransactions.push(...txns);
         if (Array.isArray(data?.warnings)) parseWarnings.push(...data.warnings);

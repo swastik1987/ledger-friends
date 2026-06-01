@@ -212,12 +212,13 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 
 ### parse-statement
 - **Purpose:** Extract and categorize transactions from bank/credit-card statement text.
-- **AI Model:** Gemini 2.5 Flash (structured output via `responseSchema`).
+- **AI Model:** Gemini 2.5 Flash (structured output via `responseSchema`). **All Gemini calls must set `thinkingConfig: { thinkingBudget: 0 }`** — Flash's default "thinking" tokens silently consume the output budget and cause structured-output workflows to return empty/truncated JSON on moderately-sized inputs. The transactions call also sets `maxOutputTokens: 32_768` (headroom for ~100+ structured rows).
+- **Per-chunk retry:** if a chunk fails (Gemini 5xx, malformed JSON, early `finishReason` like MAX_TOKENS/SAFETY), the server retries it once before giving up. The client also retries the whole edge-function call once on `error` before throwing `ParseServiceError`.
 - **Modes (selected via `body.mode`):**
   - `'metadata'` — cheap first pass: returns `{ statement_type, bank_name, base_currency, debit_credit_rule, column_semantics }`. Called once per upload from the client to prime the parsing pass.
   - `'emojis'` — suggests Phosphor icon names for new category names.
   - Default — parses transactions.
-- **Server-side chunking** (default mode): if `extractedText.length > 22_000` chars, the function splits on line boundaries into ~22k chunks with a 200-char overlap (snapped to line boundary). Chunks run with concurrency 2 via a bounded pool; per-call `AbortSignal.timeout(110_000)`.
+- **Server-side chunking** (default mode): if `extractedText.length > 8_000` chars, the function splits on line boundaries into ~8k chunks with a 200-char overlap (snapped to line boundary). Chunks run with concurrency 4 via a bounded pool; per-call `AbortSignal.timeout(40_000)` with an overall response deadline of 125s.
 - **Partial-success path:** a chunk's failure no longer aborts the whole call. The error is collected in a `warnings: string[]` array and the function returns whatever the surviving chunks produced. Only when *every* chunk fails does the function return 504. The client surfaces `warnings` via `toast.warning` so the user knows to review for missing rows.
 - **Server-side dedupe** on `(date, amount, is_debit, normalised raw_description)` removes overlap-induced duplicates.
 - **Field contract (per transaction):**
@@ -317,7 +318,7 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 1. **File Select:** Drop zone, accepts PDF/CSV/XLSX/XLS, max 10MB.
 2. **PDF Password:** Optional password entry (only for PDF files).
 3. **Processing:**
-   - Client-side text extraction (pdfjs / Papa / XLSX), chunked: 2 pages / 40 rows / chunk
+   - Client-side text extraction (pdfjs / Papa / XLSX), chunked: 6 pages / 80 rows / chunk (bumped up from 2/40 — most small/medium statements now travel in a single edge-function call; the server's own chunker handles further splitting)
    - Cheap `mode: 'metadata'` call to determine bank, statement_type, currency, debit-credit rule
    - Per-chunk `parse-statement` calls with header injection (statement header is repeated as context on every chunk after the first)
    - **Merchant + description resolution pipeline** (see "Merchant / description pipeline" below)
