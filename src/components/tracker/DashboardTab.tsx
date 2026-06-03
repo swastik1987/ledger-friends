@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import CategoryDot from '@/components/CategoryDot';
 import { formatAmountShort, formatAmount, getCurrency } from '@/lib/currencies';
-import { categoryFlows, categoryNetOutgo, netOutgoTotal, totalOut as sumOut, totalIn as sumIn, dailyNetOutgo } from '@/lib/netOutgo';
+import { categoryFlows, categoryNetOutgo, netOutgoTotal, totalOut as sumOut, totalIn as sumIn, dailyOutgo } from '@/lib/netOutgo';
 import CompareSheet from './CompareSheet';
 
 interface Props {
@@ -22,9 +22,11 @@ interface Props {
 }
 
 /**
- * Daily net-outgo line with a stock-chart style scrubber: hovering or dragging
+ * Daily-outgo line with a stock-chart style scrubber: hovering or dragging
  * across the chart drops a vertical guide + dot on the nearest day and surfaces
- * a tooltip with that day's date and net outgo amount.
+ * a tooltip with that day's date and outgo amount. Endpoints are inset by
+ * `padX` so the first/last day's indicator dot renders fully (the SVG clips its
+ * own viewport) and stays easy to hit.
  */
 function Sparkline({
   points, color, currencyCode, width = 320, height = 56,
@@ -43,27 +45,35 @@ function Sparkline({
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
-  const pad = 3;
-  const w = width - pad * 2;
-  const h = height - pad * 2;
+  const padX = 10;
+  const padY = 6;
+  const w = width - padX * 2;
+  const h = height - padY * 2;
   const pts = points.map((p, i) => {
-    const x = pad + (i / (points.length - 1)) * w;
-    const y = pad + (1 - (p.value - min) / range) * h;
+    const x = padX + (i / (points.length - 1)) * w;
+    const y = padY + (1 - (p.value - min) / range) * h;
     return [x, y] as [number, number];
   });
   const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
   const last = pts[pts.length - 1];
   const area = d + ` L ${pts[pts.length - 1][0]} ${height} L ${pts[0][0]} ${height} Z`;
 
-  // Map a pointer x (in CSS px) to the nearest data index via viewBox scaling.
+  // Map a pointer x (CSS px) → nearest data point by comparing against each
+  // point's plotted x. Scanning every point (rather than rounding a ratio)
+  // makes the inset first/last days reliably selectable across the full width.
   const handleMove = (clientX: number) => {
     const svg = svgRef.current;
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return;
     const vx = ((clientX - rect.left) / rect.width) * width;
-    const ratio = (vx - pad) / (w || 1);
-    const idx = Math.round(ratio * (points.length - 1));
-    setActive(Math.max(0, Math.min(points.length - 1, idx)));
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const dist = Math.abs(pts[i][0] - vx);
+      if (dist < bestDist) { bestDist = dist; best = i; }
+    }
+    setActive(best);
   };
 
   const sel = active != null ? pts[active] : null;
@@ -117,7 +127,7 @@ function Sparkline({
             {format(new Date(selPoint.date + 'T00:00:00'), 'EEE, d MMM')}
           </div>
           <div className="font-mono font-semibold text-[12px] tabular-nums">
-            {selPoint.value < 0 ? '+' : ''}{formatAmount(Math.abs(selPoint.value), currencyCode)}
+            {formatAmount(selPoint.value, currencyCode)}
           </div>
         </div>
       )}
@@ -176,8 +186,8 @@ export default function DashboardTab({
     return Math.round(netOutgo / Math.max(dayKeys.size, 1));
   }, [netOutgo, debits]);
 
-  // Sparkline data: daily net outgo (debits − credits) across the month.
-  const sparkPoints = useMemo(() => dailyNetOutgo(nonTransfer), [nonTransfer]);
+  // Sparkline data: daily outgo (total debits per day) across the month.
+  const sparkPoints = useMemo(() => dailyOutgo(nonTransfer), [nonTransfer]);
 
   // Per-category breakdown by Net Outgo. Only categories where outgo > inflow
   // appear; the value shown is the net outgo (outgo − inflow). MoM change
@@ -241,7 +251,7 @@ export default function DashboardTab({
 
         <div className="relative flex items-center justify-between gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-            Net outgo this month
+            Net expense amount
           </span>
           {/* Ember-tinted pill — primary affordance on the lighter card. */}
           <span

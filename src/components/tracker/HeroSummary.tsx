@@ -36,7 +36,7 @@ export default function HeroSummary({ monthLabel, netOutgo, totalOut, totalIn, c
       />
 
       <div className="relative flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider opacity-65">
-        <span>Net outgo this month</span>
+        <span>Net expense amount</span>
         <span className="inline-flex items-center gap-1">
           <Calendar size={11} weight="bold" /> {monthLabel}
         </span>

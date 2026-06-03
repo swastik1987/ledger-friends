@@ -56,7 +56,7 @@ export function totalIn(expenses: Expense[]): number {
 
 /**
  * Daily net outgo series (ascending by date): for each date, the day's debits
- * minus its credits. Used by the Dashboard sparkline + hover indicator.
+ * minus its credits.
  */
 export function dailyNetOutgo(expenses: Expense[]): { date: string; value: number }[] {
   const map = new Map<string, number>();
@@ -64,6 +64,22 @@ export function dailyNetOutgo(expenses: Expense[]): { date: string; value: numbe
     if (e.is_transfer) continue;
     const delta = e.is_debit ? e.amount : -e.amount;
     map.set(e.date, (map.get(e.date) || 0) + delta);
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, value }));
+}
+
+/**
+ * Daily outgo series (ascending by date): for each date with at least one
+ * debit, the day's total debit amount. Used by the Dashboard sparkline +
+ * hover indicator.
+ */
+export function dailyOutgo(expenses: Expense[]): { date: string; value: number }[] {
+  const map = new Map<string, number>();
+  for (const e of expenses) {
+    if (e.is_transfer || !e.is_debit) continue;
+    map.set(e.date, (map.get(e.date) || 0) + e.amount);
   }
   return Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
