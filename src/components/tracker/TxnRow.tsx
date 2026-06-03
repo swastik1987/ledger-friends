@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { format } from 'date-fns';
 import { ArrowDownLeft, Check, Trash } from '@phosphor-icons/react';
 import CategoryDot from '@/components/CategoryDot';
 import BankBadge from '@/components/BankBadge';
@@ -297,6 +298,8 @@ export default function TxnRow({
                 {formatAmountShort(expense.amount, trackerCurrency)}
               </div>
               <p className="text-[10.5px] text-ink-faint font-medium mt-0.5">
+                {format(new Date(expense.date + 'T00:00:00'), 'dd-MMM')}
+                {' · '}
                 {expense.created_by_profile?.full_name?.split(' ')[0] ||
                   expense.created_by_name?.split(' ')[0] ||
                   'Deleted'}
