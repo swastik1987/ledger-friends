@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useEffect } from 'react';
 import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
+import { fetchAllPages } from '@/lib/fetchAllPages';
 
 /**
  * Fetches the distinct months that have transactions for a tracker.
@@ -55,26 +56,31 @@ export function useExpenses(trackerId: string, month: string) {
   return useQuery({
     queryKey: ['expenses', trackerId, month],
     queryFn: async () => {
-      let query = supabase
-        .from('expenses')
-        .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
-        .eq('tracker_id', trackerId);
+      // 'all' (and even a single busy month) can exceed PostgREST's 1000-row
+      // cap, so page through with a stable order — the id tiebreaker keeps
+      // pages from overlapping or skipping rows at the boundaries.
+      const data = await fetchAllPages((from, to) => {
+        let query = supabase
+          .from('expenses')
+          .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
+          .eq('tracker_id', trackerId);
 
-      // If month is 'all', skip date filters — fetch everything for this tracker
-      if (month && month !== 'all') {
-        const [year, mon] = month.split('-').map(Number);
-        const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-        const lastDay = new Date(year, mon, 0).getDate();
-        const endDate = `${year}-${String(mon).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-        query = query.gte('date', startDate).lte('date', endDate);
-      }
+        if (month && month !== 'all') {
+          const [year, mon] = month.split('-').map(Number);
+          const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
+          const lastDay = new Date(year, mon, 0).getDate();
+          const endDate = `${year}-${String(mon).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+          query = query.gte('date', startDate).lte('date', endDate);
+        }
 
-      const { data, error } = await query
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false });
+        return query
+          .order('date', { ascending: false })
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to);
+      });
 
-      if (error) throw error;
-      return (data || []).map(e => ({
+      return data.map(e => ({
         ...e,
         amount: Number(e.amount),
         category: e.category as unknown as Category,

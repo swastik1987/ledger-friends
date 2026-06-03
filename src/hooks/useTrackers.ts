@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
 import { monthlyNetExpense, netExpenseSummedByMonth, DatedFlowExpense } from '@/lib/netOutgo';
+import { fetchAllPages } from '@/lib/fetchAllPages';
 import { toast } from 'sonner';
 
 /** Per-tracker derived figures for the Home page cards + summary hero. */
@@ -14,9 +15,15 @@ export interface TrackerHomeStat {
 }
 
 /**
- * One round trip (two parallel RLS-scoped queries) that powers the Home page:
- * the category-based net expense + monthly trend per tracker, and a small
- * member-name preview per tracker. Keyed by tracker id.
+ * Powers the Home page: the category-based net expense + monthly trend per
+ * tracker, and a small member-name preview per tracker. Keyed by tracker id.
+ *
+ * Expenses are fetched PER TRACKER in parallel, each fully paginated. A single
+ * cross-tracker query would hit PostgREST's default 1000-row cap once total
+ * transactions across all trackers exceed 1000, silently under-counting net
+ * expense. Per-tracker + pagination means every tracker gets its complete row
+ * set (same as the now-paginated useExpenses(id, 'all')), so the Home figure
+ * matches the tracker page exactly regardless of volume.
  */
 export function useTrackerHomeStats() {
   const { user } = useAuth();
@@ -26,30 +33,16 @@ export function useTrackerHomeStats() {
     queryFn: async (): Promise<Record<string, TrackerHomeStat>> => {
       if (!user) return {};
 
-      const [expRes, memRes] = await Promise.all([
-        supabase.from('expenses').select('tracker_id, category_id, amount, is_debit, is_transfer, date'),
-        supabase.from('tracker_members').select('tracker_id, profile:profiles(full_name)'),
-      ]);
-      if (expRes.error) throw expRes.error;
-      if (memRes.error) throw memRes.error;
-
-      // Bucket expenses by tracker.
-      const byTracker = new Map<string, DatedFlowExpense[]>();
-      for (const row of expRes.data || []) {
-        const e: DatedFlowExpense = {
-          category_id: row.category_id,
-          amount: Number(row.amount),
-          is_debit: row.is_debit,
-          is_transfer: row.is_transfer ?? false,
-          date: row.date,
-        };
-        const arr = byTracker.get(row.tracker_id);
-        if (arr) arr.push(e);
-        else byTracker.set(row.tracker_id, [e]);
-      }
+      // Member rows give us both the tracker id set and the name preview.
+      const { data: memRows, error: memErr } = await supabase
+        .from('tracker_members')
+        .select('tracker_id, profile:profiles(full_name)');
+      if (memErr) throw memErr;
 
       const namesByTracker = new Map<string, string[]>();
-      for (const m of memRes.data || []) {
+      const trackerIds = new Set<string>();
+      for (const m of memRows || []) {
+        trackerIds.add(m.tracker_id);
         const name = (m.profile as unknown as { full_name?: string } | null)?.full_name?.trim();
         if (!name) continue;
         const arr = namesByTracker.get(m.tracker_id);
@@ -57,22 +50,44 @@ export function useTrackerHomeStats() {
         else namesByTracker.set(m.tracker_id, [name]);
       }
 
+      const ids = [...trackerIds];
+      // One paginated expenses fetch per tracker, run in parallel. Pagination
+      // (id tiebreaker for a stable order) ensures trackers with >1000 rows
+      // aren't truncated — matching the now-paginated useExpenses(id, 'all').
+      const perTracker = await Promise.all(
+        ids.map(id =>
+          fetchAllPages<{ category_id: string; amount: number; is_debit: boolean; is_transfer: boolean | null; date: string }>(
+            (from, to) =>
+              supabase
+                .from('expenses')
+                .select('category_id, amount, is_debit, is_transfer, date')
+                .eq('tracker_id', id)
+                .order('id', { ascending: false })
+                .range(from, to),
+          ),
+        ),
+      );
+
       const out: Record<string, TrackerHomeStat> = {};
-      const trackerIds = new Set([...byTracker.keys(), ...namesByTracker.keys()]);
-      for (const id of trackerIds) {
-        const rows = byTracker.get(id) || [];
+      ids.forEach((id, idx) => {
+        const rows: DatedFlowExpense[] = perTracker[idx].map(row => ({
+          category_id: row.category_id,
+          amount: Number(row.amount),
+          is_debit: row.is_debit,
+          is_transfer: row.is_transfer ?? false,
+          date: row.date,
+        }));
         // Net expense is summed across months (each month's net expense added
         // up) — NOT all months lumped into one net-outgo calc, which would
         // wrongly cancel a category's outgo in one month against inflow in
         // another. This matches the per-month figure shown on the tracker page.
-        const trend = monthlyNetExpense(rows);
         out[id] = {
           netExpense: netExpenseSummedByMonth(rows),
           txnCount: rows.length,
-          trend,
+          trend: monthlyNetExpense(rows),
           memberNames: namesByTracker.get(id) || [],
         };
-      }
+      });
       return out;
     },
     enabled: !!user,
