@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import CategoryDot from '@/components/CategoryDot';
 import { formatAmountShort, formatAmount, getCurrency } from '@/lib/currencies';
-import { categoryFlows, categoryNetOutgo, netOutgoTotal, totalOut as sumOut, totalIn as sumIn, dailyOutgo } from '@/lib/netOutgo';
+import { categoryFlows, categoryNetOutgo, netExpenseSummedByMonth, totalOut as sumOut, totalIn as sumIn, dailyOutgo } from '@/lib/netOutgo';
 import CompareSheet from './CompareSheet';
 
 interface Props {
@@ -171,10 +171,10 @@ export default function DashboardTab({
   const debits = useMemo(() => nonTransfer.filter(e => e.is_debit), [nonTransfer]);
   const totalDebits = useMemo(() => sumOut(nonTransfer), [nonTransfer]);
   const totalCredits = useMemo(() => sumIn(nonTransfer), [nonTransfer]);
-  const netOutgo = useMemo(() => netOutgoTotal(nonTransfer), [nonTransfer]);
+  const netOutgo = useMemo(() => netExpenseSummedByMonth(nonTransfer), [nonTransfer]);
 
   const prevNonTransfer = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer), [prevExpenses]);
-  const prevNetOutgo = useMemo(() => netOutgoTotal(prevNonTransfer), [prevNonTransfer]);
+  const prevNetOutgo = useMemo(() => netExpenseSummedByMonth(prevNonTransfer), [prevNonTransfer]);
   const pctChange = prevNetOutgo > 0
     ? Math.round(((netOutgo - prevNetOutgo) / prevNetOutgo) * 100)
     : null;

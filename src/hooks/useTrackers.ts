@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
-import { monthlyNetExpense, DatedFlowExpense } from '@/lib/netOutgo';
+import { monthlyNetExpense, netExpenseSummedByMonth, DatedFlowExpense } from '@/lib/netOutgo';
 import { toast } from 'sonner';
 
 /** Per-tracker derived figures for the Home page cards + summary hero. */
@@ -67,7 +67,7 @@ export function useTrackerHomeStats() {
         // another. This matches the per-month figure shown on the tracker page.
         const trend = monthlyNetExpense(rows);
         out[id] = {
-          netExpense: trend.reduce((sum, p) => sum + p.value, 0),
+          netExpense: netExpenseSummedByMonth(rows),
           txnCount: rows.length,
           trend,
           memberNames: namesByTracker.get(id) || [],

@@ -111,3 +111,15 @@ export function monthlyNetExpense(expenses: DatedFlowExpense[]): { date: string;
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, rows]) => ({ date, value: netOutgoTotal(rows) }));
 }
+
+/**
+ * Net expense summed across calendar months: each month's net expense computed
+ * independently, then added. This is the canonical "net expense" figure used
+ * everywhere a date range can span multiple months (Home cards + the tracker
+ * hero's "All Months" view). For a single month it equals netOutgoTotal — the
+ * two only diverge when a category has outgo in one month and inflow in another
+ * (which a single lumped netOutgoTotal would wrongly cancel out).
+ */
+export function netExpenseSummedByMonth(expenses: DatedFlowExpense[]): number {
+  return monthlyNetExpense(expenses).reduce((sum, p) => sum + p.value, 0);
+}

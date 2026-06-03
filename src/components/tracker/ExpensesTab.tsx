@@ -23,7 +23,7 @@ import FilterSheet, { UNSPECIFIED } from './FilterSheet';
 import { useMonthSwipe, adjacentMonths } from '@/hooks/useMonthSwipe';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
-import { totalOut, totalIn, netOutgoTotal } from '@/lib/netOutgo';
+import { totalOut, totalIn, netExpenseSummedByMonth } from '@/lib/netOutgo';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -199,7 +199,7 @@ export default function ExpensesTab({
   // modes, categories) — all three derive from filteredExpenses.
   const heroTotalOut = useMemo(() => totalOut(filteredExpenses), [filteredExpenses]);
   const heroTotalIn = useMemo(() => totalIn(filteredExpenses), [filteredExpenses]);
-  const heroNetOutgo = useMemo(() => netOutgoTotal(filteredExpenses), [filteredExpenses]);
+  const heroNetOutgo = useMemo(() => netExpenseSummedByMonth(filteredExpenses), [filteredExpenses]);
 
   const isCategorySort = sortBy === 'category-asc' || sortBy === 'category-desc';
   const isAmountSort = sortBy === 'amount-asc' || sortBy === 'amount-desc';
