@@ -23,6 +23,7 @@ import FilterSheet, { UNSPECIFIED } from './FilterSheet';
 import { useMonthSwipe, adjacentMonths } from '@/hooks/useMonthSwipe';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { formatAmountShort, getCurrency } from '@/lib/currencies';
+import { totalOut, totalIn, netOutgoTotal } from '@/lib/netOutgo';
 
 const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
@@ -166,21 +167,6 @@ export default function ExpensesTab({
     setIsSelecting(false);
   }, [month, typeFilter]);
 
-  // Hero shows unfiltered (by user/cat) but type-filtered totals from the month
-  // Hero totals are filter-aware: 'credit' filter zeroes spend, 'debit' filter zeroes earn.
-  const monthSpend = useMemo(
-    () => typeFilter === 'credit'
-      ? 0
-      : expenses.filter(e => e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0),
-    [expenses, typeFilter]
-  );
-  const monthEarn = useMemo(
-    () => typeFilter === 'debit'
-      ? 0
-      : expenses.filter(e => !e.is_debit && !e.is_transfer).reduce((s, e) => s + e.amount, 0),
-    [expenses, typeFilter]
-  );
-
   const filteredExpenses = useMemo(() => {
     let result = expenses;
     if (typeFilter === 'debit') result = result.filter(e => e.is_debit);
@@ -208,6 +194,12 @@ export default function ExpensesTab({
     }
     return result;
   }, [expenses, typeFilter, filterUsers, filterBanks, filterPaymentMethods, filterCategories]);
+
+  // Hero totals reflect every active filter (type, people, banks, payment
+  // modes, categories) — all three derive from filteredExpenses.
+  const heroTotalOut = useMemo(() => totalOut(filteredExpenses), [filteredExpenses]);
+  const heroTotalIn = useMemo(() => totalIn(filteredExpenses), [filteredExpenses]);
+  const heroNetOutgo = useMemo(() => netOutgoTotal(filteredExpenses), [filteredExpenses]);
 
   const isCategorySort = sortBy === 'category-asc' || sortBy === 'category-desc';
   const isAmountSort = sortBy === 'amount-asc' || sortBy === 'amount-desc';
@@ -345,8 +337,9 @@ export default function ExpensesTab({
         <>
           <HeroSummary
             monthLabel={monthLabel}
-            spend={monthSpend}
-            earn={monthEarn}
+            netOutgo={heroNetOutgo}
+            totalOut={heroTotalOut}
+            totalIn={heroTotalIn}
             currencyCode={trackerCurrency}
             onPrevMonth={prevMonth ? () => onMonthChange(prevMonth) : undefined}
             onNextMonth={nextMonth ? () => onMonthChange(nextMonth) : undefined}

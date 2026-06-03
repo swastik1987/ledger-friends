@@ -4,8 +4,12 @@ import MonthNavChevrons from './MonthNavChevrons';
 
 interface Props {
   monthLabel: string;
-  spend: number;
-  earn: number;
+  /** Category-based net outgo — headline figure. Always ≤ totalOut. */
+  netOutgo: number;
+  /** Total debits in view. */
+  totalOut: number;
+  /** Total credits in view. */
+  totalIn: number;
   currencyCode: string;
   /** Tap to move to the older month. Omit when current is the oldest. */
   onPrevMonth?: () => void;
@@ -13,11 +17,8 @@ interface Props {
   onNextMonth?: () => void;
 }
 
-export default function HeroSummary({ monthLabel, spend, earn, currencyCode, onPrevMonth, onNextMonth }: Props) {
+export default function HeroSummary({ monthLabel, netOutgo, totalOut, totalIn, currencyCode, onPrevMonth, onNextMonth }: Props) {
   const symbol = getCurrency(currencyCode).symbol;
-  const savings = earn - spend;
-  const savingsPositive = savings >= 0;
-  const savingsAbs = Math.abs(savings);
 
   return (
     <div className="mx-4 mb-3 rounded-3xl hero-card p-5">
@@ -45,23 +46,20 @@ export default function HeroSummary({ monthLabel, spend, earn, currencyCode, onP
         className="relative font-display tabular-nums mt-1.5"
         style={{ fontSize: 44, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.05 }}
       >
-        {symbol}{Math.round(spend).toLocaleString('en-IN')}
+        {symbol}{Math.round(netOutgo).toLocaleString('en-IN')}
       </div>
 
       <div className="relative mt-3.5 grid grid-cols-2 gap-2.5">
         <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-          <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Total In</span>
-          <span className="font-mono font-semibold text-[13px]">
-            {formatAmountShort(earn, currencyCode)}
+          <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Total Out</span>
+          <span className="font-mono font-semibold text-[13px]" style={{ color: '#F2B6A8' }}>
+            {formatAmountShort(totalOut, currencyCode)}
           </span>
         </div>
         <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5" style={{ background: 'rgba(255,255,255,0.08)' }}>
-          <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Net Savings</span>
-          <span
-            className="font-mono font-semibold text-[13px]"
-            style={{ color: savingsPositive ? '#9DDFB3' : '#F2B6A8' }}
-          >
-            {savingsPositive ? '+' : '−'}{formatAmountShort(savingsAbs, currencyCode)}
+          <span className="text-[10px] font-medium opacity-70 tracking-wide uppercase">Total In</span>
+          <span className="font-mono font-semibold text-[13px]" style={{ color: '#9DDFB3' }}>
+            {formatAmountShort(totalIn, currencyCode)}
           </span>
         </div>
       </div>

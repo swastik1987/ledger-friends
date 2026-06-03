@@ -7,7 +7,8 @@ import MonthNavChevrons from './MonthNavChevrons';
 import { useNavigate } from 'react-router-dom';
 import { useExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import CategoryDot from '@/components/CategoryDot';
-import { formatAmountShort, getCurrency } from '@/lib/currencies';
+import { formatAmountShort, formatAmount, getCurrency } from '@/lib/currencies';
+import { categoryFlows, categoryNetOutgo, netOutgoTotal, totalOut as sumOut, totalIn as sumIn, dailyNetOutgo } from '@/lib/netOutgo';
 import CompareSheet from './CompareSheet';
 
 interface Props {
@@ -20,29 +21,107 @@ interface Props {
   isLoading: boolean;
 }
 
-function Sparkline({ values, color, width = 320, height = 40 }: { values: number[]; color: string; width?: number; height?: number }) {
-  if (values.length < 2) return null;
+/**
+ * Daily net-outgo line with a stock-chart style scrubber: hovering or dragging
+ * across the chart drops a vertical guide + dot on the nearest day and surfaces
+ * a tooltip with that day's date and net outgo amount.
+ */
+function Sparkline({
+  points, color, currencyCode, width = 320, height = 56,
+}: {
+  points: { date: string; value: number }[];
+  color: string;
+  currencyCode: string;
+  width?: number;
+  height?: number;
+}) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [active, setActive] = useState<number | null>(null);
+
+  if (points.length < 2) return null;
+  const values = points.map(p => p.value);
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
   const pad = 3;
   const w = width - pad * 2;
   const h = height - pad * 2;
-  const pts = values.map((v, i) => {
-    const x = pad + (i / (values.length - 1)) * w;
-    const y = pad + (1 - (v - min) / range) * h;
-    return [x, y];
+  const pts = points.map((p, i) => {
+    const x = pad + (i / (points.length - 1)) * w;
+    const y = pad + (1 - (p.value - min) / range) * h;
+    return [x, y] as [number, number];
   });
   const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
   const last = pts[pts.length - 1];
   const area = d + ` L ${pts[pts.length - 1][0]} ${height} L ${pts[0][0]} ${height} Z`;
+
+  // Map a pointer x (in CSS px) to the nearest data index via viewBox scaling.
+  const handleMove = (clientX: number) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const vx = ((clientX - rect.left) / rect.width) * width;
+    const ratio = (vx - pad) / (w || 1);
+    const idx = Math.round(ratio * (points.length - 1));
+    setActive(Math.max(0, Math.min(points.length - 1, idx)));
+  };
+
+  const sel = active != null ? pts[active] : null;
+  const selPoint = active != null ? points[active] : null;
+  // Keep the tooltip inside the card — flip anchoring near the right edge.
+  const tipLeftPct = sel ? (sel[0] / width) * 100 : 0;
+  const tipFlip = tipLeftPct > 60;
+
   return (
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-      <path d={area} fill={color} opacity={0.18} />
-      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={last[0]} cy={last[1]} r="3.5" fill={color} />
-      <circle cx={last[0]} cy={last[1]} r="6" fill={color} opacity={0.25} />
-    </svg>
+    <div className="relative" style={{ touchAction: 'pan-y' }}>
+      <svg
+        ref={svgRef}
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        style={{ display: 'block' }}
+        onMouseMove={e => handleMove(e.clientX)}
+        onMouseLeave={() => setActive(null)}
+        onTouchStart={e => handleMove(e.touches[0].clientX)}
+        onTouchMove={e => handleMove(e.touches[0].clientX)}
+        onTouchEnd={() => setActive(null)}
+      >
+        <path d={area} fill={color} opacity={0.18} />
+        <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        {sel ? (
+          <>
+            <line x1={sel[0]} y1={0} x2={sel[0]} y2={height} stroke={color} strokeWidth="1" opacity={0.4} />
+            <circle cx={sel[0]} cy={sel[1]} r="4" fill={color} />
+            <circle cx={sel[0]} cy={sel[1]} r="7" fill={color} opacity={0.22} />
+          </>
+        ) : (
+          <>
+            <circle cx={last[0]} cy={last[1]} r="3.5" fill={color} />
+            <circle cx={last[0]} cy={last[1]} r="6" fill={color} opacity={0.25} />
+          </>
+        )}
+      </svg>
+      {selPoint && (
+        <div
+          className="absolute top-0 pointer-events-none z-10 rounded-lg px-2 py-1 shadow-md whitespace-nowrap"
+          style={{
+            left: `${tipLeftPct}%`,
+            transform: `translate(${tipFlip ? '-100%' : '0'}, -100%)`,
+            marginLeft: tipFlip ? -6 : 6,
+            background: 'hsl(var(--ink))',
+            color: 'hsl(var(--background))',
+          }}
+        >
+          <div className="text-[10px] font-semibold opacity-75 tabular-nums">
+            {format(new Date(selPoint.date + 'T00:00:00'), 'EEE, d MMM')}
+          </div>
+          <div className="font-mono font-semibold text-[12px] tabular-nums">
+            {selPoint.value < 0 ? '+' : ''}{formatAmount(Math.abs(selPoint.value), currencyCode)}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -75,64 +154,57 @@ export default function DashboardTab({
 
   const monthLabel = months.find(m => m.value === month)?.label || month;
 
-  // Non-transfer expenses split into debits and credits. Dashboard is
-  // outgo-centric — debits drive the headline. Credits surface as the
-  // "Total In" + "Net Savings" sub-chips, the same shape as the
-  // Transactions tab's HeroSummary.
+  // Non-transfer expenses. Dashboard is outgo-centric: the headline is the
+  // category-based Net Outgo (per-category outgo − inflow, only where outgo
+  // wins). Total Out (all debits) + Total In (all credits) ride as sub-chips.
   const nonTransfer = useMemo(() => expenses.filter(e => !e.is_transfer), [expenses]);
   const debits = useMemo(() => nonTransfer.filter(e => e.is_debit), [nonTransfer]);
-  const totalDebits = debits.reduce((s, e) => s + e.amount, 0);
-  const totalCredits = useMemo(
-    () => nonTransfer.filter(e => !e.is_debit).reduce((s, e) => s + e.amount, 0),
-    [nonTransfer],
-  );
+  const totalDebits = useMemo(() => sumOut(nonTransfer), [nonTransfer]);
+  const totalCredits = useMemo(() => sumIn(nonTransfer), [nonTransfer]);
+  const netOutgo = useMemo(() => netOutgoTotal(nonTransfer), [nonTransfer]);
 
   const prevNonTransfer = useMemo(() => (prevExpenses || []).filter(e => !e.is_transfer), [prevExpenses]);
-  const prevTotalDebits = prevNonTransfer.filter(e => e.is_debit).reduce((s, e) => s + e.amount, 0);
-  const pctChange = prevTotalDebits > 0
-    ? Math.round(((totalDebits - prevTotalDebits) / prevTotalDebits) * 100)
+  const prevNetOutgo = useMemo(() => netOutgoTotal(prevNonTransfer), [prevNonTransfer]);
+  const pctChange = prevNetOutgo > 0
+    ? Math.round(((netOutgo - prevNetOutgo) / prevNetOutgo) * 100)
     : null;
 
-  const savings = totalCredits - totalDebits;
-  const savingsPositive = savings >= 0;
-
-  // Average daily debit (over days that had at least one debit).
+  // Average daily net outgo (over days that had at least one debit).
   const avgPerDay = useMemo(() => {
-    if (totalDebits === 0) return 0;
+    if (netOutgo === 0) return 0;
     const dayKeys = new Set(debits.map(e => e.date));
-    return Math.round(totalDebits / Math.max(dayKeys.size, 1));
-  }, [totalDebits, debits]);
+    return Math.round(netOutgo / Math.max(dayKeys.size, 1));
+  }, [netOutgo, debits]);
 
-  // Sparkline values: daily debit totals across the month (ascending date).
-  const sparkValues = useMemo(() => {
-    const map = new Map<string, number>();
-    debits.forEach(e => map.set(e.date, (map.get(e.date) || 0) + e.amount));
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
-  }, [debits]);
+  // Sparkline data: daily net outgo (debits − credits) across the month.
+  const sparkPoints = useMemo(() => dailyNetOutgo(nonTransfer), [nonTransfer]);
 
-  // Per-category breakdown of debits (always debit — the Out/In toggle is gone).
+  // Per-category breakdown by Net Outgo. Only categories where outgo > inflow
+  // appear; the value shown is the net outgo (outgo − inflow). MoM change
+  // compares against the previous month's net outgo for the same category.
   const categoryBreakdown = useMemo(() => {
-    const agg = new Map<string, { value: number; count: number; cat: Category }>();
-    debits.forEach(e => {
-      const cat = categories.find(c => c.id === e.category_id);
-      if (!cat) return;
-      const entry = agg.get(cat.id) || { value: 0, count: 0, cat };
-      entry.value += e.amount;
-      entry.count += 1;
-      agg.set(cat.id, entry);
-    });
-    const prevAgg = new Map<string, number>();
-    prevNonTransfer.filter(e => e.is_debit).forEach(e => {
-      prevAgg.set(e.category_id, (prevAgg.get(e.category_id) || 0) + e.amount);
-    });
-    return Array.from(agg.values())
+    const flows = categoryFlows(nonTransfer);
+    const counts = new Map<string, number>();
+    debits.forEach(e => counts.set(e.category_id, (counts.get(e.category_id) || 0) + 1));
+    const prevFlows = categoryFlows(prevNonTransfer);
+    return Array.from(flows.entries())
+      .map(([catId, flow]) => {
+        const cat = categories.find(c => c.id === catId);
+        const value = categoryNetOutgo(flow);
+        return { catId, cat, value, count: counts.get(catId) || 0 };
+      })
+      .filter((item): item is { catId: string; cat: Category; value: number; count: number } =>
+        item.cat != null && item.value > 0)
       .map(item => {
-        const prev = prevAgg.get(item.cat.id) || 0;
-        const change = prev > 0 ? Math.round(((item.value - prev) / prev) * 100) : (item.value > 0 ? 100 : 0);
+        const prev = prevFlows.get(item.catId);
+        const prevValue = prev ? categoryNetOutgo(prev) : 0;
+        const change = prevValue > 0
+          ? Math.round(((item.value - prevValue) / prevValue) * 100)
+          : (item.value > 0 ? 100 : 0);
         return { ...item, change };
       })
       .sort((a, b) => b.value - a.value);
-  }, [debits, prevNonTransfer, categories]);
+  }, [nonTransfer, debits, prevNonTransfer, categories]);
 
   const totalBreakdown = categoryBreakdown.reduce((s, c) => s + c.value, 0);
   const biggest = useMemo(() => [...debits].sort((a, b) => b.amount - a.amount).slice(0, 5), [debits]);
@@ -156,7 +228,7 @@ export default function DashboardTab({
 
   return (
     <div ref={rootRef} className="pb-4">
-      {/* Hero: Net Outgo + Total In + Net Savings on the cream card surface
+      {/* Hero: Net Outgo + Total Out + Total In on the cream card surface
           so it visually rhymes with "Where it went" + "Biggest" below.
           The Transactions tab keeps the dark ink HeroSummary — that's the
           high-impact moment; here we want a calm overview. */}
@@ -188,7 +260,7 @@ export default function DashboardTab({
             className="font-display tabular-nums text-ink"
             style={{ fontSize: 44, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.05 }}
           >
-            {symbol}{Math.round(totalDebits).toLocaleString('en-IN')}
+            {symbol}{Math.round(netOutgo).toLocaleString('en-IN')}
           </div>
           {pctChange !== null && (
             <span
@@ -215,26 +287,23 @@ export default function DashboardTab({
           Avg {symbol}{avgPerDay.toLocaleString('en-IN')} / day · {debits.length} transaction{debits.length !== 1 ? 's' : ''}
         </div>
 
-        {sparkValues.length >= 2 && (
+        {sparkPoints.length >= 2 && (
           <div className="relative mt-3 -mx-1">
-            <Sparkline values={sparkValues} color="hsl(var(--ember))" width={320} height={40} />
+            <Sparkline points={sparkPoints} color="hsl(var(--ember))" currencyCode={trackerCurrency} width={320} height={56} />
           </div>
         )}
 
         <div className="relative mt-3.5 grid grid-cols-2 gap-2.5">
           <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5 bg-surface-alt border border-line-soft">
-            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Total In</span>
-            <span className="font-mono font-semibold text-[13px] text-ink">
-              {formatAmountShort(totalCredits, trackerCurrency)}
+            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Total Out</span>
+            <span className="font-mono font-semibold text-[13px]" style={{ color: 'hsl(var(--spend))' }}>
+              {formatAmountShort(totalDebits, trackerCurrency)}
             </span>
           </div>
           <div className="rounded-xl px-3 py-2 flex flex-col gap-0.5 bg-surface-alt border border-line-soft">
-            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Net Savings</span>
-            <span
-              className="font-mono font-semibold text-[13px]"
-              style={{ color: savingsPositive ? 'hsl(var(--earn))' : 'hsl(var(--spend))' }}
-            >
-              {savingsPositive ? '+' : '−'}{formatAmountShort(Math.abs(savings), trackerCurrency)}
+            <span className="text-[10px] font-semibold text-ink-faint tracking-wider uppercase">Total In</span>
+            <span className="font-mono font-semibold text-[13px]" style={{ color: 'hsl(var(--earn))' }}>
+              {formatAmountShort(totalCredits, trackerCurrency)}
             </span>
           </div>
         </div>
