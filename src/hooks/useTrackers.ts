@@ -2,7 +2,78 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
+import { netOutgoTotal, monthlyNetExpense, DatedFlowExpense } from '@/lib/netOutgo';
 import { toast } from 'sonner';
+
+/** Per-tracker derived figures for the Home page cards + summary hero. */
+export interface TrackerHomeStat {
+  netExpense: number;
+  txnCount: number;
+  trend: { date: string; value: number }[];
+  memberNames: string[];
+}
+
+/**
+ * One round trip (two parallel RLS-scoped queries) that powers the Home page:
+ * the category-based net expense + monthly trend per tracker, and a small
+ * member-name preview per tracker. Keyed by tracker id.
+ */
+export function useTrackerHomeStats() {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ['tracker-home-stats', user?.id],
+    queryFn: async (): Promise<Record<string, TrackerHomeStat>> => {
+      if (!user) return {};
+
+      const [expRes, memRes] = await Promise.all([
+        supabase.from('expenses').select('tracker_id, category_id, amount, is_debit, is_transfer, date'),
+        supabase.from('tracker_members').select('tracker_id, profile:profiles(full_name)'),
+      ]);
+      if (expRes.error) throw expRes.error;
+      if (memRes.error) throw memRes.error;
+
+      // Bucket expenses by tracker.
+      const byTracker = new Map<string, DatedFlowExpense[]>();
+      for (const row of expRes.data || []) {
+        const e: DatedFlowExpense = {
+          category_id: row.category_id,
+          amount: Number(row.amount),
+          is_debit: row.is_debit,
+          is_transfer: row.is_transfer ?? false,
+          date: row.date,
+        };
+        const arr = byTracker.get(row.tracker_id);
+        if (arr) arr.push(e);
+        else byTracker.set(row.tracker_id, [e]);
+      }
+
+      const namesByTracker = new Map<string, string[]>();
+      for (const m of memRes.data || []) {
+        const name = (m.profile as unknown as { full_name?: string } | null)?.full_name?.trim();
+        if (!name) continue;
+        const arr = namesByTracker.get(m.tracker_id);
+        if (arr) arr.push(name);
+        else namesByTracker.set(m.tracker_id, [name]);
+      }
+
+      const out: Record<string, TrackerHomeStat> = {};
+      const trackerIds = new Set([...byTracker.keys(), ...namesByTracker.keys()]);
+      for (const id of trackerIds) {
+        const rows = byTracker.get(id) || [];
+        out[id] = {
+          netExpense: netOutgoTotal(rows),
+          txnCount: rows.length,
+          trend: monthlyNetExpense(rows),
+          memberNames: namesByTracker.get(id) || [],
+        };
+      }
+      return out;
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+}
 
 export function useTrackers() {
   const { user } = useAuth();
