@@ -195,6 +195,7 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 - **`tracker_members` INSERT** is admin-only. The creator's admin row is auto-added by the `add_tracker_admin_member` `SECURITY DEFINER` trigger on `trackers` INSERT — `useCreateTracker` no longer inserts a member row.
 - EXECUTE on internal `SECURITY DEFINER` helpers (`is_tracker_member`, `is_tracker_admin`, `get_tracker_stats`, `handle_new_user`, `update_updated_at_column`, `add_tracker_admin_member`) is revoked from `anon`/`public`; only `authenticated` retains the three callable from app code.
 - Expense edit/delete: creator OR tracker admin
+- **UPDATE policies carry explicit `WITH CHECK` (hardened Jun 3 2026).** `expenses` UPDATE: `USING` = creator-or-admin (which existing rows you may touch); `WITH CHECK` = `is_tracker_member(uid, tracker_id) AND (creator OR admin)` re-verified against the **new** row. `categories` UPDATE: `WITH CHECK` re-asserts `tracker_id IS NOT NULL AND is_tracker_member(uid, tracker_id)`. Without an explicit `WITH CHECK`, Postgres reuses the `USING` clause for the new row — and since `created_by_id = uid` stays true when you only change `tracker_id`, a creator could move a row into a tracker they don't belong to. The new-row membership check blocks that. Legitimate bulk-Move (`useBulkMoveExpenses`) still passes — its targets come from the user's own `useTrackers` list.
 - Category learning is globally shared
 
 ### Realtime
@@ -582,6 +583,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 19. **`raw_description` column added to `expenses`** (`20260522_add_raw_description.sql`)
 20. **`rejected_as_transfer` column added to `expenses`** + partial index (`20260523_add_rejected_as_transfer.sql`) — fixes the "Not Transfer" bug where pair-matched rows re-surfaced on every refetch.
 21. **Security hardening** (`20260526085546_...sql`) — `profiles` SELECT narrowed to self + shared-tracker members; `tracker_members` self-insert removed in favour of an `add_tracker_admin_member` `SECURITY DEFINER` trigger; EXECUTE revoked from `anon`/`public` on the internal helpers (only `authenticated` keeps `is_tracker_member`, `is_tracker_admin`, `get_tracker_stats`).
+22. **Hardened tracker UPDATE policies** (`20260603092233_...sql`, by Lovable) — recreated the `expenses` "Creator or admin can update" and `categories` "Members can update custom categories" UPDATE policies with explicit `WITH CHECK` clauses that re-verify tracker membership on the **new** row. Closes a cross-tracker move: previously the absent `WITH CHECK` defaulted to the `USING` clause, so a creator (whose `created_by_id = uid` survives a `tracker_id` change) could move a row into a tracker they aren't a member of. See the RLS Policies note above.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 
