@@ -25,20 +25,26 @@ export default function HeroSummary({ monthLabel, netOutgo, totalOut, totalIn, c
       {/* Month-nav chevron affordances — subtle hints for the swipe gesture. */}
       <MonthNavChevrons onPrev={onPrevMonth} onNext={onNextMonth} tone="dark" />
 
-      {/* Decorative dots */}
+      {/* Decorative dots — tucked into the top-right corner so they no longer
+          sit under the month label. */}
       <div
         className="absolute pointer-events-none"
-        style={{ right: -40, top: -40, width: 140, height: 140, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.18 }}
+        style={{ right: -48, top: -48, width: 140, height: 140, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.16 }}
       />
       <div
         className="absolute pointer-events-none"
-        style={{ right: 16, top: 16, width: 64, height: 64, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.40 }}
+        style={{ right: -16, top: -16, width: 56, height: 56, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.32 }}
       />
 
-      <div className="relative flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider opacity-65">
-        <span>Net expense amount</span>
-        <span className="inline-flex items-center gap-1">
-          <Calendar size={11} weight="bold" /> {monthLabel}
+      <div className="relative z-10 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider opacity-65">Net expense amount</span>
+        {/* Month gets its own high-contrast pill (full opacity, own background)
+            so it stays legible over the decorative ember dots. */}
+        <span
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+          style={{ background: 'rgba(255,255,255,0.16)', color: '#fff' }}
+        >
+          <Calendar size={12} weight="bold" /> {monthLabel}
         </span>
       </div>
 
