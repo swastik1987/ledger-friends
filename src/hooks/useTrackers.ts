@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
-import { netOutgoTotal, monthlyNetExpense, DatedFlowExpense } from '@/lib/netOutgo';
+import { monthlyNetExpense, DatedFlowExpense } from '@/lib/netOutgo';
 import { toast } from 'sonner';
 
 /** Per-tracker derived figures for the Home page cards + summary hero. */
@@ -61,10 +61,15 @@ export function useTrackerHomeStats() {
       const trackerIds = new Set([...byTracker.keys(), ...namesByTracker.keys()]);
       for (const id of trackerIds) {
         const rows = byTracker.get(id) || [];
+        // Net expense is summed across months (each month's net expense added
+        // up) — NOT all months lumped into one net-outgo calc, which would
+        // wrongly cancel a category's outgo in one month against inflow in
+        // another. This matches the per-month figure shown on the tracker page.
+        const trend = monthlyNetExpense(rows);
         out[id] = {
-          netExpense: netOutgoTotal(rows),
+          netExpense: trend.reduce((sum, p) => sum + p.value, 0),
           txnCount: rows.length,
-          trend: monthlyNetExpense(rows),
+          trend,
           memberNames: namesByTracker.get(id) || [],
         };
       }
