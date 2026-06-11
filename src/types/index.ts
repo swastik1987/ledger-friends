@@ -8,6 +8,9 @@ export interface Profile {
   full_name: string;
   avatar_url?: string;
   created_at: string;
+  /** Home page bento pins (max 3, first = hero tile). Absent until the
+   *  20260611130000 migration is applied. */
+  pinned_tracker_ids?: string[];
 }
 
 export interface Tracker {

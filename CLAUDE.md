@@ -284,9 +284,12 @@ interface DraftExpense {
 ### Authentication
 Unchanged from baseline: two-tab UI, `supabase.auth.signInWithPassword()` / `supabase.auth.signUp()`, profile auto-created via trigger, state via `AuthContext`.
 
-### Home Page
+### Home Page (bento layout, Jun 2026)
 - Greeting based on time of day + first name
-- Tracker cards (name, monthly spend, member count, date range)
+- **Bento tiles**: up to 3 pinned trackers (`usePinnedTrackers`, pin order matters). 1 pin = full-width hero tile (tinted per-tracker color, net expense, sparkline, member/since meta); 2–3 pins = hero (first pin) at 1.5fr + compact amount-only sidekick tiles stacked right. 0 pins = dashed hint card.
+- **Tracker list**: ALL trackers (pinned included), sorted by most recent transaction (`date_range.max` desc from `get_tracker_stats`), each row showing net expense · member count, a last-activity label (Today/Yesterday/EEE/d MMM/MMM 'yy) and a PushPin toggle (ember fill = pinned; max 3 enforced with a toast).
+- Pins persist in `profiles.pinned_tracker_ids uuid[]` (migration #24) and mirror to localStorage (`expensesync-pinned-trackers`) so the feature works before the migration is applied (PGRST204 ignored on write).
+- The old "Net expense · all trackers" summary hero was removed in favour of the bento.
 - `FloatingAdd` ember FAB (bottom-right, above BottomNav) opens the Create Tracker sheet
 - BottomNav (`Home / Trackers / You`) at bottom — Trackers deep-links to `activeTrackerId` when set
 
@@ -590,6 +593,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 22. **Hardened tracker UPDATE policies** (`20260603092233_...sql`, by Lovable) — recreated the `expenses` "Creator or admin can update" and `categories` "Members can update custom categories" UPDATE policies with explicit `WITH CHECK` clauses that re-verify tracker membership on the **new** row. Closes a cross-tracker move: previously the absent `WITH CHECK` defaulted to the `USING` clause, so a creator (whose `created_by_id = uid` survives a `tracker_id` change) could move a row into a tracker they aren't a member of. See the RLS Policies note above.
 
 23. **`get_tracker_home_stats` RPC** (`20260611100000_add_get_tracker_home_stats.sql`) — server-side Home page aggregation; see RPC Functions. ⚠️ Not yet applied to the linked project (MCP is read-only, CLI not logged in) — apply with `supabase db push` or paste into the dashboard SQL editor; the client falls back gracefully until then.
+24. **`pinned_tracker_ids` on profiles** (`20260611130000_add_pinned_tracker_ids.sql`) — uuid[] for the Home bento pins, covered by the existing self-update policy. ⚠️ Also pending application; `usePinnedTrackers` keeps pins in localStorage until the column exists.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

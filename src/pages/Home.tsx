@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTrackers, useTrackerHomeStats, useCreateTracker } from '@/hooks/useTrackers';
 import { useApp } from '@/contexts/AppContext';
-import { format, parseISO } from 'date-fns';
-import { CaretRight, FolderOpen, CircleNotch, UserPlus, X } from '@phosphor-icons/react';
+import { format, parseISO, differenceInCalendarDays } from 'date-fns';
+import { FolderOpen, CircleNotch, UserPlus, X, PushPin } from '@phosphor-icons/react';
+import { usePinnedTrackers } from '@/hooks/usePinnedTrackers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,6 +34,18 @@ function trackerColor(seed: string): string {
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   return (((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase()) || '?';
+}
+
+/** Human label for a tracker's most recent transaction date. */
+function lastActivityLabel(dateStr?: string): string | null {
+  if (!dateStr) return null;
+  const d = parseISO(dateStr);
+  const days = differenceInCalendarDays(new Date(), d);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return format(d, 'EEE');
+  if (d.getFullYear() === new Date().getFullYear()) return format(d, 'd MMM');
+  return format(d, "MMM ''yy");
 }
 
 /** Tiny non-interactive trend line for the tracker cards. */
@@ -69,21 +82,23 @@ export default function HomePage() {
   const createTracker = useCreateTracker();
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there';
+  const { pinnedIds, togglePin } = usePinnedTrackers();
 
-  // Summary-hero aggregates. Net expense is summed per currency (mixing
-  // currencies into one figure would be meaningless); the dominant currency
-  // leads, the rest surface as small chips.
   const trackerList = trackers || [];
-  const totalsByCurrency = new Map<string, number>();
-  let totalTxns = 0;
-  for (const t of trackerList) {
-    const s = homeStats?.[t.id];
-    if (!s) continue;
-    totalsByCurrency.set(t.currency, (totalsByCurrency.get(t.currency) || 0) + s.netExpense);
-    totalTxns += s.txnCount;
-  }
-  const currencyTotals = [...totalsByCurrency.entries()].sort((a, b) => b[1] - a[1]);
-  const primaryTotal = currencyTotals[0];
+
+  // Bento tiles: pinned trackers in pin order — first pin is the hero tile.
+  const pinnedTrackers = pinnedIds
+    .map(id => trackerList.find(t => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => !!t);
+  const heroTracker = pinnedTrackers[0];
+  const sidekicks = pinnedTrackers.slice(1);
+
+  // List: every tracker, most recent transaction first (no activity → last).
+  const sortedTrackers = [...trackerList].sort((a, b) => {
+    const am = a.date_range?.max || '';
+    const bm = b.date_range?.max || '';
+    return bm.localeCompare(am);
+  });
 
   // Listen for the bottom nav's "New Tracker" button event
   const openCreateSheet = useCallback(() => setShowCreate(true), []);
@@ -188,106 +203,132 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Summary hero — combined net expense across all trackers */}
-        {!isLoading && trackerList.length > 0 && (
-          <div className="rounded-3xl hero-card p-5 relative overflow-hidden animate-fade-in-up">
-            <div
-              className="absolute pointer-events-none"
-              style={{ right: -36, top: -36, width: 128, height: 128, borderRadius: 999, background: 'hsl(var(--ember))', opacity: 0.18 }}
-            />
-            <p className="relative text-[11px] font-semibold uppercase tracking-wider opacity-65">Net expense · all trackers</p>
-            <div
-              className="relative font-display tabular-nums mt-1"
-              style={{ fontSize: 40, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.05 }}
-            >
-              {primaryTotal ? formatAmountShort(primaryTotal[1], primaryTotal[0]) : '—'}
-            </div>
-            {currencyTotals.length > 1 && (
-              <div className="relative flex flex-wrap gap-1.5 mt-2">
-                {currencyTotals.slice(1).map(([cur, val]) => (
-                  <span key={cur} className="font-mono text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.10)' }}>
-                    {formatAmountShort(val, cur)}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="relative mt-3 flex items-center gap-4 text-[12px] font-medium opacity-80">
-              <span>{trackerList.length} tracker{trackerList.length !== 1 ? 's' : ''}</span>
-              <span className="opacity-50">·</span>
-              <span>{totalTxns.toLocaleString('en-IN')} transaction{totalTxns !== 1 ? 's' : ''}</span>
-            </div>
+        {/* Bento tiles — pinned trackers. 1 pin = full-width hero; 2–3 pins =
+            hero (first pin) + compact sidekicks stacked on the right. */}
+        {!isLoading && trackerList.length > 0 && pinnedTrackers.length === 0 && (
+          <div className="rounded-2xl border-2 border-dashed border-line p-5 text-center animate-fade-in-up">
+            <PushPin size={20} color="hsl(var(--ink-faint))" className="mx-auto mb-1.5" />
+            <p className="text-[13px] text-ink-soft font-medium">
+              Pin up to 3 trackers for a quick view — tap the pin on any tracker below
+            </p>
           </div>
         )}
+
+        {!isLoading && heroTracker && (() => {
+          const heroColor = trackerColor(heroTracker.id);
+          const heroStats = homeStats?.[heroTracker.id];
+          const heroNet = heroStats ? heroStats.netExpense : heroTracker.monthly_total;
+          const heroTile = (
+            <button
+              onClick={() => handleTrackerClick(heroTracker.id)}
+              className="w-full h-full text-left rounded-2xl p-4 animate-fade-in-up"
+              style={{ background: `${heroColor}1F` }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-display font-semibold text-[15px] truncate" style={{ color: heroColor, letterSpacing: '-0.01em' }}>
+                  {heroTracker.name}
+                </p>
+                <PushPin size={13} color={heroColor} className="shrink-0 mt-0.5" />
+              </div>
+              <p className="text-[9.5px] font-semibold uppercase tracking-wider text-ink-faint mt-2">Net expense</p>
+              <p className="font-mono text-[22px] font-semibold text-ink leading-tight">
+                {formatAmountShort(heroNet, heroTracker.currency)}
+              </p>
+              {heroStats && heroStats.trend.length >= 2 && (
+                <div className="mt-2">
+                  <MiniSparkline values={heroStats.trend.map(p => p.value)} color={heroColor} width={sidekicks.length > 0 ? 120 : 200} height={32} />
+                </div>
+              )}
+              <p className="text-[11px] text-ink-soft font-medium mt-2">
+                {heroTracker.member_count} member{heroTracker.member_count !== 1 ? 's' : ''}
+                {heroTracker.date_range && <> · since {format(parseISO(heroTracker.date_range.min), "MMM ''yy")}</>}
+              </p>
+            </button>
+          );
+
+          if (sidekicks.length === 0) return heroTile;
+
+          return (
+            <div className="grid gap-2" style={{ gridTemplateColumns: '1.5fr 1fr' }}>
+              {heroTile}
+              <div className="flex flex-col gap-2">
+                {sidekicks.map(t => {
+                  const c = trackerColor(t.id);
+                  const s = homeStats?.[t.id];
+                  const net = s ? s.netExpense : t.monthly_total;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => handleTrackerClick(t.id)}
+                      className="flex-1 text-left rounded-2xl p-3 animate-fade-in-up"
+                      style={{ background: `${c}1F` }}
+                    >
+                      <p className="font-display font-semibold text-[12.5px] truncate" style={{ color: c }}>{t.name}</p>
+                      <p className="font-mono text-[15px] font-semibold text-ink mt-1">
+                        {formatAmountShort(net, t.currency)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Section header */}
         {!isLoading && trackerList.length > 0 && (
           <div className="flex items-baseline justify-between px-1 pt-1">
             <h2 className="font-display font-semibold text-[15px] text-ink" style={{ letterSpacing: '-0.01em' }}>Your trackers</h2>
-            <span className="text-[12px] text-ink-faint font-medium">{trackerList.length}</span>
+            <span className="text-[12px] text-ink-faint font-medium">by last activity</span>
           </div>
         )}
 
-        {trackerList.map((tracker, i) => {
+        {sortedTrackers.map((tracker, i) => {
           const s = homeStats?.[tracker.id];
           const color = trackerColor(tracker.id);
           const net = s ? s.netExpense : tracker.monthly_total;
-          const names = s?.memberNames || [];
-          const dateRange = tracker.date_range
-            ? `${format(parseISO(tracker.date_range.min), "MMM ''yy")}${tracker.date_range.min.slice(0, 7) !== tracker.date_range.max.slice(0, 7) ? ` – ${format(parseISO(tracker.date_range.max), "MMM ''yy")}` : ''}`
-            : null;
+          const isPinned = pinnedIds.includes(tracker.id);
+          const activity = lastActivityLabel(tracker.date_range?.max);
           return (
-            <button
+            <div
               key={tracker.id}
+              role="button"
+              tabIndex={0}
               onClick={() => handleTrackerClick(tracker.id)}
-              className="w-full text-left rounded-2xl bg-card border border-line-soft p-4 shadow-sm hover:shadow-md transition-all duration-200 flex items-center gap-3 animate-stagger"
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTrackerClick(tracker.id); } }}
+              className="rounded-2xl bg-card border border-line-soft p-3 shadow-sm hover:shadow-md transition-all duration-200 flex items-center gap-3 cursor-pointer animate-stagger"
               style={{ animationDelay: `${i * 0.06}s` }}
             >
-              {/* Colored initial tile — per-tracker identity */}
               <div
-                className="w-12 h-12 rounded-2xl flex items-center justify-center font-display font-semibold text-[16px] shrink-0"
+                className="w-10 h-10 rounded-xl flex items-center justify-center font-display font-semibold text-[14px] shrink-0"
                 style={{ background: `${color}22`, color }}
               >
                 {initials(tracker.name)}
               </div>
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-display font-semibold text-[16px] truncate text-ink" style={{ letterSpacing: '-0.01em' }}>{tracker.name}</p>
-                  {s && s.trend.length >= 2 && <MiniSparkline values={s.trend.map(p => p.value)} color={color} />}
-                </div>
-
-                <p className="text-[9.5px] font-semibold uppercase tracking-wider text-ink-faint mt-1.5">Net expense</p>
-                <p className="font-mono text-[19px] font-semibold text-ink leading-none">{formatAmountShort(net, tracker.currency)}</p>
-
-                <div className="flex items-center gap-2 mt-2 min-w-0">
-                  {names.length > 0 ? (
-                    <div className="flex -space-x-1.5 shrink-0">
-                      {names.slice(0, 3).map((n, idx) => (
-                        <span
-                          key={idx}
-                          className="w-5 h-5 rounded-full border-2 border-card flex items-center justify-center text-[8px] font-bold text-white"
-                          style={{ background: trackerColor(tracker.id + n) }}
-                        >
-                          {initials(n)}
-                        </span>
-                      ))}
-                      {names.length > 3 && (
-                        <span className="w-5 h-5 rounded-full border-2 border-card bg-chip flex items-center justify-center text-[8px] font-bold text-ink-soft">
-                          +{names.length - 3}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-[11.5px] text-ink-soft">{tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''}</span>
-                  )}
-                  {dateRange && (
-                    <span className="text-[11px] text-ink-faint font-medium truncate">{dateRange}</span>
-                  )}
-                </div>
+                <p className="font-display font-semibold text-[15px] truncate text-ink" style={{ letterSpacing: '-0.01em' }}>{tracker.name}</p>
+                <p className="text-[11.5px] text-ink-soft font-medium mt-0.5">
+                  <span className="font-mono font-semibold text-ink">{formatAmountShort(net, tracker.currency)}</span>
+                  {' · '}{tracker.member_count} member{tracker.member_count !== 1 ? 's' : ''}
+                </p>
               </div>
 
-              <CaretRight className="h-5 w-5 text-ink-faint flex-shrink-0" />
-            </button>
+              {activity && (
+                <span className="text-[11px] text-ink-faint font-medium shrink-0">{activity}</span>
+              )}
+
+              <button
+                onClick={e => { e.stopPropagation(); togglePin(tracker.id); }}
+                aria-label={isPinned ? `Unpin ${tracker.name}` : `Pin ${tracker.name} to quick view`}
+                className="h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-xl transition-colors"
+                style={isPinned
+                  ? { background: 'hsl(var(--ember) / 0.12)', color: 'hsl(var(--ember))' }
+                  : { color: 'hsl(var(--ink-faint))' }}
+              >
+                <PushPin size={16} weight={isPinned ? 'fill' : 'regular'} />
+              </button>
+            </div>
           );
         })}
 
