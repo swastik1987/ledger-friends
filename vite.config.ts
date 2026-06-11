@@ -70,8 +70,11 @@ export default defineConfig(({ mode }) => ({
             },
           },
         ],
-        // Never intercept Supabase API/auth/realtime traffic.
-        navigateFallbackDenylist: [/^\/api/],
+        // Paths the SPA must never swallow: /~oauth/* is Lovable's OAuth
+        // broker (Google/Apple sign-in) served by the host, not React Router.
+        // Without this, the installed PWA's SW serves index.html for the
+        // broker navigation and the user lands on the app's 404 page.
+        navigateFallbackDenylist: [/^\/api/, /^\/~oauth/],
       },
     }),
   ].filter(Boolean),
