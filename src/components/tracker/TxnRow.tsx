@@ -7,10 +7,6 @@ import PaymentBadge from '@/components/PaymentBadge';
 import { paymentMeta } from '@/lib/paymentMethodMeta';
 import { Expense } from '@/types';
 import { formatAmountShort } from '@/lib/currencies';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 
 interface Props {
   expense: Expense;
@@ -49,7 +45,6 @@ export default function TxnRow({
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [translateX, setTranslateX] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Description text: prefer description if it differs from merchant
   const hasDistinctDescription =
@@ -168,11 +163,12 @@ export default function TxnRow({
       return;
     }
 
-    // Swipe-delete: horizontal distance past threshold of card width
+    // Swipe-delete: horizontal distance past threshold of card width.
+    // Deletes immediately — the parent shows an Undo toast (no confirm dialog).
     if (canModify && wasDragging) {
       const width = cardRef.current?.offsetWidth || 320;
       if (Math.abs(dx) >= width * SWIPE_THRESHOLD) {
-        setConfirmDelete(true);
+        onDelete(expense.id);
         reset();
         return;
       }
@@ -353,27 +349,6 @@ export default function TxnRow({
           )}
         </div>
       </div>
-
-      {/* Confirm delete dialog — opens after a full swipe */}
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete transaction?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete &quot;{expense.merchant_name || expense.description}&quot;.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { onDelete(expense.id); setConfirmDelete(false); }}
-              className="bg-spend text-white hover:bg-spend/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

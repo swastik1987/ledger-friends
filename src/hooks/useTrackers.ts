@@ -14,16 +14,63 @@ export interface TrackerHomeStat {
   memberNames: string[];
 }
 
+/** Row shape returned by the get_tracker_home_stats RPC. */
+interface HomeStatRpcRow {
+  tracker_id: string;
+  month: string; // 'YYYY-MM'
+  net_expense: number | string;
+  txn_count: number | string;
+}
+
+/**
+ * Legacy fallback for environments where the get_tracker_home_stats migration
+ * (20260611100000) hasn't been applied yet: download every expense row per
+ * tracker (paginated, in parallel) and aggregate client-side.
+ */
+async function fetchHomeStatsClientSide(
+  ids: string[],
+): Promise<Map<string, Omit<TrackerHomeStat, 'memberNames'>>> {
+  const perTracker = await Promise.all(
+    ids.map(id =>
+      fetchAllPages<{ category_id: string; amount: number; is_debit: boolean; is_transfer: boolean | null; date: string }>(
+        (from, to) =>
+          supabase
+            .from('expenses')
+            .select('category_id, amount, is_debit, is_transfer, date')
+            .eq('tracker_id', id)
+            .order('id', { ascending: false })
+            .range(from, to),
+      ),
+    ),
+  );
+  const out = new Map<string, Omit<TrackerHomeStat, 'memberNames'>>();
+  ids.forEach((id, idx) => {
+    const rows: DatedFlowExpense[] = perTracker[idx].map(row => ({
+      category_id: row.category_id,
+      amount: Number(row.amount),
+      is_debit: row.is_debit,
+      is_transfer: row.is_transfer ?? false,
+      date: row.date,
+    }));
+    out.set(id, {
+      netExpense: netExpenseSummedByMonth(rows),
+      txnCount: rows.length,
+      trend: monthlyNetExpense(rows),
+    });
+  });
+  return out;
+}
+
 /**
  * Powers the Home page: the category-based net expense + monthly trend per
  * tracker, and a small member-name preview per tracker. Keyed by tracker id.
  *
- * Expenses are fetched PER TRACKER in parallel, each fully paginated. A single
- * cross-tracker query would hit PostgREST's default 1000-row cap once total
- * transactions across all trackers exceed 1000, silently under-counting net
- * expense. Per-tracker + pagination means every tracker gets its complete row
- * set (same as the now-paginated useExpenses(id, 'all')), so the Home figure
- * matches the tracker page exactly regardless of volume.
+ * Aggregation happens server-side via the get_tracker_home_stats RPC — one
+ * row per (tracker, month) instead of every expense row crossing the wire.
+ * The RPC computes per-month, per-category GREATEST(outgo − inflow, 0), the
+ * same math as netExpenseSummedByMonth/monthlyNetExpense, so the Home figure
+ * still matches the tracker page exactly. If the RPC isn't deployed yet
+ * (PGRST202), the hook falls back to the legacy client-side aggregation.
  */
 export function useTrackerHomeStats() {
   const { user } = useAuth();
@@ -51,43 +98,31 @@ export function useTrackerHomeStats() {
       }
 
       const ids = [...trackerIds];
-      // One paginated expenses fetch per tracker, run in parallel. Pagination
-      // (id tiebreaker for a stable order) ensures trackers with >1000 rows
-      // aren't truncated — matching the now-paginated useExpenses(id, 'all').
-      const perTracker = await Promise.all(
-        ids.map(id =>
-          fetchAllPages<{ category_id: string; amount: number; is_debit: boolean; is_transfer: boolean | null; date: string }>(
-            (from, to) =>
-              supabase
-                .from('expenses')
-                .select('category_id, amount, is_debit, is_transfer, date')
-                .eq('tracker_id', id)
-                .order('id', { ascending: false })
-                .range(from, to),
-          ),
-        ),
-      );
-
       const out: Record<string, TrackerHomeStat> = {};
-      ids.forEach((id, idx) => {
-        const rows: DatedFlowExpense[] = perTracker[idx].map(row => ({
-          category_id: row.category_id,
-          amount: Number(row.amount),
-          is_debit: row.is_debit,
-          is_transfer: row.is_transfer ?? false,
-          date: row.date,
-        }));
-        // Net expense is summed across months (each month's net expense added
-        // up) — NOT all months lumped into one net-outgo calc, which would
-        // wrongly cancel a category's outgo in one month against inflow in
-        // another. This matches the per-month figure shown on the tracker page.
-        out[id] = {
-          netExpense: netExpenseSummedByMonth(rows),
-          txnCount: rows.length,
-          trend: monthlyNetExpense(rows),
-          memberNames: namesByTracker.get(id) || [],
-        };
-      });
+      for (const id of ids) {
+        out[id] = { netExpense: 0, txnCount: 0, trend: [], memberNames: namesByTracker.get(id) || [] };
+      }
+
+      const { data: statRows, error: rpcErr } = await (supabase.rpc as any)('get_tracker_home_stats');
+      if (rpcErr) {
+        // PGRST202 = function not found (migration not applied) — legacy path.
+        if ((rpcErr as { code?: string }).code !== 'PGRST202') throw rpcErr;
+        const legacy = await fetchHomeStatsClientSide(ids);
+        for (const [id, s] of legacy) {
+          out[id] = { ...s, memberNames: namesByTracker.get(id) || [] };
+        }
+        return out;
+      }
+
+      // Rows arrive ordered by (tracker_id, month asc) — trend stays sorted.
+      for (const r of (statRows || []) as HomeStatRpcRow[]) {
+        const s = out[r.tracker_id];
+        if (!s) continue;
+        const value = Number(r.net_expense);
+        s.netExpense += value;
+        s.txnCount += Number(r.txn_count);
+        s.trend.push({ date: r.month, value });
+      }
       return out;
     },
     enabled: !!user,

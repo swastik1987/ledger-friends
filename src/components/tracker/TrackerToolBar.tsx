@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, ArrowUp, ArrowDown, Check } from '@phosphor-icons/react';
+import { CaretDown, Calendar, FunnelSimple, ArrowsDownUp, ArrowsLeftRight, ArrowUp, ArrowDown, Check, MagnifyingGlass } from '@phosphor-icons/react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -43,6 +43,9 @@ interface Props {
   onOpenFilter: () => void;
   transferCount: number;
   onOpenTransferReview: () => void;
+  /** True while the search row is open or a query is active. */
+  searchActive: boolean;
+  onToggleSearch: () => void;
 }
 
 export default function TrackerToolBar({
@@ -56,6 +59,8 @@ export default function TrackerToolBar({
   onOpenFilter,
   transferCount,
   onOpenTransferReview,
+  searchActive,
+  onToggleSearch,
 }: Props) {
   const [monthOpen, setMonthOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -128,6 +133,18 @@ export default function TrackerToolBar({
           </Tooltip>
         </TooltipProvider>
       )}
+
+      {/* Search */}
+      <button
+        onClick={onToggleSearch}
+        aria-label="Search transactions"
+        className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-xl border bg-card"
+        style={searchActive
+          ? { color: 'hsl(var(--ember))', borderColor: 'hsl(var(--ember))' }
+          : { color: 'hsl(var(--ink))', borderColor: 'hsl(var(--line))' }}
+      >
+        <MagnifyingGlass size={17} />
+      </button>
 
       {/* Sort */}
       <Popover open={sortOpen} onOpenChange={setSortOpen}>

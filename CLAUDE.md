@@ -207,6 +207,7 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 
 ### RPC Functions
 - `get_tracker_stats` — Returns trackers with member_count, monthly_total, date_range
+- `get_tracker_home_stats` — One row per (tracker, month): net_expense + txn_count, membership enforced via auth.uid() inside the SECURITY DEFINER body (no user param). Mirrors the netOutgo.ts math (per-category GREATEST(outgo−inflow,0) per month). `useTrackerHomeStats` consumes it and falls back to client-side aggregation on PGRST202 if the migration isn't applied.
 
 ---
 
@@ -294,7 +295,7 @@ A `/tracker/:id` page with **two sticky bars at the top**: `TrackerTopBar` (back
 
 **Expenses Tab:**
 - `HeroSummary` dark ink card: big label "Net outgo this month", big number = total month debits, sub-chips "Total In" (credits) and "Net Savings" (In − Out, signed and color-tinted green/coral). All three values are filter-aware: the `Out` filter zeros earn; the `In` filter zeros spend. `MonthNavChevrons` sit inside the card at the left/right edges (dark tone, low opacity) and disappear at boundaries.
-- `TrackerToolBar` (Transactions tab only): ink-pill month dropdown (matches the active TabBar style so the current month reads as a primary selection) · transfer-review button (warn-coloured with count badge) · sort button · filter button (with badge). Horizontal swipe on the tab body also steps months via `useMonthSwipe`, bounded — no wrap.
+- `TrackerToolBar` (Transactions tab only): ink-pill month dropdown (matches the active TabBar style so the current month reads as a primary selection) · transfer-review button (warn-coloured with count badge) · search button (toggles an inline search row below the toolbar; matches description/merchant/raw_description/notes/bank_name client-side, ember-highlighted while active) · sort button · filter button (with badge). Horizontal swipe on the tab body also steps months via `useMonthSwipe`, bounded — no wrap.
 - `TypeSegment`: All / Out / In segmented control — replaces the old `TransactionTypeFilter`.
 - Day group headers show net delta `+₹X` / `−₹X` color-coded.
 - `TxnRow` letter-receipt cards (see gesture model below).
@@ -364,7 +365,7 @@ Each card owns its own pointer handling. Thresholds:
 Behaviour:
 - **Tap** (down→up, ≤8px movement, ≤250ms): opens edit modal — `canModify` only. In multi-select mode, taps toggle selection.
 - **Long-press 500ms**: enters multi-select mode (notifies parent via `onLongPressStart`).
-- **Horizontal swipe** ≥ 40% of card width: card slides with the finger up to ±140px, snaps back, and opens the in-card delete confirm dialog. A red "Delete" hint reveals under the card during drag. Only fires for `canModify` rows.
+- **Horizontal swipe** ≥ 40% of card width: card slides with the finger up to ±140px, snaps back, and **deletes immediately** — no confirm dialog. The row is optimistically removed from cache and a Sonner toast offers **Undo** for 5s; the DB delete only commits when the toast closes un-undone (`useUndoableDeleteExpense`, delayed-commit pattern). A red "Delete" hint reveals under the card during drag. Only fires for `canModify` rows.
 - **Vertical drag > 12px**: cancels horizontal handling and lets the page scroll. `touchAction: pan-y` reinforces this on touch hardware.
 - `setPointerCapture` keeps the gesture alive when the finger leaves the card during a swipe.
 
@@ -587,6 +588,8 @@ Listed chronologically (newest last). Always create a new migration file; never 
 20. **`rejected_as_transfer` column added to `expenses`** + partial index (`20260523_add_rejected_as_transfer.sql`) — fixes the "Not Transfer" bug where pair-matched rows re-surfaced on every refetch.
 21. **Security hardening** (`20260526085546_...sql`) — `profiles` SELECT narrowed to self + shared-tracker members; `tracker_members` self-insert removed in favour of an `add_tracker_admin_member` `SECURITY DEFINER` trigger; EXECUTE revoked from `anon`/`public` on the internal helpers (only `authenticated` keeps `is_tracker_member`, `is_tracker_admin`, `get_tracker_stats`).
 22. **Hardened tracker UPDATE policies** (`20260603092233_...sql`, by Lovable) — recreated the `expenses` "Creator or admin can update" and `categories` "Members can update custom categories" UPDATE policies with explicit `WITH CHECK` clauses that re-verify tracker membership on the **new** row. Closes a cross-tracker move: previously the absent `WITH CHECK` defaulted to the `USING` clause, so a creator (whose `created_by_id = uid` survives a `tracker_id` change) could move a row into a tracker they aren't a member of. See the RLS Policies note above.
+
+23. **`get_tracker_home_stats` RPC** (`20260611100000_add_get_tracker_home_stats.sql`) — server-side Home page aggregation; see RPC Functions. ⚠️ Not yet applied to the linked project (MCP is read-only, CLI not logged in) — apply with `supabase db push` or paste into the dashboard SQL editor; the client falls back gracefully until then.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

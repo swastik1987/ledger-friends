@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Expense, Category, Profile } from '@/types';
 import { toast } from 'sonner';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
 import { fetchAllPages } from '@/lib/fetchAllPages';
@@ -152,6 +152,55 @@ export function useDeleteExpense() {
   });
 }
 
+/**
+ * Instant swipe-delete with Undo. The row is removed from the cache
+ * immediately and a Sonner toast offers Undo for a few seconds; the actual
+ * DB delete only fires when the toast closes without Undo (delayed commit).
+ * Worst case — tab closed mid-toast — the delete silently doesn't happen,
+ * which is the safe failure direction.
+ */
+export function useUndoableDeleteExpense(trackerId: string) {
+  const queryClient = useQueryClient();
+
+  return useCallback((expenseId: string) => {
+    // Snapshot every month-view of this tracker so Undo can restore exactly.
+    const snapshots = queryClient.getQueriesData<Expense[]>({ queryKey: ['expenses', trackerId] });
+    queryClient.setQueriesData<Expense[]>(
+      { queryKey: ['expenses', trackerId] },
+      old => old?.filter(e => e.id !== expenseId),
+    );
+
+    let undone = false;
+    let committed = false;
+    const restore = () => {
+      snapshots.forEach(([key, data]) => queryClient.setQueryData(key, data));
+    };
+    const commit = async () => {
+      if (undone || committed) return;
+      committed = true;
+      const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+      if (error) {
+        restore();
+        toast.error(error.message);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['expense-months', trackerId] });
+      queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
+    };
+
+    toast('Transaction deleted', {
+      action: {
+        label: 'Undo',
+        onClick: () => { undone = true; restore(); },
+      },
+      duration: 5000,
+      onAutoClose: () => { void commit(); },
+      onDismiss: () => { void commit(); },
+    });
+  }, [queryClient, trackerId]);
+}
+
 export function useBulkCreateExpenses() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -173,7 +222,7 @@ export function useBulkCreateExpenses() {
 export function useBulkUpdateCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string }) => {
+    mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string; category?: Category }) => {
       const { error } = await supabase
         .from('expenses')
         .update({ category_id: categoryId } as any)
@@ -181,13 +230,28 @@ export function useBulkUpdateCategory() {
       if (error) throw error;
       return ids.length;
     },
-    onSuccess: (count) => {
+    // Optimistic: re-tag the rows in cache immediately; rollback on error.
+    onMutate: async ({ ids, categoryId, category }) => {
+      await queryClient.cancelQueries({ queryKey: ['expenses'] });
+      const snapshots = queryClient.getQueriesData<Expense[]>({ queryKey: ['expenses'] });
+      const idSet = new Set(ids);
+      queryClient.setQueriesData<Expense[]>({ queryKey: ['expenses'] }, old =>
+        old?.map(e => idSet.has(e.id)
+          ? { ...e, category_id: categoryId, category: category ?? e.category }
+          : e),
+      );
+      return { snapshots };
+    },
+    onError: (err: Error, _vars, ctx) => {
+      ctx?.snapshots.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      toast.error(err.message);
+    },
+    onSuccess: (count) => toast.success(`${count} transactions updated`),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
-      toast.success(`${count} transactions updated`);
     },
-    onError: (err: Error) => toast.error(err.message),
   });
 }
 
@@ -202,13 +266,26 @@ export function useBulkDeleteExpenses() {
       if (error) throw error;
       return ids.length;
     },
-    onSuccess: (count) => {
+    // Optimistic: rows vanish the moment the user confirms; rollback on error.
+    onMutate: async (ids: string[]) => {
+      await queryClient.cancelQueries({ queryKey: ['expenses'] });
+      const snapshots = queryClient.getQueriesData<Expense[]>({ queryKey: ['expenses'] });
+      const idSet = new Set(ids);
+      queryClient.setQueriesData<Expense[]>({ queryKey: ['expenses'] }, old =>
+        old?.filter(e => !idSet.has(e.id)),
+      );
+      return { snapshots };
+    },
+    onError: (err: Error, _ids, ctx) => {
+      ctx?.snapshots.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      toast.error(err.message);
+    },
+    onSuccess: (count) => toast.success(`🗑️ ${count} transactions deleted`),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-months'] });
       queryClient.invalidateQueries({ queryKey: ['suspected-transfers'] });
-      toast.success(`🗑️ ${count} transactions deleted`);
     },
-    onError: (err: Error) => toast.error(err.message),
   });
 }
 
@@ -356,20 +433,27 @@ export function useSuspectedTransfers(trackerId: string) {
     queryFn: async () => {
       // Pull every non-transfer row for the tracker. We need the full pool to
       // compute pair matches across the whole history (a real transfer's two
-      // legs may straddle a month boundary).
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('*, category:categories(*)')
-        .eq('tracker_id', trackerId)
-        .eq('is_transfer', false)
-        .order('date', { ascending: false });
+      // legs may straddle a month boundary) — but only the slim column set the
+      // pair heuristic + review sheet actually use, paginated past the
+      // PostgREST 1000-row cap (id tiebreaker keeps page boundaries stable).
+      const data = await fetchAllPages((from, to) =>
+        supabase
+          .from('expenses')
+          .select('id, tracker_id, amount, date, is_debit, is_transfer, suspected_transfer, rejected_as_transfer, merchant_name, description, bank_name, currency, category_id, category:categories(icon, color)')
+          .eq('tracker_id', trackerId)
+          .eq('is_transfer', false)
+          .order('date', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to),
+      );
 
-      if (error) throw error;
+      // Slim rows carry every field the review flow touches; the cast keeps
+      // the public Expense-based API unchanged for the sheet.
       const rows = (data || []).map(e => ({
         ...e,
         amount: Number(e.amount),
         category: e.category as unknown as Category,
-      })) as Expense[];
+      })) as unknown as Expense[];
 
       const pairedIds = findTransferPairs(rows);
       // Keyword-flagged rows still count — but if the user has already rejected

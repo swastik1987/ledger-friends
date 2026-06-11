@@ -4,7 +4,7 @@ import { format, isToday, isYesterday } from 'date-fns';
 import { Receipt, X, MagnifyingGlass, Tag, ArrowsLeftRight, Trash, ArrowsClockwise, CircleNotch } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
+import { useUndoableDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { useTrackers } from '@/hooks/useTrackers';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -113,7 +113,7 @@ export default function ExpensesTab({
   typeFilter, onTypeFilterChange, suspectedTransferCount, onOpenTransferReview,
 }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
-  const deleteExpense = useDeleteExpense();
+  const undoableDelete = useUndoableDeleteExpense(trackerId);
   const bulkUpdateCategory = useBulkUpdateCategory();
   const bulkDeleteExpenses = useBulkDeleteExpenses();
   const bulkMoveExpenses = useBulkMoveExpenses();
@@ -137,6 +137,19 @@ export default function ExpensesTab({
     setSortBy(value);
     writeSortPref(trackerId, value);
   };
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const toggleSearch = () => {
+    setSearchOpen(prev => {
+      if (prev) setSearchQuery('');
+      return !prev;
+    });
+  };
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const [filterUsers, setFilterUsers] = useState<Set<string>>(new Set());
   const [filterBanks, setFilterBanks] = useState<Set<string>>(new Set());
@@ -192,8 +205,17 @@ export default function ExpensesTab({
     if (filterCategories.size > 0) {
       result = result.filter(e => filterCategories.has(e.category_id));
     }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      result = result.filter(e =>
+        e.description?.toLowerCase().includes(q) ||
+        e.merchant_name?.toLowerCase().includes(q) ||
+        e.raw_description?.toLowerCase().includes(q) ||
+        e.notes?.toLowerCase().includes(q) ||
+        e.bank_name?.toLowerCase().includes(q));
+    }
     return result;
-  }, [expenses, typeFilter, filterUsers, filterBanks, filterPaymentMethods, filterCategories]);
+  }, [expenses, typeFilter, filterUsers, filterBanks, filterPaymentMethods, filterCategories, searchQuery]);
 
   // Hero totals reflect every active filter (type, people, banks, payment
   // modes, categories) — all three derive from filteredExpenses.
@@ -285,7 +307,10 @@ export default function ExpensesTab({
   const handleBulkCategoryChange = async (categoryId: string) => {
     const ids = Array.from(selectedIds);
     setShowBulkCategoryPicker(false);
-    await bulkUpdateCategory.mutateAsync({ ids, categoryId });
+    // Pass the category object so the optimistic cache patch can re-tag rows
+    // with the right icon/color immediately.
+    const category = categories.find(c => c.id === categoryId);
+    await bulkUpdateCategory.mutateAsync({ ids, categoryId, category });
     clearSelection();
   };
 
@@ -356,7 +381,32 @@ export default function ExpensesTab({
             onOpenFilter={() => setFilterOpen(true)}
             transferCount={suspectedTransferCount}
             onOpenTransferReview={onOpenTransferReview}
+            searchActive={searchOpen || searchQuery.trim() !== ''}
+            onToggleSearch={toggleSearch}
           />
+
+          {searchOpen && (
+            <div className="mx-4 mb-3 relative">
+              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2" size={16} color="hsl(var(--ink-faint))" />
+              <Input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search merchant, description, notes…"
+                className="pl-9 pr-9 h-11 rounded-xl"
+                inputMode="search"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full text-ink-faint hover:text-ink"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          )}
 
           <TypeSegment value={typeFilter} onChange={onTypeFilterChange} />
         </>
@@ -384,11 +434,19 @@ export default function ExpensesTab({
       {!isLoading && filteredExpenses.length === 0 && (
         <div className="text-center py-16 px-4">
           <Receipt size={64} color="hsl(var(--ink-faint) / 0.45)" className="mx-auto mb-4" />
-          {activeFilterCount > 0 ? (
+          {(activeFilterCount > 0 || searchQuery.trim() !== '') ? (
             <>
               <p className="font-display font-semibold text-lg text-ink">No matching transactions</p>
-              <p className="text-sm text-ink-soft mb-4">Try adjusting your filters</p>
-              <Button variant="outline" onClick={clearAllFilters} className="h-11">Clear Filters</Button>
+              <p className="text-sm text-ink-soft mb-4">
+                {searchQuery.trim() !== '' ? <>Nothing matches &quot;{searchQuery.trim()}&quot;</> : 'Try adjusting your filters'}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => { clearAllFilters(); setSearchQuery(''); }}
+                className="h-11"
+              >
+                {activeFilterCount > 0 ? 'Clear Filters' : 'Clear Search'}
+              </Button>
             </>
           ) : (
             <>
@@ -429,7 +487,7 @@ export default function ExpensesTab({
                   canModify={canModify}
                   onSelect={toggleSelect}
                   onEdit={onEditExpense}
-                  onDelete={(id) => deleteExpense.mutate(id)}
+                  onDelete={undoableDelete}
                   onLongPressStart={handleEnterSelectMode}
                   onLongPressCancel={() => { /* TxnRow handles cancellation internally */ }}
                 />
