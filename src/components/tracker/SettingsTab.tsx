@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import type { TransactionFilter } from '@/hooks/useTransactionTypeFilter';
 import { CURRENCIES, getCurrency } from '@/lib/currencies';
 import { useExpenses } from '@/hooks/useExpenses';
-import * as XLSX from 'xlsx';
 import { CATEGORY_ICON_MAP, ICON_GROUPS, ICON_LABELS, getSuggestedIcons } from '@/lib/phosphorIcons';
 import CategoryIcon from '@/components/CategoryIcon';
 import CategoryDot from '@/components/CategoryDot';
@@ -52,13 +51,14 @@ export default function SettingsTab({ trackerId, tracker, members, categories, i
   const { data: allExpenses = [], isLoading: isExportLoading } = useExpenses(trackerId, 'all');
   const [exporting, setExporting] = useState(false);
 
-  const handleExportAll = () => {
+  const handleExportAll = async () => {
     if (allExpenses.length === 0) {
       toast.error('No transactions to export');
       return;
     }
     setExporting(true);
     try {
+      const XLSX = await import('xlsx');
       const currencySymbol = getCurrency(tracker.currency).symbol;
       const rows = allExpenses.map(e => ({
         Date: e.date,

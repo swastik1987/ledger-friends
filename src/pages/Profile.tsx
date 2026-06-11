@@ -6,7 +6,6 @@ import { useTrackers, useDeleteTracker, useRemoveMember, useTrackerMembers } fro
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
 import {
   ArrowLeft, SignOut, Trash, DownloadSimple, Shield, Users, Crown,
   CircleNotch, Warning, CaretRight, CheckCircle,
@@ -105,6 +104,7 @@ export default function ProfilePage() {
     if (!user) return;
     setExporting(true);
     try {
+      const XLSX = await import('xlsx');
       // Fetch all expenses across all trackers
       const { data: expenses, error } = await supabase
         .from('expenses')

@@ -22,7 +22,8 @@ The tracker page received a full visual + interaction revamp in May 2026 — "Sa
 | Auth | Supabase Auth (email/password) |
 | File Parsing | pdfjs-dist 4.0.379, PapaParse 5.5.3, XLSX 0.18.5 |
 | AI | Gemini 2.5 Flash (via Supabase Edge Function) |
-| Charts | hand-rolled SVG sparkline (Recharts removed from Dashboard) |
+| Charts | hand-rolled SVG sparkline (recharts dependency fully removed Jun 2026, incl. the unused `ui/chart.tsx`) |
+| PWA | `vite-plugin-pwa` (autoUpdate) — manifest + Workbox service worker; precaches app shell, runtime-caches Google Fonts + bank favicons |
 | Toasts | Sonner 1.7.4 |
 | Icons | `@phosphor-icons/react` (regular weight — monoline) everywhere in app code; `lucide-react` remains only inside vendored shadcn `ui/*` primitives |
 | Dates | date-fns 3.6.0 |
@@ -153,6 +154,8 @@ ledger-friends/
 | `*` | `NotFound` | None | 404 page |
 
 Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
+
+**Code splitting (Jun 2026):** all 7 pages are `React.lazy` routes behind a `Suspense` fallback in `App.tsx`, and `xlsx` is dynamically imported at its three call sites (SettingsTab/Profile export, UploadStatement parse) — keep it out of static imports. `pdfjs-dist` was already dynamic. Entry bundle dropped from ~1.7 MB (499 KB gzip) to ~484 KB (146 KB gzip).
 
 ---
 

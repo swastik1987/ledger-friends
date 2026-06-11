@@ -29,7 +29,6 @@ import BankBadge from '@/components/BankBadge';
 import { useNudge } from '@/hooks/useNudge';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
 import { useQueryClient } from '@tanstack/react-query';
 
 // ──────────────────────────────────────────────────────────────────────
@@ -551,6 +550,7 @@ export default function UploadStatement() {
       rows = result.data as Record<string, string>[];
       headers = result.meta.fields || [];
     } else {
+      const XLSX = await import('xlsx');
       const wb = XLSX.read(arrayBuffer);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as string[][];
@@ -762,6 +762,7 @@ export default function UploadStatement() {
           textChunks.push(JSON.stringify(rows.slice(i, i + ROWS_PER_CHUNK)));
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
+        const XLSX = await import('xlsx');
         let wb: any;
         try {
           wb = XLSX.read(arrayBuffer);
