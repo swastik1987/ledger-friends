@@ -23,6 +23,23 @@ async function fetchGemini(body: unknown, timeoutMs: number): Promise<Response> 
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Pull Gemini's suggested wait out of a 429 response: either the `Retry-After`
+// header or the RetryInfo.retryDelay ("21s") embedded in the error body. Capped
+// at 30s so a single backoff can never blow the function's overall deadline.
+// Returns 0 when nothing usable is present (caller falls back to exponential backoff).
+function parseRetryDelayMs(res: Response, bodyText: string): number {
+  const header = res.headers.get('retry-after');
+  if (header) {
+    const secs = Number(header);
+    if (!Number.isNaN(secs) && secs > 0) return Math.min(secs * 1000, 30_000);
+  }
+  const m = bodyText.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  if (m) return Math.min(Math.ceil(Number(m[1]) * 1000), 30_000);
+  return 0;
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -297,8 +314,12 @@ serve(async (req) => {
       }
 
       if (!geminiRes.ok) {
+        // Metadata is an optional priming pass — never hard-fail the upload over it.
+        // On rate-limit (429) or any Gemini error, degrade to "unknown" so the parse
+        // pass still runs (and the client doesn't see a scary 502 for an optional call).
         const err = await geminiRes.text();
-        return new Response(JSON.stringify({ error: `Gemini API error: ${err}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        console.warn(`Metadata Gemini call failed (HTTP ${geminiRes.status}): ${err.slice(0, 150)}`);
+        return quickJson({ metadata: { statement_type: 'unknown', bank_name: null, base_currency: null, debit_credit_rule: null, column_semantics: null } });
       }
 
       const geminiData = await geminiRes.json();
@@ -341,15 +362,18 @@ serve(async (req) => {
     const transactionSchema = buildTransactionSchema(debitCats, creditCats);
 
     // ── Chunk extractedText to avoid the 150s edge-function idle timeout ──
-    // Large statements can take Gemini >150s in one shot. Split by lines into
-    // ~22k-char chunks (well under Gemini Flash's comfort zone) and process
-    // with a small concurrency pool. Adjacent chunks overlap by ~200 chars so
-    // any transaction landing on a seam appears in both chunks; a server-side
-    // dedupe pass drops the duplicate before returning.
-    const CHUNK_CHAR_LIMIT = 8_000;
+    // Gemini 2.5 Flash has a huge context window, so we keep chunks LARGE: a
+    // typical statement (a few pages) then fits in a SINGLE Gemini call, which
+    // matters most on the free tier where requests-per-minute is the binding
+    // limit. Only genuinely long statements split, and even then chunks run
+    // SERIALLY (concurrency 1) so we never burst past the free-tier RPM cap.
+    // Adjacent chunks overlap by ~200 chars so any transaction landing on a seam
+    // appears in both; a server-side dedupe pass drops the duplicate.
+    const CHUNK_CHAR_LIMIT = 25_000;
     const CHUNK_OVERLAP = 200;
-    const PER_CALL_TIMEOUT_MS = 40_000;
-    const CONCURRENCY = 4;
+    const PER_CALL_TIMEOUT_MS = 45_000;
+    const CONCURRENCY = 1;
+    const MAX_CHUNK_ATTEMPTS = 4;
     const RESPONSE_DEADLINE_MS = 125_000;
     const START_DEADLINE_MS = RESPONSE_DEADLINE_MS - PER_CALL_TIMEOUT_MS - 5_000;
     const startedAt = Date.now();
@@ -419,66 +443,102 @@ serve(async (req) => {
         },
       };
 
-      const t0 = Date.now();
-      let geminiRes: Response;
-      const controller = new AbortController();
-      chunkControllers.add(controller);
-      const timeoutId = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
-      try {
-        geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(geminiBody),
-          signal: controller.signal,
-        });
-      } catch (e) {
-        console.error(`Gemini fetch failed on chunk ${i + 1}/${n} after ${Date.now() - t0}ms:`, e);
-        return { index: i, ok: false, error: `Gemini request timed out on chunk ${i + 1}/${n}` };
-      } finally {
-        clearTimeout(timeoutId);
-        chunkControllers.delete(controller);
-      }
+      // Each chunk owns its own retry/backoff loop so a transient Gemini hiccup
+      // (free-tier 429, 5xx, malformed JSON) self-heals without the caller firing
+      // a second full request. On 429 we honour Gemini's suggested retryDelay.
+      let lastError = `Gemini request failed on chunk ${i + 1}/${n}`;
 
-      if (!geminiRes.ok) {
-        const err = await geminiRes.text();
-        console.error(`Gemini API error on chunk ${i + 1}/${n}: ${err.slice(0, 200)}`);
-        return { index: i, ok: false, error: `Gemini API error on chunk ${i + 1}/${n}: HTTP ${geminiRes.status}` };
-      }
+      for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt++) {
+        if (Date.now() - startedAt > START_DEADLINE_MS) {
+          return { index: i, ok: false, error: `Chunk ${i + 1}/${n} skipped: response deadline reached` };
+        }
 
-      const geminiData = await geminiRes.json();
-      const finishReason = geminiData.candidates?.[0]?.finishReason;
-      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const cleaned = rawText.replace(/```json|```/gi, '').trim();
-
-      // If Gemini hit a stop condition that aborted output (token budget, safety,
-      // recitation, etc.), surface it as a chunk failure so the client can retry.
-      if (!cleaned && finishReason && finishReason !== 'STOP') {
-        console.error(`Chunk ${i + 1}/${n}: Gemini stopped with finishReason=${finishReason}, no text returned`);
-        return { index: i, ok: false, error: `Gemini stopped early on chunk ${i + 1}/${n} (${finishReason})` };
-      }
-
-      let transactions: any[];
-      try {
-        transactions = JSON.parse(cleaned || '[]');
-      } catch (parseErr) {
-        const match = cleaned.match(/\[[\s\S]*\]/);
+        const t0 = Date.now();
+        let geminiRes: Response;
+        const controller = new AbortController();
+        chunkControllers.add(controller);
+        const timeoutId = setTimeout(() => controller.abort(), PER_CALL_TIMEOUT_MS);
         try {
-          transactions = match ? JSON.parse(match[0]) : [];
-        } catch {
-          console.error(`Chunk ${i + 1}/${n}: JSON.parse failed (finishReason=${finishReason}, len=${cleaned.length}, head=${cleaned.slice(0, 120)})`, parseErr);
-          return { index: i, ok: false, error: `Gemini returned malformed JSON on chunk ${i + 1}/${n}` };
+          geminiRes = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(geminiBody),
+            signal: controller.signal,
+          });
+        } catch (e) {
+          console.error(`Gemini fetch failed on chunk ${i + 1}/${n} after ${Date.now() - t0}ms (attempt ${attempt}):`, e);
+          lastError = `Gemini request timed out on chunk ${i + 1}/${n}`;
+          if (attempt < MAX_CHUNK_ATTEMPTS) { await sleep(1_000 * attempt); continue; }
+          return { index: i, ok: false, error: lastError };
+        } finally {
+          clearTimeout(timeoutId);
+          chunkControllers.delete(controller);
         }
+
+        // ── Rate limited (free-tier RPM): wait the suggested delay and retry ──
+        if (geminiRes.status === 429) {
+          const errText = await geminiRes.text();
+          const suggested = parseRetryDelayMs(geminiRes, errText);
+          const wait = suggested || Math.min(2_000 * 2 ** (attempt - 1), 20_000); // 2s,4s,8s,16s
+          const budgetLeft = START_DEADLINE_MS - (Date.now() - startedAt);
+          console.warn(`Chunk ${i + 1}/${n}: HTTP 429 (attempt ${attempt}); backing off ${wait}ms`);
+          if (attempt < MAX_CHUNK_ATTEMPTS && wait + 2_000 < budgetLeft) {
+            await sleep(wait);
+            continue;
+          }
+          return { index: i, ok: false, error: `RATE_LIMITED: Gemini free-tier rate limit hit on chunk ${i + 1}/${n}` };
+        }
+
+        if (!geminiRes.ok) {
+          const err = await geminiRes.text();
+          console.error(`Gemini API error on chunk ${i + 1}/${n}: HTTP ${geminiRes.status} ${err.slice(0, 200)}`);
+          lastError = `Gemini API error on chunk ${i + 1}/${n}: HTTP ${geminiRes.status}`;
+          // Retry transient server errors (5xx); client errors (4xx) are terminal.
+          if (geminiRes.status >= 500 && attempt < MAX_CHUNK_ATTEMPTS) { await sleep(1_500 * attempt); continue; }
+          return { index: i, ok: false, error: lastError };
+        }
+
+        const geminiData = await geminiRes.json();
+        const finishReason = geminiData.candidates?.[0]?.finishReason;
+        const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const cleaned = rawText.replace(/```json|```/gi, '').trim();
+
+        // If Gemini hit a stop condition that aborted output (token budget, safety,
+        // recitation, etc.), retry once more if we still have budget.
+        if (!cleaned && finishReason && finishReason !== 'STOP') {
+          console.error(`Chunk ${i + 1}/${n}: Gemini stopped with finishReason=${finishReason}, no text returned (attempt ${attempt})`);
+          lastError = `Gemini stopped early on chunk ${i + 1}/${n} (${finishReason})`;
+          if (attempt < MAX_CHUNK_ATTEMPTS) { await sleep(1_000); continue; }
+          return { index: i, ok: false, error: lastError };
+        }
+
+        let transactions: any[];
+        try {
+          transactions = JSON.parse(cleaned || '[]');
+        } catch (parseErr) {
+          const match = cleaned.match(/\[[\s\S]*\]/);
+          try {
+            transactions = match ? JSON.parse(match[0]) : [];
+          } catch {
+            console.error(`Chunk ${i + 1}/${n}: JSON.parse failed (finishReason=${finishReason}, len=${cleaned.length}, head=${cleaned.slice(0, 120)})`, parseErr);
+            lastError = `Gemini returned malformed JSON on chunk ${i + 1}/${n}`;
+            if (attempt < MAX_CHUNK_ATTEMPTS) { await sleep(1_000); continue; }
+            return { index: i, ok: false, error: lastError };
+          }
+        }
+
+        transactions = transactions.map((t: any) => {
+          if (typeof t?.category !== 'string' || !allowedSet.has(t.category)) {
+            t.category = t?.is_debit ? fallbackDebit : fallbackCredit;
+            t.confidence = Math.min(t?.confidence ?? 0.5, 0.5);
+          }
+          return t;
+        });
+        console.log(`Chunk ${i + 1}/${n}: ${transactions.length} txns in ${Date.now() - t0}ms (attempt ${attempt})`);
+        return { index: i, ok: true, transactions };
       }
 
-      transactions = transactions.map((t: any) => {
-        if (typeof t?.category !== 'string' || !allowedSet.has(t.category)) {
-          t.category = t?.is_debit ? fallbackDebit : fallbackCredit;
-          t.confidence = Math.min(t?.confidence ?? 0.5, 0.5);
-        }
-        return t;
-      });
-      console.log(`Chunk ${i + 1}/${n}: ${transactions.length} txns in ${Date.now() - t0}ms`);
-      return { index: i, ok: true, transactions };
+      return { index: i, ok: false, error: lastError };
     }
 
     // ── Bounded-concurrency runner: at most CONCURRENCY chunks in flight. ──
@@ -493,14 +553,9 @@ serve(async (req) => {
             results[idx] = { index: idx, ok: false, error: `Chunk ${idx + 1}/${items.length} skipped: response deadline reached` };
             continue;
           }
-          // One retry on transient Gemini failures (5xx, malformed JSON, early
-          // finishReason). Only retry once and only if we still have deadline budget.
-          let attempt = await processChunk(items[idx], idx, items.length);
-          if (!attempt.ok && Date.now() - startedAt < START_DEADLINE_MS) {
-            console.warn(`Chunk ${idx + 1}/${items.length} failed once (${attempt.error}); retrying`);
-            attempt = await processChunk(items[idx], idx, items.length);
-          }
-          results[idx] = attempt;
+          // processChunk owns its own retry/backoff (incl. 429 handling), so the
+          // pool dispatches each chunk exactly once.
+          results[idx] = await processChunk(items[idx], idx, items.length);
         }
       };
       const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
@@ -535,8 +590,20 @@ serve(async (req) => {
       }
     }
 
-    // If every chunk failed, return the same 5xx the previous code would have.
+    // If every chunk failed, decide how to surface it. A rate-limit needs a clear,
+    // actionable message — but supabase-js only exposes the response BODY on a 2xx
+    // status (non-2xx collapses to a generic "non-2xx" error). So for the rate-limit
+    // case we return 200 with a `rateLimited` flag the client can read and act on.
     if (chunks.length > 0 && successCount === 0) {
+      const rateLimited = warnings.some((w) => w.startsWith('RATE_LIMITED:'));
+      if (rateLimited) {
+        return quickJson({
+          transactions: [],
+          rateLimited: true,
+          error: 'Gemini free-tier rate limit reached. Please wait about a minute and try again.',
+          warnings,
+        });
+      }
       return new Response(
         JSON.stringify({ error: warnings[0] || 'All chunks failed to parse.', warnings }),
         { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

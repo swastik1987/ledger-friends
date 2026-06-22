@@ -327,6 +327,9 @@ class NoTransactionsError extends Error {
 class ParseServiceError extends Error {
   constructor(msg = 'Statement parsing failed. Please check your connection and try again.') { super(msg); this.name = 'ParseServiceError'; }
 }
+class RateLimitError extends Error {
+  constructor(msg = 'AI service is rate-limited on the free tier. Please wait about a minute and try again.') { super(msg); this.name = 'RateLimitError'; }
+}
 
 function NudgeUploadModes() {
   const { show, dismiss } = useNudge('upload-two-modes');
@@ -742,9 +745,10 @@ export default function UploadStatement() {
 
       const textChunks: string[] = [];
       // Bigger client chunks = fewer round-trips for small/medium statements.
-      // The edge function chunks again internally (8000-char limit, concurrency 4),
-      // so we can safely bundle more pages per call. A typical 3-page statement
-      // now travels in a single call; a 12-page statement takes ~2.
+      // The edge function chunks again internally (25k-char limit, serialised),
+      // so we can safely bundle more pages per call. A typical 3-4 page statement
+      // travels in a single edge call = a single Gemini request, which keeps us
+      // well under the free-tier requests-per-minute cap.
       const PAGES_PER_CHUNK = 6;
       const ROWS_PER_CHUNK = 80;
 
@@ -835,7 +839,21 @@ export default function UploadStatement() {
       setProgress(18);
 
       // ── Stage 2b: AI transaction parsing (18% → 80%) ──
-      setProgressMessage('🧠 AI is categorising your transactions...');
+      // Estimate how many Gemini calls this run will take. The edge function splits
+      // each client chunk at ~25k chars and processes parts SERIALLY (free-tier
+      // friendly, but slower), so a long statement legitimately takes a bit longer.
+      // Warn the user up front instead of leaving them staring at a stalled bar.
+      const SERVER_CHUNK_CHARS = 25_000;
+      const estimatedParts = textChunks.reduce(
+        (sum, c) => sum + Math.max(1, Math.ceil(c.length / SERVER_CHUNK_CHARS)),
+        0,
+      );
+      const isLargeStatement = estimatedParts > 1;
+      setProgressMessage(
+        isLargeStatement
+          ? '🧠 Large statement — analysing in parts, this may take a moment...'
+          : '🧠 AI is categorising your transactions...'
+      );
       const allTransactions: any[] = [];
       const parseWarnings: string[] = [];
       const chunkProgressRange = 62; // 18% → 80%
@@ -856,6 +874,11 @@ export default function UploadStatement() {
 
       for (let ci = 0; ci < textChunks.length; ci++) {
         if (signal.aborted) return;
+
+        // Per-part feedback when the statement spans multiple client chunks.
+        if (textChunks.length > 1) {
+          setProgressMessage(`🧠 Analysing part ${ci + 1} of ${textChunks.length}...`);
+        }
 
         // Header injection: prepend the first chunk's headers to every subsequent chunk
         // so the AI always has bank/column context, not just the raw row text.
@@ -889,6 +912,12 @@ export default function UploadStatement() {
             error = e;
           }
           if (signal.aborted) return;
+          // Rate limit: the server already backed off and exhausted its budget.
+          // Don't hammer it with another full request — bail out with a clear,
+          // actionable message and let the user retry in a minute.
+          if (!error && data?.rateLimited) {
+            throw new RateLimitError(data.error);
+          }
           // Treat as success if we have any transactions OR the call returned without error.
           // Warnings on a successful response are fine and surfaced separately.
           if (!error && data) break;
@@ -1170,6 +1199,11 @@ export default function UploadStatement() {
       if (err instanceof PasswordRequiredError || err instanceof WrongPasswordError) {
         toast.error(err.message);
         setStep(2); // Go back to password step — keep file so user can retry
+      } else if (err instanceof RateLimitError) {
+        // Transient free-tier throttle — keep the file and return to the analyse
+        // step (PDF page-preview, else file step) so the user can retry shortly.
+        toast.error(err.message);
+        setStep(isPdf ? 3 : 1);
       } else {
         toast.error(err?.message || 'Failed to process file');
         setStep(1);
