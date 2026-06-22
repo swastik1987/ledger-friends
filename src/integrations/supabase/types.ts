@@ -216,6 +216,7 @@ export type Database = {
           email: string | null
           full_name: string
           id: string
+          pinned_tracker_ids: string[]
         }
         Insert: {
           avatar_url?: string | null
@@ -223,6 +224,7 @@ export type Database = {
           email?: string | null
           full_name: string
           id: string
+          pinned_tracker_ids?: string[]
         }
         Update: {
           avatar_url?: string | null
@@ -230,6 +232,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id?: string
+          pinned_tracker_ids?: string[]
         }
         Relationships: []
       }
@@ -312,6 +315,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_tracker_home_stats: {
+        Args: never
+        Returns: {
+          month: string
+          net_expense: number
+          tracker_id: string
+          txn_count: number
+        }[]
+      }
       get_tracker_stats: {
         Args: { p_user_id: string }
         Returns: {
