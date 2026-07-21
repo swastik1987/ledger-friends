@@ -27,34 +27,12 @@ import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
 import BankBadge from '@/components/BankBadge';
 import { useNudge } from '@/hooks/useNudge';
+import { useBanks, useResolveBankName } from '@/hooks/useBanks';
+import { findBankMatch } from '@/lib/bankResolver';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import { useQueryClient } from '@tanstack/react-query';
-
-// ──────────────────────────────────────────────────────────────────────
-// Fuzzy string similarity (Levenshtein-based, 0..1)
-// ──────────────────────────────────────────────────────────────────────
-function editDistance(a: string, b: string): number {
-  const m: number[][] = Array.from({ length: b.length + 1 }, (_, i) =>
-    Array.from({ length: a.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= b.length; i++)
-    for (let j = 1; j <= a.length; j++)
-      m[i][j] = b[i - 1] === a[j - 1]
-        ? m[i - 1][j - 1]
-        : Math.min(m[i - 1][j - 1] + 1, m[i][j - 1] + 1, m[i - 1][j] + 1);
-  return m[b.length][a.length];
-}
-
-function similarity(a: string, b: string): number {
-  const na = a.toLowerCase().trim();
-  const nb = b.toLowerCase().trim();
-  if (na === nb) return 1;
-  const longer = na.length > nb.length ? na : nb;
-  const shorter = na.length > nb.length ? nb : na;
-  if (longer.length === 0) return 1;
-  return (longer.length - editDistance(longer, shorter)) / longer.length;
-}
+import { similarity } from '@/lib/stringSimilarity';
 
 // ──────────────────────────────────────────────────────────────────────
 // Bulk Excel column header detection
@@ -345,6 +323,8 @@ export default function UploadStatement() {
   const trackerCurrency = tracker?.currency || 'INR';
   const bulkCreate = useBulkCreateExpenses();
   const queryClient = useQueryClient();
+  const { data: banks } = useBanks();
+  const resolveBankName = useResolveBankName();
 
   // Step machine:
   // 1 = file select, 2 = password (PDF only, if locked), 3 = page select (PDF only),
@@ -829,7 +809,12 @@ export default function UploadStatement() {
         if (metaData?.metadata) {
           statementMetadata = metaData.metadata;
           if (typeof statementMetadata?.bank_name === 'string' && statementMetadata.bank_name.trim()) {
-            setStatementBank(statementMetadata.bank_name.trim());
+            const guess = statementMetadata.bank_name.trim();
+            // Prefer the registry's canonical spelling when this guess matches a
+            // known bank/alias/close-fuzzy-match, so the review screen shows
+            // "HDFC Bank" instead of whatever exact wording the AI returned.
+            const known = findBankMatch(guess, banks || []);
+            setStatementBank(known?.canonical_name || guess);
           }
         }
       } catch {
@@ -1189,7 +1174,10 @@ export default function UploadStatement() {
         for (const [b, c] of counts) {
           if (c > topCount) { top = b; topCount = c; }
         }
-        if (top) setStatementBank(top);
+        if (top) {
+          const known = findBankMatch(top, banks || []);
+          setStatementBank(known?.canonical_name || top);
+        }
       }
 
       setDrafts(draftExpenses);
@@ -1263,8 +1251,27 @@ export default function UploadStatement() {
       }
     }
 
-    const expenses = approvedDrafts.map(d => {
+    // Resolve free-text bank names to canonical `banks` rows before insert, so
+    // every write path collapses spelling variants ("HDFC Bank Private
+    // Limited" → "HDFC Bank") instead of storing whatever text is on screen.
+    // Cached by raw string so repeated per-row values don't hit the table twice.
+    const bankCache = new Map<string, { id: string; canonical_name: string } | null>();
+    const resolveCachedBank = async (raw: string | null | undefined) => {
+      const key = (raw || '').trim();
+      if (!key) return null;
+      if (bankCache.has(key)) return bankCache.get(key)!;
+      const resolved = await resolveBankName(key);
+      bankCache.set(key, resolved);
+      return resolved;
+    };
+    // Statement-level bank overrides any per-row bank guess from the AI — every
+    // row in this upload belongs to the same statement / bank. Falls back to
+    // resolving the per-row value only when the user hasn't confirmed a statement bank.
+    const statementBankResolved = await resolveCachedBank(statementBank);
+
+    const expenses = await Promise.all(approvedDrafts.map(async d => {
       const conv = conversionResults[d.temp_id];
+      const rowBank = statementBankResolved ?? await resolveCachedBank(d.bank_name);
       return {
         tracker_id: trackerId,
         created_by_id: user.id,
@@ -1281,10 +1288,8 @@ export default function UploadStatement() {
         is_transfer: false,
         suspected_transfer: d.suspected_transfer || false,
         payment_method: d.payment_method || null,
-        // Statement-level bank overrides any per-row bank guess from the AI — every
-        // row in this upload belongs to the same statement / bank. Falls back to
-        // the per-row value only when the user hasn't confirmed a statement bank.
-        bank_name: statementBank.trim() || d.bank_name || null,
+        bank_name: rowBank?.canonical_name ?? null,
+        bank_id: rowBank?.id ?? null,
         reference_number: d.reference_number || null,
         notes: d.notes || null,
         ...(conv ? {
@@ -1294,7 +1299,7 @@ export default function UploadStatement() {
           conversion_note: conv.note,
         } : {}),
       };
-    });
+    }));
 
     await bulkCreate.mutateAsync(expenses);
 
@@ -1520,6 +1525,7 @@ export default function UploadStatement() {
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditingBank(false); }}
                     placeholder="e.g. HDFC Bank, Axis Bank, Scapia"
                     className="h-7 mt-0.5 text-sm"
+                    list="statement-bank-suggestions"
                   />
                 ) : (
                   <p className="text-sm font-medium truncate mt-0.5">
@@ -1533,6 +1539,9 @@ export default function UploadStatement() {
               >
                 {editingBank ? 'Done' : (statementBank ? 'Edit' : 'Add')}
               </button>
+              <datalist id="statement-bank-suggestions">
+                {(banks || []).map(b => <option key={b.id} value={b.canonical_name} />)}
+              </datalist>
             </div>
 
             <div className="rounded-2xl bg-card border border-border p-3 grid grid-cols-3 gap-2 text-center">

@@ -68,6 +68,7 @@ ledger-friends/
 │   │
 │   ├── hooks/
 │   │   ├── useExpenses.ts                    # CRUD + bulk + realtime + duplicate + suspected-transfers (incl. pair matching)
+│   │   ├── useBanks.ts                       # Bank registry query + find-or-create resolver
 │   │   ├── useTrackers.ts
 │   │   ├── useTransactionTypeFilter.ts       # URL + localStorage synced
 │   │   ├── useNudge.ts
@@ -109,7 +110,9 @@ ledger-friends/
 │   │   ├── transferDetector.ts               # Internal-transfer keyword detection
 │   │   ├── merchantDictionary.ts             # Curated merchant→category rules
 │   │   ├── merchantExtraction.ts             # Merchant/description normalisation pipeline
-│   │   ├── bankBrand.ts                      # Bank name → domain (Google favicon URL) + curated brand color + hash fallback + monogram
+│   │   ├── bankBrand.ts                      # Hardcoded domain/brand-color fallback map + Google favicon URL builder + monogram
+│   │   ├── bankResolver.ts                   # normalizeBankKey() + findBankMatch() — resolves free text against the `banks` registry (exact/alias/fuzzy)
+│   │   ├── stringSimilarity.ts               # Shared Levenshtein similarity() (category matching + bank matching)
 │   │   ├── paymentMethodMeta.ts              # Payment method → Phosphor icon + tinted color
 │   │   ├── phosphorIcons.ts                  # Icon name → Phosphor component map + heuristic picker
 │   │   └── utils.ts
@@ -182,13 +185,19 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 - `id`, `tracker_id`, `created_by_id` (nullable), `created_by_name` (denormalised)
 - `category_id`, `amount`, `currency`, `date`
 - `description` (cleaned, human-readable phrase), `merchant_name` (normalised brand/payee), **`raw_description`** (verbatim original narration — NEW)
-- `payment_method`, `bank_name`, `notes`, `tags` (text[]), `reference_number`
+- `payment_method`, `bank_name` (denormalised cache of `banks.canonical_name`), `bank_id` (FK → `banks`), `notes`, `tags` (text[]), `reference_number`
 - `is_debit`, `source` ('manual' | 'statement_upload'), `is_transfer`, `suspected_transfer`, `rejected_as_transfer`
 - `original_amount`, `original_currency`, `conversion_rate`, `conversion_note`
 - `created_at`, `updated_at` (auto-updated via trigger)
 
 **category_learning**
 - `id`, `normalized_description` (unique), `merchant_name`, `category_id`, `applied_count`, `updated_at`
+
+**banks** (added `20260721120000_add_banks_registry.sql`)
+- `id`, `canonical_name` (unique), `aliases` (text[]), `domain` (feeds the Google favicon lookup), `brand_color`, `created_at`, `updated_at`
+- Global reference registry, same RLS shape as `category_learning` (any authenticated user reads/inserts/updates, nobody deletes from app code)
+- Seeded from the banks previously hardcoded in `bankBrand.ts`'s `DOMAIN_MAP`/`BRAND_COLOR`; existing `expenses.bank_name` values were backfilled to `bank_id` by matching against `canonical_name`/`aliases` via the `normalize_bank_name()` SQL function (strips legal suffixes like "Private Limited" then a trailing "bank")
+- All write paths (`UploadStatement.tsx` save, `AddExpenseSheet.tsx` save) resolve free-text bank input through `useResolveBankName()` (exact/alias/fuzzy match via `bankResolver.ts`, else insert a new row) before writing `bank_id` + the canonical `bank_name`, so "HDFC Bank" and "HDFC Bank Private Limited" always collapse to one row instead of fragmenting filters/autocomplete
 
 ### RLS Policies
 - Tracker-scoped data is restricted by tracker membership
@@ -425,6 +434,10 @@ Three pieces:
 - `useDuplicateCheck(trackerId)` — Levenshtein-based duplicate detection
 - `useSuspectedTransfers(trackerId)` — returns `{ all, pairedIds }`. `all` is the union of rows where `suspected_transfer=true` and rows that participate in a debit↔credit pair (±1 day, amounts within 1%, cross-user). Both pools exclude `is_transfer=true` AND `rejected_as_transfer=true`. Internally calls `findTransferPairs(rows)` — see Transfer Detection.
 
+### useBanks.ts
+- `useBanks()` — all registered banks, ordered by canonical name. Degrades to `[]` (rather than throwing) if the `banks` table isn't migrated yet (`42P01`/`PGRST205`).
+- `useResolveBankName()` — returns a stable async `(raw: string) => { id, canonical_name } | null` that resolves free text against the registry (exact/alias/fuzzy match via `bankResolver.ts`), creating a new `banks` row only when nothing close enough exists. Used by both `UploadStatement.tsx` (save) and `AddExpenseSheet.tsx` (save) so manual entries and uploads canonicalise the same way.
+
 ### useTrackers.ts
 - `useTrackers()` — all user trackers (via `get_tracker_stats` RPC)
 - `useTracker(trackerId)` / `useCreateTracker()` / `useUpdateTracker()` / `useDeleteTracker()`
@@ -502,7 +515,7 @@ Tailwind exposes the CSS vars as utilities:
 
 ### Iconography
 - Single curated family in app code: `@phosphor-icons/react`, `weight="regular"` (monoline). `CategoryIcon` always renders regular weight; `CategoryDot` is the colored-disc wrapper that pairs an icon with a soft-tinted background.
-- `lucide-react` is retained only inside the vendored shadcn `ui/*` primitives (dialog/X, command/Search, etc.) — never import it from outside `src/components/ui/`. Bank logos use real favicons via `BankBadge` (Google's `s2/favicons`), with a curated brand-color monogram disc as the offline fallback. Payment methods use `PaymentBadge` (per-method Phosphor icon + tinted disc).
+- `lucide-react` is retained only inside the vendored shadcn `ui/*` primitives (dialog/X, command/Search, etc.) — never import it from outside `src/components/ui/`. Bank logos use real favicons via `BankBadge` (Google's `s2/favicons`, domain/color resolved from the `banks` DB registry first, then the hardcoded `bankBrand.ts` map), with a curated brand-color monogram disc as the offline fallback. Payment methods use `PaymentBadge` (per-method Phosphor icon + tinted disc).
 - Emoji is no longer used anywhere as an icon. Custom category creation uses the icon-picker UI (3-column AI suggestion + 6-column "Browse all" grid).
 
 ### Color conventions
@@ -595,6 +608,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 
 23. **`get_tracker_home_stats` RPC** (`20260611100000_add_get_tracker_home_stats.sql`) — server-side Home page aggregation; see RPC Functions. ⚠️ Not yet applied to the linked project (MCP is read-only, CLI not logged in) — apply with `supabase db push` or paste into the dashboard SQL editor; the client falls back gracefully until then.
 24. **`pinned_tracker_ids` on profiles** (`20260611130000_add_pinned_tracker_ids.sql`) — uuid[] for the Home bento pins, covered by the existing self-update policy. ⚠️ Also pending application; `usePinnedTrackers` keeps pins in localStorage until the column exists.
+25. **`banks` registry + `expenses.bank_id`** (`20260721120000_add_banks_registry.sql`) — canonical bank table (`canonical_name`, `aliases[]`, `domain`, `brand_color`), seeded from the banks previously hardcoded in `bankBrand.ts`. Adds `expenses.bank_id` FK and backfills it from existing `bank_name` text via `normalize_bank_name()` (alias/suffix-insensitive match), registering any unrecognised existing spelling as its own new bank so no data is lost. See the `banks` table entry above and `useBanks.ts`.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

@@ -41,6 +41,22 @@ export interface Category {
   created_by?: string;
 }
 
+/**
+ * Canonical bank/issuer registry row. One row per real-world bank; `aliases`
+ * holds every free-text spelling that should resolve to it (e.g. "HDFC Bank
+ * Private Limited" → HDFC Bank). `domain` feeds the logo lookup in
+ * bankBrand.ts, `brand_color` is the monogram fallback color.
+ */
+export interface Bank {
+  id: string;
+  canonical_name: string;
+  aliases: string[];
+  domain?: string | null;
+  brand_color?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Expense {
   id: string;
   tracker_id: string;
@@ -56,6 +72,8 @@ export interface Expense {
   merchant_name?: string;
   payment_method?: PaymentMethod;
   bank_name?: string;
+  /** FK to banks.id. bank_name is kept as a denormalised display cache of banks.canonical_name. */
+  bank_id?: string | null;
   notes?: string;
   tags?: string[];
   reference_number?: string;
@@ -98,6 +116,7 @@ export interface DraftExpense {
   suspected_transfer?: boolean; // suspected internal transfer (keyword or AI detection) — awaits user confirmation
   payment_method?: PaymentMethod;
   bank_name?: string;
+  bank_id?: string | null;
 }
 
 export interface TrackerWithStats extends Tracker {

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
 import { supabase } from '@/integrations/supabase/client';
+import { useBanks, useResolveBankName } from '@/hooks/useBanks';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import CategoryIcon from '@/components/CategoryIcon';
@@ -52,6 +53,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
   const checkDuplicate = useDuplicateCheck(trackerId);
+  const { data: banks } = useBanks();
+  const resolveBankName = useResolveBankName();
 
   const editExpense = editExpenseId ? expenses.find(e => e.id === editExpenseId) : null;
   const isEdit = !!editExpense;
@@ -167,6 +170,11 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
     const detectedSuspect = !!detectTransferByKeyword(description);
     const suspectedTransfer = !isEdit && !isTransfer && detectedSuspect;
 
+    // Resolve the typed bank name to a canonical `banks` row (creating one
+    // only if nothing close enough already exists) so manual entries collapse
+    // spelling variants the same way statement uploads do.
+    const resolvedBank = await resolveBankName(bankName);
+
     const expenseData = {
       tracker_id: trackerId,
       created_by_id: user.id,
@@ -183,7 +191,8 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
       suspected_transfer: suspectedTransfer,
       rejected_as_transfer: false,
       payment_method: (paymentMethod || undefined) as PaymentMethod | undefined,
-      bank_name: bankName || undefined,
+      bank_name: resolvedBank?.canonical_name || undefined,
+      bank_id: resolvedBank?.id || undefined,
       source: 'manual' as const,
       ...conversionFields,
     };
@@ -391,9 +400,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
                 list="bank-suggestions"
               />
               <datalist id="bank-suggestions">
-                {[...new Set(expenses.map(e => e.bank_name).filter(Boolean))].map(name => (
-                  <option key={name} value={name!} />
-                ))}
+                {(banks || []).map(b => <option key={b.id} value={b.canonical_name} />)}
               </datalist>
             </div>
 

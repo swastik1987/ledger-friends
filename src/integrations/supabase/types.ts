@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      banks: {
+        Row: {
+          aliases: string[]
+          brand_color: string | null
+          canonical_name: string
+          created_at: string | null
+          domain: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          aliases?: string[]
+          brand_color?: string | null
+          canonical_name: string
+          created_at?: string | null
+          domain?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Update: {
+          aliases?: string[]
+          brand_color?: string | null
+          canonical_name?: string
+          created_at?: string | null
+          domain?: string | null
+          id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       categories: {
         Row: {
           color: string
@@ -100,6 +130,7 @@ export type Database = {
       expenses: {
         Row: {
           amount: number
+          bank_id: string | null
           bank_name: string | null
           category_id: string
           conversion_note: string | null
@@ -129,6 +160,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          bank_id?: string | null
           bank_name?: string | null
           category_id: string
           conversion_note?: string | null
@@ -158,6 +190,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          bank_id?: string | null
           bank_name?: string | null
           category_id?: string
           conversion_note?: string | null
@@ -186,6 +219,13 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "expenses_bank_id_fkey"
+            columns: ["bank_id"]
+            isOneToOne: false
+            referencedRelation: "banks"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "expenses_category_id_fkey"
             columns: ["category_id"]

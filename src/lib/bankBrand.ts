@@ -87,7 +87,7 @@ const DOMAIN_MAP: Record<string, string> = {
  * instead of dbs.com), so we always combine this with an onError handler in
  * <BankBadge> that falls back to a monogram disc when the logo doesn't load.
  */
-function guessDomain(name: string): string {
+export function guessDomain(name: string): string {
   const slug = name.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
   return slug ? `${slug}.com` : '';
 }
@@ -103,14 +103,23 @@ export function bankDomain(name: string | undefined | null): string | undefined 
   return guess || undefined;
 }
 
-export function bankLogoUrl(name: string | undefined | null, sizePx = 64): string | undefined {
-  const domain = bankDomain(name);
+/**
+ * Builds the Google favicon URL for an already-known domain (e.g. a `banks`
+ * table row's `domain` column). Split out from `bankLogoUrl` so DB-resolved
+ * banks — which may carry a domain the hardcoded DOMAIN_MAP doesn't have —
+ * can render a logo without needing a name-based re-guess.
+ */
+export function bankLogoUrlForDomain(domain: string | undefined | null, sizePx = 64): string | undefined {
   if (!domain) return undefined;
   // Google's faviconV2 endpoint returns a PNG of the site's favicon at
   // the requested size. Free, public, no auth. We pin sz to one of the
   // values Google honours (16, 32, 64, 128, 256) — they round otherwise.
   const sz = sizePx <= 16 ? 16 : sizePx <= 32 ? 32 : sizePx <= 64 ? 64 : sizePx <= 128 ? 128 : 256;
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=${sz}`;
+}
+
+export function bankLogoUrl(name: string | undefined | null, sizePx = 64): string | undefined {
+  return bankLogoUrlForDomain(bankDomain(name), sizePx);
 }
 
 // ──────────────────────────────────────────────────────────────────────
