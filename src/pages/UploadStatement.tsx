@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload as UploadIcon, FileText, CircleNotch, X } from '@phosphor-icons/react';
+import { ArrowLeft, Upload as UploadIcon, FileText, CircleNotch, X, CaretDown, CaretUp } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -25,6 +25,7 @@ import {
 } from '@/lib/merchantExtraction';
 import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
+import CategoryDot from '@/components/CategoryDot';
 import BankBadge from '@/components/BankBadge';
 import { useNudge } from '@/hooks/useNudge';
 import { useBanks, useResolveBankName } from '@/hooks/useBanks';
@@ -346,6 +347,9 @@ export default function UploadStatement() {
   // overrides bank_name on every approved draft.
   const [statementBank, setStatementBank] = useState<string>('');
   const [editingBank, setEditingBank] = useState(false);
+  // Review-step per-card UI state: expanded raw narration + inline merchant edit
+  const [expandedRawIds, setExpandedRawIds] = useState<Set<string>>(new Set());
+  const [editingMerchantId, setEditingMerchantId] = useState<string | null>(null);
   const pdfDocRef = useRef<any>(null);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
@@ -1336,6 +1340,22 @@ export default function UploadStatement() {
     } : d));
   };
 
+  const handleMerchantChange = (tempId: string, value: string) => {
+    const cleaned = value.trim().slice(0, 40);
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      merchant_name: cleaned || undefined,
+    } : d));
+  };
+
+  const toggleRawExpanded = (tempId: string) => {
+    setExpandedRawIds(prev => {
+      const next = new Set(prev);
+      if (next.has(tempId)) next.delete(tempId); else next.add(tempId);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
@@ -1562,69 +1582,137 @@ export default function UploadStatement() {
             </div>
 
             <div className="space-y-2">
-              {drafts.map(draft => (
-                <div key={draft.temp_id} className={`rounded-2xl border p-3 shadow-sm ${draft.review_status === 'discarded' ? 'opacity-40 bg-muted' : 'bg-card border-border'}`}>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={draft.review_status !== 'discarded'}
-                      onChange={() => toggleDraft(draft.temp_id)}
-                      className="h-4 w-4 rounded shrink-0"
-                    />
-                    <Select
-                      value={draft.suggested_category_id}
-                      onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
-                      disabled={draft.review_status === 'discarded'}
-                    >
-                      <SelectTrigger className="h-6 w-auto min-w-0 border-none bg-transparent p-0 text-sm font-medium hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-1 [&>svg]:h-3 [&>svg]:w-3">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allCategories.map(cat => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            <span className="flex items-center gap-1.5"><CategoryIcon icon={cat.icon} color={cat.color} size={13} /> {cat.name}</span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="ml-auto text-right shrink-0">
-                      <button
-                        onClick={() => toggleDebitCredit(draft.temp_id)}
-                        className={`font-mono text-sm font-semibold px-2 py-0.5 rounded-lg border transition-colors ${
-                          draft.is_debit
-                            ? 'border-transparent hover:border-red-200 hover:bg-red-50'
-                            : 'text-emerald-600 border-transparent hover:border-emerald-200 hover:bg-emerald-50'
-                        }`}
-                        title="Tap to toggle debit/credit"
-                      >
-                        {draft.is_debit ? '↑' : '↓'} {draft.is_debit ? '' : '+'}{formatAmountShort(draft.amount, draft.detected_currency || trackerCurrency)}
-                      </button>
-                      <p className="text-xs text-muted-foreground">{draft.date}</p>
+              {drafts.map(draft => {
+                const isDiscarded = draft.review_status === 'discarded';
+                const cardCat = allCategories.find(c => c.id === draft.suggested_category_id);
+                const merchant = (draft.merchant_name || '').trim();
+                const title = merchant || draft.description;
+                const showDescription = !!draft.description && draft.description !== title;
+                const isEditingMerchant = editingMerchantId === draft.temp_id;
+                const isRawExpanded = expandedRawIds.has(draft.temp_id);
+
+                return (
+                  <div key={draft.temp_id} className={`rounded-2xl border p-3 shadow-sm ${isDiscarded ? 'opacity-40 bg-muted' : 'bg-card border-border'}`}>
+                    {/* Row 1: checkbox · category dot · merchant title · amount/date */}
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!isDiscarded}
+                        onChange={() => toggleDraft(draft.temp_id)}
+                        className="h-4 w-4 rounded shrink-0"
+                      />
+                      <CategoryDot icon={cardCat?.icon || 'Tag'} color={cardCat?.color || 'hsl(var(--ember))'} size={36} />
+                      <div className="flex-1 min-w-0">
+                        {isEditingMerchant && !isDiscarded ? (
+                          <Input
+                            autoFocus
+                            defaultValue={merchant}
+                            placeholder="Merchant name"
+                            className="h-7 text-sm font-semibold px-1.5"
+                            onBlur={(e) => { handleMerchantChange(draft.temp_id, e.target.value); setEditingMerchantId(null); }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                              if (e.key === 'Escape') setEditingMerchantId(null);
+                            }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isDiscarded}
+                            onClick={() => setEditingMerchantId(draft.temp_id)}
+                            title="Tap to edit merchant name"
+                            className="font-display font-semibold text-[15px] text-ink truncate text-left w-full hover:text-ember transition-colors disabled:hover:text-ink"
+                          >
+                            {title}
+                          </button>
+                        )}
+                        {/* Row 2: category select */}
+                        <Select
+                          value={draft.suggested_category_id}
+                          onValueChange={(val) => handleCategoryChange(draft.temp_id, val)}
+                          disabled={isDiscarded}
+                        >
+                          <SelectTrigger className="mt-0.5 h-5 w-auto min-w-0 border-none bg-transparent p-0 text-xs text-ink-soft hover:text-foreground focus:ring-0 focus:ring-offset-0 gap-1 [&>svg]:h-3 [&>svg]:w-3">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allCategories.map(cat => (
+                              <SelectItem key={cat.id} value={cat.id}>
+                                <span className="flex items-center gap-1.5"><CategoryIcon icon={cat.icon} color={cat.color} size={13} /> {cat.name}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <button
+                          onClick={() => toggleDebitCredit(draft.temp_id)}
+                          className={`font-mono text-sm font-semibold px-2 py-0.5 rounded-lg border transition-colors ${
+                            draft.is_debit
+                              ? 'border-transparent hover:border-red-200 hover:bg-red-50'
+                              : 'text-emerald-600 border-transparent hover:border-emerald-200 hover:bg-emerald-50'
+                          }`}
+                          title="Tap to toggle debit/credit"
+                        >
+                          {draft.is_debit ? '↑' : '↓'} {draft.is_debit ? '' : '+'}{formatAmountShort(draft.amount, draft.detected_currency || trackerCurrency)}
+                        </button>
+                        <p className="text-xs text-muted-foreground">{draft.date}</p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-2 pl-7 space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm text-foreground text-left">{draft.description}</p>
-                      {draft.suspected_transfer && (
+
+                    {/* Row 3: description, chips, notes, warnings */}
+                    <div className="mt-2 pl-[60px] space-y-0.5">
+                      {showDescription && (
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs text-ink-soft text-left truncate">{draft.description}</p>
+                          {draft.suspected_transfer && (
+                            <span
+                              className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium dark:bg-amber-900/20 dark:text-amber-400"
+                              title="Possible internal transfer — confirm after saving"
+                            >
+                              ↔ Possible transfer
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!showDescription && draft.suspected_transfer && (
                         <span
-                          className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium dark:bg-amber-900/20 dark:text-amber-400"
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium dark:bg-amber-900/20 dark:text-amber-400"
                           title="Possible internal transfer — confirm after saving"
                         >
                           ↔ Possible transfer
                         </span>
                       )}
+                      {draft.notes && (
+                        <p className="text-xs text-muted-foreground text-left line-clamp-2">{draft.notes}</p>
+                      )}
+                      {draft.needs_review && !isDiscarded && (
+                        <p className="text-xs text-warning text-left mt-1">
+                          ⚠️ {draft.confidence < 0.75 ? `Low confidence (${(draft.confidence * 100).toFixed(0)}%)` : 'Verify debit/credit direction — tap amount to toggle'}
+                        </p>
+                      )}
+                      {/* Expandable raw narration */}
+                      {draft.raw_description && (
+                        <div className="pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleRawExpanded(draft.temp_id)}
+                            className="inline-flex items-center gap-0.5 text-[11px] text-ink-faint hover:text-ink-soft transition-colors"
+                          >
+                            {isRawExpanded ? <CaretUp size={11} /> : <CaretDown size={11} />}
+                            {isRawExpanded ? 'Hide original' : 'View original'}
+                          </button>
+                          {isRawExpanded && (
+                            <p className="mt-1 text-[11px] font-mono text-muted-foreground text-left break-words leading-snug">
+                              {draft.raw_description}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {draft.notes && (
-                      <p className="text-xs text-muted-foreground text-left line-clamp-2">{draft.notes}</p>
-                    )}
-                    {draft.needs_review && draft.review_status !== 'discarded' && (
-                      <p className="text-xs text-warning text-left mt-1">
-                        ⚠️ {draft.confidence < 0.75 ? `Low confidence (${(draft.confidence * 100).toFixed(0)}%)` : 'Verify debit/credit direction — tap amount to toggle'}
-                      </p>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="sticky bottom-4">
