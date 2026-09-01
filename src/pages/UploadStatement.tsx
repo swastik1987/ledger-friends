@@ -1340,6 +1340,22 @@ export default function UploadStatement() {
     } : d));
   };
 
+  const handleMerchantChange = (tempId: string, value: string) => {
+    const cleaned = value.trim().slice(0, 40);
+    setDrafts(prev => prev.map(d => d.temp_id === tempId ? {
+      ...d,
+      merchant_name: cleaned || undefined,
+    } : d));
+  };
+
+  const toggleRawExpanded = (tempId: string) => {
+    setExpandedRawIds(prev => {
+      const next = new Set(prev);
+      if (next.has(tempId)) next.delete(tempId); else next.add(tempId);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-4 py-3">
