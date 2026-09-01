@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Upload as UploadIcon, FileText, CircleNotch, X } from '@phosphor-icons/react';
+import { ArrowLeft, Upload as UploadIcon, FileText, CircleNotch, X, CaretDown, CaretUp } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -25,6 +25,7 @@ import {
 } from '@/lib/merchantExtraction';
 import Nudge from '@/components/Nudge';
 import CategoryIcon from '@/components/CategoryIcon';
+import CategoryDot from '@/components/CategoryDot';
 import BankBadge from '@/components/BankBadge';
 import { useNudge } from '@/hooks/useNudge';
 import { useBanks, useResolveBankName } from '@/hooks/useBanks';
@@ -346,6 +347,9 @@ export default function UploadStatement() {
   // overrides bank_name on every approved draft.
   const [statementBank, setStatementBank] = useState<string>('');
   const [editingBank, setEditingBank] = useState(false);
+  // Review-step per-card UI state: expanded raw narration + inline merchant edit
+  const [expandedRawIds, setExpandedRawIds] = useState<Set<string>>(new Set());
+  const [editingMerchantId, setEditingMerchantId] = useState<string | null>(null);
   const pdfDocRef = useRef<any>(null);
   // Track newly created categories during bulk import so the review screen can use them
   const newCategoriesRef = useRef<Category[]>([]);
