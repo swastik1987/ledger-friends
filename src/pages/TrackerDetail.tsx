@@ -7,6 +7,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useTransactionTypeFilter } from '@/hooks/useTransactionTypeFilter';
 import BottomNav from '@/components/BottomNav';
 import ExpensesTab from '@/components/tracker/ExpensesTab';
+import LoadError, { type LoadErrorState } from '@/components/LoadError';
 import DashboardTab from '@/components/tracker/DashboardTab';
 import SettingsTab from '@/components/tracker/SettingsTab';
 import AddExpenseSheet from '@/components/tracker/AddExpenseSheet';
@@ -28,7 +29,17 @@ export default function TrackerDetail() {
 
   const tab = (searchParams.get('tab') || 'expenses') as 'expenses' | 'dashboard' | 'settings';
 
-  const { data: tracker, isError: trackerError } = useTracker(trackerId!);
+  const {
+    data: tracker, isError: trackerError, error: trackerErrorObj,
+    isFetching: trackerFetching, refetch: refetchTracker,
+  } = useTracker(trackerId!);
+  // Only a genuinely missing tracker is "not found": .single() with no visible
+  // row (deleted, or RLS hides it from non-members) → PGRST116; a malformed id →
+  // 22P02. Anything else (offline, 5xx) is a load failure — offer a retry
+  // instead of bouncing the user home with a misleading "Tracker not found".
+  const trackerErrorCode = (trackerErrorObj as { code?: string } | null)?.code;
+  const trackerMissing = trackerError && (trackerErrorCode === 'PGRST116' || trackerErrorCode === '22P02');
+  const trackerLoadFailed = trackerError && !trackerMissing && !tracker;
   const { data: members, isFetched: membersFetched } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
   const { data: availableMonths } = useExpenseMonths(trackerId!);
@@ -36,7 +47,14 @@ export default function TrackerDetail() {
   const latestMonth = availableMonths?.find(m => m.value !== 'all')?.value || format(new Date(), 'yyyy-MM');
   const month = searchParams.get('month') || latestMonth;
 
-  const { data: expenses, isLoading: expensesLoading } = useExpenses(trackerId!, month);
+  const {
+    data: expenses, isLoading: expensesLoading, isError: expensesError,
+    isFetching: expensesFetching, refetch: refetchExpenses,
+  } = useExpenses(trackerId!, month);
+  // Failed load with nothing cached: the tabs show an error, not "No transactions".
+  const expensesLoadError: LoadErrorState | null = expensesError && !expenses?.length
+    ? { onRetry: () => void refetchExpenses(), retrying: expensesFetching }
+    : null;
   const [typeFilter, setTypeFilter] = useTransactionTypeFilter(trackerId!);
 
   const [showAddExpense, setShowAddExpense] = useState(false);
@@ -97,18 +115,27 @@ export default function TrackerDetail() {
   };
 
   useEffect(() => {
-    if (trackerError) {
+    if (trackerMissing) {
       toast.error('Tracker not found');
       navigate('/');
     } else if (membersFetched && members && user && !members.some(m => m.user_id === user.id)) {
       toast.error("You don't have access to this tracker");
       navigate('/');
     }
-  }, [trackerError, membersFetched, members, user, navigate]);
+  }, [trackerMissing, membersFetched, members, user, navigate]);
 
   if (!tracker) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="animate-pulse text-ink-soft">Loading...</div>
+      {trackerLoadFailed ? (
+        <LoadError
+          what="this tracker"
+          onRetry={() => void refetchTracker()}
+          retrying={trackerFetching}
+          secondaryAction={{ label: 'Back to Home', onClick: () => navigate('/') }}
+        />
+      ) : (
+        <div className="animate-pulse text-ink-soft">Loading...</div>
+      )}
     </div>
   );
 
@@ -129,6 +156,7 @@ export default function TrackerDetail() {
             expenses={expenses || []}
             categories={categories || []}
             isLoading={expensesLoading}
+            loadError={expensesLoadError}
             month={month}
             onMonthChange={setMonth}
             onAddExpense={() => setShowAddExpense(true)}
@@ -151,6 +179,7 @@ export default function TrackerDetail() {
             month={month}
             onMonthChange={setMonth}
             isLoading={expensesLoading}
+            loadError={expensesLoadError}
           />
         )}
 

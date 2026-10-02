@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { format, isToday, isYesterday } from 'date-fns';
 import { Receipt, X, MagnifyingGlass, Tag, ArrowsLeftRight, Trash, ArrowsClockwise, CircleNotch } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
+import LoadError, { type LoadErrorState } from '@/components/LoadError';
 import { Input } from '@/components/ui/input';
 import { useUndoableDeleteExpense, useBulkUpdateCategory, useBulkDeleteExpenses, useBulkMoveExpenses, useExpenseMonths } from '@/hooks/useExpenses';
 import { useTrackers } from '@/hooks/useTrackers';
@@ -95,6 +96,8 @@ interface Props {
   expenses: Expense[];
   categories: Category[];
   isLoading: boolean;
+  /** Set when expenses failed to load with nothing cached. */
+  loadError?: LoadErrorState | null;
   month: string;
   onMonthChange: (m: string) => void;
   onAddExpense: () => void;
@@ -108,7 +111,7 @@ interface Props {
 }
 
 export default function ExpensesTab({
-  trackerId, trackerCurrency, expenses, categories, isLoading,
+  trackerId, trackerCurrency, expenses, categories, isLoading, loadError,
   month, onMonthChange, onAddExpense, onEditExpense, isAdmin, userId,
   typeFilter, onTypeFilterChange, suspectedTransferCount, onOpenTransferReview,
 }: Props) {
@@ -339,6 +342,11 @@ export default function ExpensesTab({
   const otherTrackers = (allTrackers || []).filter(t => t.id !== trackerId);
   const isBulkPending = bulkUpdateCategory.isPending || bulkDeleteExpenses.isPending || bulkMoveExpenses.isPending;
   const symbol = getCurrency(trackerCurrency).symbol;
+
+  // Failed load with nothing cached: an error, not "No transactions" under a ₹0 hero.
+  if (loadError && !isLoading) {
+    return <LoadError what="this tracker's transactions" onRetry={loadError.onRetry} retrying={loadError.retrying} />;
+  }
 
   return (
     <div ref={rootRef} className="pb-4">

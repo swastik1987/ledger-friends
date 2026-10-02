@@ -18,6 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import BottomNav from '@/components/BottomNav';
+import LoadError from '@/components/LoadError';
 
 // ─── Delete Countdown Button ────────────────────────────────────
 function DeleteCountdownButton({ onConfirm, label, seconds = 5 }: { onConfirm: () => void; label: string; seconds?: number }) {
@@ -47,7 +48,12 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
   const { setActiveTrackerId } = useApp();
-  const { data: trackers, isLoading: trackersLoading } = useTrackers();
+  const {
+    data: trackers, isLoading: trackersLoading, isError: trackersError,
+    isFetching: trackersFetching, refetch: refetchTrackers,
+  } = useTrackers();
+  // Same rule as Home: a failed load with nothing cached isn't "No trackers yet".
+  const trackersFailed = trackersError && !trackers?.length;
   const deleteTracker = useDeleteTracker();
 
   // Tracker deletion state
@@ -308,7 +314,11 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {!trackersLoading && (!trackers || trackers.length === 0) && (
+          {trackersFailed && (
+            <LoadError compact what="your trackers" onRetry={() => void refetchTrackers()} retrying={trackersFetching} />
+          )}
+
+          {!trackersLoading && !trackersFailed && (!trackers || trackers.length === 0) && (
             <div className="rounded-xl bg-card border border-border p-6 text-center">
               <p className="text-sm text-muted-foreground">No trackers yet</p>
             </div>

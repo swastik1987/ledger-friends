@@ -10,6 +10,7 @@ import CategoryDot from '@/components/CategoryDot';
 import { formatAmountShort, formatAmount, getCurrency } from '@/lib/currencies';
 import { categoryFlows, categoryNetOutgo, netExpenseSummedByMonth, totalOut as sumOut, totalIn as sumIn, dailyOutgo } from '@/lib/netOutgo';
 import CompareSheet from './CompareSheet';
+import LoadError, { type LoadErrorState } from '@/components/LoadError';
 
 interface Props {
   trackerId: string;
@@ -19,6 +20,8 @@ interface Props {
   month: string;
   onMonthChange: (m: string) => void;
   isLoading: boolean;
+  /** Set when expenses failed to load with nothing cached. */
+  loadError?: LoadErrorState | null;
 }
 
 /**
@@ -148,7 +151,7 @@ function StackedShareBar({ slices }: { slices: { id: string; value: number; colo
 
 export default function DashboardTab({
   trackerId, trackerCurrency, expenses, categories,
-  month, onMonthChange, isLoading,
+  month, onMonthChange, isLoading, loadError,
 }: Props) {
   const { data: months = [{ value: 'all', label: 'All Months' }] } = useExpenseMonths(trackerId);
   const navigate = useNavigate();
@@ -234,6 +237,11 @@ export default function DashboardTab({
         ))}
       </div>
     );
+  }
+
+  // Failed load with nothing cached: an error, not a ₹0 hero and "No data".
+  if (loadError) {
+    return <LoadError what="this tracker's dashboard" onRetry={loadError.onRetry} retrying={loadError.retrying} />;
   }
 
   return (
