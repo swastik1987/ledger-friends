@@ -31,7 +31,7 @@ export default function TrackerDetail() {
 
   const {
     data: tracker, isError: trackerError, error: trackerErrorObj,
-    isFetching: trackerFetching, refetch: refetchTracker,
+    isFetching: trackerFetching, isPaused: trackerPaused, refetch: refetchTracker,
   } = useTracker(trackerId!);
   // Only a genuinely missing tracker is "not found": .single() with no visible
   // row (deleted, or RLS hides it from non-members) → PGRST116; a malformed id →
@@ -39,7 +39,9 @@ export default function TrackerDetail() {
   // instead of bouncing the user home with a misleading "Tracker not found".
   const trackerErrorCode = (trackerErrorObj as { code?: string } | null)?.code;
   const trackerMissing = trackerError && (trackerErrorCode === 'PGRST116' || trackerErrorCode === '22P02');
-  const trackerLoadFailed = trackerError && !trackerMissing && !tracker;
+  // Paused = React Query is holding the request until the device is back online.
+  const trackerOffline = trackerPaused && !tracker;
+  const trackerLoadFailed = (trackerError && !trackerMissing && !tracker) || trackerOffline;
   const { data: members, isFetched: membersFetched } = useTrackerMembers(trackerId!);
   const { data: categories } = useCategories(trackerId);
   const { data: availableMonths } = useExpenseMonths(trackerId!);
@@ -49,11 +51,13 @@ export default function TrackerDetail() {
 
   const {
     data: expenses, isLoading: expensesLoading, isError: expensesError,
-    isFetching: expensesFetching, refetch: refetchExpenses,
+    isFetching: expensesFetching, isPaused: expensesPaused, refetch: refetchExpenses,
   } = useExpenses(trackerId!, month);
-  // Failed load with nothing cached: the tabs show an error, not "No transactions".
-  const expensesLoadError: LoadErrorState | null = expensesError && !expenses?.length
-    ? { onRetry: () => void refetchExpenses(), retrying: expensesFetching }
+  // Failed (or offline-paused) load with nothing cached: the tabs show that
+  // state, not "No transactions".
+  const expensesOffline = expensesPaused && !expenses?.length;
+  const expensesLoadError: LoadErrorState | null = (expensesError && !expenses?.length) || expensesOffline
+    ? { onRetry: () => void refetchExpenses(), retrying: expensesFetching, offline: expensesOffline }
     : null;
   const [typeFilter, setTypeFilter] = useTransactionTypeFilter(trackerId!);
 
@@ -131,6 +135,7 @@ export default function TrackerDetail() {
           what="this tracker"
           onRetry={() => void refetchTracker()}
           retrying={trackerFetching}
+          offline={trackerOffline}
           secondaryAction={{ label: 'Back to Home', onClick: () => navigate('/') }}
         />
       ) : (

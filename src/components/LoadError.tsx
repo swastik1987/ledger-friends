@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 export interface LoadErrorState {
   onRetry: () => void;
   retrying: boolean;
+  /** Query is paused waiting for the network rather than failed (see `offline` below). */
+  offline: boolean;
 }
 
 interface Props {
@@ -17,6 +19,12 @@ interface Props {
   compact?: boolean;
   /** Optional secondary action shown under "Try again" (full variant only). */
   secondaryAction?: { label: string; onClick: () => void };
+  /**
+   * The query is paused, not failed: once React Query has seen the device go
+   * offline it holds new queries (fetchStatus 'paused') instead of erroring,
+   * and resumes them on reconnect. No retry button — it happens automatically.
+   */
+  offline?: boolean;
 }
 
 /**
@@ -24,8 +32,14 @@ interface Props {
  * Without it, pages fall through to their empty state and tell users who do
  * have data that they have none ("No trackers yet — Create My First Tracker").
  */
-export default function LoadError({ what, onRetry, retrying = false, compact = false, secondaryAction }: Props) {
-  const retry = (
+export default function LoadError({ what, onRetry, retrying = false, compact = false, secondaryAction, offline = false }: Props) {
+  const What = what.charAt(0).toUpperCase() + what.slice(1);
+  const heading = offline ? "You're offline" : `Couldn't load ${what}`;
+  const body = offline
+    ? `${What} will load as soon as you're back online. Your data is safe.`
+    : 'Check your connection and try again. Your data is safe.';
+
+  const retry = offline ? null : (
     <Button
       variant="outline"
       size={compact ? 'sm' : 'default'}
@@ -41,7 +55,9 @@ export default function LoadError({ what, onRetry, retrying = false, compact = f
   if (compact) {
     return (
       <div role="alert" className="rounded-xl bg-card border border-border p-6 text-center space-y-3">
-        <p className="text-sm text-muted-foreground">Couldn&apos;t load {what}. Check your connection.</p>
+        <p className="text-sm text-muted-foreground">
+          {offline ? `You're offline. ${What} will load when you reconnect.` : `Couldn't load ${what}. Check your connection.`}
+        </p>
         {retry}
       </div>
     );
@@ -50,8 +66,8 @@ export default function LoadError({ what, onRetry, retrying = false, compact = f
   return (
     <div role="alert" className="text-center py-16 px-4 animate-fade-in-up">
       <CloudSlash size={64} color="hsl(var(--ink-faint) / 0.45)" className="mx-auto mb-4" />
-      <p className="font-display font-semibold text-lg text-ink">Couldn&apos;t load {what}</p>
-      <p className="text-sm text-ink-soft mb-4">Check your connection and try again. Your data is safe.</p>
+      <p className="font-display font-semibold text-lg text-ink">{heading}</p>
+      <p className="text-sm text-ink-soft mb-4">{body}</p>
       {retry}
       {secondaryAction && (
         <button onClick={secondaryAction.onClick} className="block mx-auto mt-3 text-sm font-medium text-ink-soft">

@@ -50,10 +50,12 @@ export default function ProfilePage() {
   const { setActiveTrackerId } = useApp();
   const {
     data: trackers, isLoading: trackersLoading, isError: trackersError,
-    isFetching: trackersFetching, refetch: refetchTrackers,
+    isFetching: trackersFetching, isPaused: trackersPaused, refetch: refetchTrackers,
   } = useTrackers();
-  // Same rule as Home: a failed load with nothing cached isn't "No trackers yet".
-  const trackersFailed = trackersError && !trackers?.length;
+  // Same rule as Home: a failed load — or one paused because the device is
+  // offline — with nothing cached isn't "No trackers yet".
+  const trackersOffline = trackersPaused && !trackers?.length;
+  const trackersFailed = (trackersError && !trackers?.length) || trackersOffline;
   const deleteTracker = useDeleteTracker();
 
   // Tracker deletion state
@@ -315,7 +317,13 @@ export default function ProfilePage() {
           )}
 
           {trackersFailed && (
-            <LoadError compact what="your trackers" onRetry={() => void refetchTrackers()} retrying={trackersFetching} />
+            <LoadError
+              compact
+              what="your trackers"
+              onRetry={() => void refetchTrackers()}
+              retrying={trackersFetching}
+              offline={trackersOffline}
+            />
           )}
 
           {!trackersLoading && !trackersFailed && (!trackers || trackers.length === 0) && (

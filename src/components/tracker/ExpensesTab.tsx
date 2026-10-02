@@ -345,7 +345,14 @@ export default function ExpensesTab({
 
   // Failed load with nothing cached: an error, not "No transactions" under a ₹0 hero.
   if (loadError && !isLoading) {
-    return <LoadError what="this tracker's transactions" onRetry={loadError.onRetry} retrying={loadError.retrying} />;
+    return (
+      <LoadError
+        what="this tracker's transactions"
+        onRetry={loadError.onRetry}
+        retrying={loadError.retrying}
+        offline={loadError.offline}
+      />
+    );
   }
 
   return (

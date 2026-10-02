@@ -71,7 +71,7 @@ function MiniSparkline({ values, color, width = 64, height = 24 }: { values: num
 
 export default function HomePage() {
   const { profile } = useAuth();
-  const { data: trackers, isLoading, isError, isFetching, refetch } = useTrackers();
+  const { data: trackers, isLoading, isError, isFetching, isPaused, refetch } = useTrackers();
   const { data: homeStats } = useTrackerHomeStats();
   const { setActiveTrackerId } = useApp();
   const navigate = useNavigate();
@@ -90,6 +90,10 @@ export default function HomePage() {
   // "No trackers yet" UI — that tells users with trackers their data is gone.
   // (A failed background refetch keeps showing the cached list instead.)
   const loadFailed = isError && trackerList.length === 0;
+  // Same for a query React Query paused because the device is offline — it
+  // isn't loading (isLoading is false while paused) and hasn't errored.
+  const waitingForNetwork = isPaused && trackerList.length === 0;
+  const unavailable = loadFailed || waitingForNetwork;
 
   // Bento tiles: pinned trackers in pin order — first pin is the hero tile.
   const pinnedTrackers = pinnedIds
@@ -181,12 +185,12 @@ export default function HomePage() {
 
       {/* Content */}
       <div className="flex-1 max-w-lg mx-auto w-full px-4 py-4 space-y-3">
-        {loadFailed && (
-          <LoadError what="your trackers" onRetry={() => void refetch()} retrying={isFetching} />
+        {unavailable && (
+          <LoadError what="your trackers" onRetry={() => void refetch()} retrying={isFetching} offline={waitingForNetwork} />
         )}
 
         {/* Onboarding banner for new users */}
-        {!isLoading && !loadFailed && trackerList.length === 0 && (
+        {!isLoading && !unavailable && trackerList.length === 0 && (
           <div className="rounded-2xl bg-surface-alt border border-line-soft p-5 space-y-3 shadow-sm animate-fade-in-up">
             <p className="font-display text-lg font-semibold">Welcome to ExpenseSync</p>
             <p className="text-sm text-ink-soft">Start by creating your first tracker. You can invite collaborators after creating it.</p>
@@ -341,7 +345,7 @@ export default function HomePage() {
           );
         })}
 
-        {!isLoading && !loadFailed && trackerList.length === 0 && (
+        {!isLoading && !unavailable && trackerList.length === 0 && (
           <div className="text-center py-16">
             <FolderOpen className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
             <p className="font-semibold text-lg">No trackers yet</p>

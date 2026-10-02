@@ -241,7 +241,14 @@ export default function DashboardTab({
 
   // Failed load with nothing cached: an error, not a ₹0 hero and "No data".
   if (loadError) {
-    return <LoadError what="this tracker's dashboard" onRetry={loadError.onRetry} retrying={loadError.retrying} />;
+    return (
+      <LoadError
+        what="this tracker's dashboard"
+        onRetry={loadError.onRetry}
+        retrying={loadError.retrying}
+        offline={loadError.offline}
+      />
+    );
   }
 
   return (
