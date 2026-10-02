@@ -25,6 +25,10 @@ export default defineConfig(({ mode }) => ({
     react(),
     mode === "development" && componentTagger(),
     VitePWA({
+      // The native (Capacitor) build serves assets from the app bundle, so a
+      // service worker is redundant there and risks serving stale chunks —
+      // `vite build --mode capacitor` skips it. Web/PWA builds are unchanged.
+      disable: mode === "capacitor",
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "logo-512.png"],
       manifest: {

@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppProvider } from "@/contexts/AppContext";
 import { lazy, Suspense } from "react";
+import SpikeLauncher from "./spike/SpikeLauncher";
 
 const AuthPage = lazy(() => import("./pages/Auth"));
 const Home = lazy(() => import("./pages/Home"));
@@ -14,6 +15,8 @@ const TrackerDetail = lazy(() => import("./pages/TrackerDetail"));
 const UploadStatement = lazy(() => import("./pages/UploadStatement"));
 const ProfilePage = lazy(() => import("./pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+// Phase 0 Android offline-sync spike (throwaway) — docs/android-spike-runbook.md
+const SpikePage = lazy(() => import("./spike/SpikePage"));
 
 const queryClient = new QueryClient();
 
@@ -49,6 +52,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <AppProvider>
+            <SpikeLauncher />
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
@@ -56,6 +60,8 @@ const App = () => (
                 <Route path="/tracker/:trackerId" element={<ProtectedRoute><TrackerDetail /></ProtectedRoute>} />
                 <Route path="/tracker/:trackerId/upload" element={<ProtectedRoute><UploadStatement /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+                {/* Unprotected on purpose: the spike observes auth state while offline. */}
+                <Route path="/spike" element={<SpikePage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
