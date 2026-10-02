@@ -84,6 +84,7 @@ ledger-friends/
 │   │   ├── CategoryDot.tsx                   # Colored disc + Phosphor line icon
 │   │   ├── CategoryIcon.tsx                  # Phosphor regular weight render
 │   │   ├── BankBadge.tsx                     # Real bank logo via Google favicons + brand-color monogram fallback
+│   │   ├── LoadError.tsx                     # Failed/offline-paused query state (full + compact) — use instead of empty states when a load fails
 │   │   ├── PaymentBadge.tsx                  # Per-method Phosphor icon + tinted disc
 │   │   ├── Nudge.tsx
 │   │   ├── NavLink.tsx
@@ -649,7 +650,7 @@ What anyone touching the Android work needs to know:
 
 ## KNOWN QUIRKS & FUTURE WORK
 
-- **Failed loads render as empty data.** `Home.tsx` reads only `isLoading` from `useTrackers()`, never `isError`, so a failed fetch (offline or a network blip) shows the first-run "Welcome… / No trackers yet / Create My First Tracker" UI for accounts that have trackers. `Profile.tsx` has the same pattern. Fix: render an error-plus-retry state when the query errors.
+- **Never let a failed or paused query render an empty state.** With nothing cached, a failed query must show `LoadError` ("Couldn't load … / Try again"), not "No trackers yet" or "No transactions in {month}". Home, Profile, TrackerDetail and the Transactions/Dashboard tabs do this. React Query (default `networkMode: 'online'`) assumes online at startup, so a cold start offline **errors**. Once it has seen an offline event, new queries instead **pause** (`isPaused`), and `isLoading` (`isPending && isFetching`) is `false` while paused. So check `isError || isPaused` with no data, and use `LoadError`'s `offline` mode for the paused case (no retry button; queries resume on reconnect). TrackerDetail redirects with "Tracker not found" only for a genuinely missing tracker (`PGRST116` / `22P02`), not on network failures.
 
 - **Edge function token cost / free-tier rate limits.** Each chunk re-sends the full ~4 KB system prompt. Chunking is now intentionally tuned for the **Gemini free tier**: large 25k-char chunks + `CONCURRENCY = 1` keep a normal statement to one Gemini call so requests-per-minute stays low. Raising concurrency would improve wall-clock on very long statements but reintroduces the burst that trips the free-tier RPM cap (the original 502/504 symptom). If the project moves to a billed Gemini key, concurrency can be raised again. The binding free-tier limit is **requests-per-minute**, not volume — a single click previously fanned out into ~5–16 Gemini calls (metadata + chunked parse × server-retry × client-retry), which is what caused 100%-error 429s at low daily request counts.
 - **Notifications row** in Settings → Preferences is a placeholder; tapping toasts "Notifications are not yet wired up".
