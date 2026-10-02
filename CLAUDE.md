@@ -19,7 +19,7 @@ The tracker page received a full visual + interaction revamp in May 2026 — "Sa
 | Forms | React Hook Form 7.61 + Zod 3.25 |
 | Database | Supabase PostgreSQL with Row Level Security |
 | Real-time | Supabase Realtime (postgres_changes) |
-| Auth | Supabase Auth (email/password) |
+| Auth | Supabase Auth — email/password + Google (web: Lovable Cloud OAuth broker; Android: native sign-in). Apple removed Oct 2026 |
 | File Parsing | pdfjs-dist 4.0.379, PapaParse 5.5.3, XLSX 0.18.5 |
 | AI | Gemini via Supabase Edge Functions — default `gemini-2.5-flash`, switchable with the `GEMINI_MODEL` secret |
 | Charts | hand-rolled SVG sparkline (recharts dependency fully removed Jun 2026, incl. the unused `ui/chart.tsx`) |
@@ -123,8 +123,12 @@ ledger-friends/
 │   │   └── index.ts                          # Expense, DraftExpense, Tracker, …
 │   │
 │   ├── integrations/supabase/
-│   │   ├── client.ts
+│   │   ├── client.ts                         # Lovable-generated — do not edit
+│   │   ├── previewAuthStorage.ts             # Lovable-generated — session storage (localStorage; brokered inside Lovable preview iframes)
 │   │   └── types.ts                          # Generated DB types (hand-edited for raw_description + rejected_as_transfer)
+│   │
+│   ├── integrations/lovable/
+│   │   └── index.ts                          # Lovable-generated — Google OAuth via the /~oauth broker (web only)
 │   │
 │   ├── App.tsx
 │   ├── main.tsx
@@ -137,6 +141,10 @@ ledger-friends/
 │       ├── convert-currency/
 │       ├── delete-account/
 │       └── suggest-emojis/
+│
+├── docs/
+│   ├── android-app-plan.md                   # Android app plan (Capacitor + offline-first sync) — Phase 0 results folded in
+│   └── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
 │
 ├── public/                                   # Static assets
 ├── vite.config.ts                            # SWC + lovable-tagger, port 8080
@@ -295,7 +303,12 @@ interface DraftExpense {
 ## KEY FEATURES & USER FLOWS
 
 ### Authentication
-Unchanged from baseline: two-tab UI, `supabase.auth.signInWithPassword()` / `supabase.auth.signUp()`, profile auto-created via trigger, state via `AuthContext`.
+- **Email/password:** two-tab UI (`supabase.auth.signInWithPassword()` / `supabase.auth.signUp()`), profile auto-created via trigger, state via `AuthContext`.
+- **Google (web):** "Continue with Google" calls `lovable.auth.signInWithOAuth('google', { redirect_uri: window.location.origin })` from the **Lovable-generated** `src/integrations/lovable/index.ts` (`@lovable.dev/cloud-auth-js`, do not edit). It navigates to Lovable's **relative** `/~oauth/initiate` broker, which is why `vite.config.ts` keeps `/~oauth` out of the service worker. The broker returns tokens that are passed to `supabase.auth.setSession()`.
+- **Google OAuth credentials:** since 2026-10-02 Lovable Cloud uses **your own credentials** (Cloud → Users → Auth settings → Google), not Lovable's managed client. A Web client and an Android client live in one Google Cloud project, and the consent screen is published to Production. Existing users kept their accounts, because Google's `sub` is stable across OAuth clients. Setup and troubleshooting: `docs/android-google-signin.md`.
+- **Google (Android):** the web broker can't work inside the Capacitor shell (the relative path resolves to the local bundle, and Google blocks OAuth in embedded WebViews), so the Android app uses **native** sign-in instead: Credential Manager via `@capgo/capacitor-social-login`, then `supabase.auth.signInWithIdToken` with a hashed nonce. This lives on branch `spike/android-offline` (`src/lib/nativeGoogleAuth.ts`); see **Android app** below.
+- **Apple sign-in** was removed on 2026-10-02.
+- `src/integrations/supabase/client.ts` and `previewAuthStorage.ts` are also Lovable-generated. Session storage is `localStorage`, except inside a Lovable preview iframe, where it's brokered to the editor.
 
 ### Home Page (bento layout, Jun 2026)
 - Greeting based on time of day + first name
@@ -617,7 +630,26 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ---
 
+## ANDROID APP (in progress)
+
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike) is complete**; the work lives on branch **`spike/android-offline`**, which is throwaway and **not for merging as-is** (it still carries the Apple button that `main` removed, Bun-only lockfile changes, and the `/spike` test harness). Results: `docs/android-spike-runbook.md` §8 on that branch.
+
+What anyone touching the Android work needs to know:
+- **Build:** `vite build --mode capacitor`, then `cap sync android` (`npm run build:android` on the branch). The `capacitor` mode disables the PWA service worker (`VitePWA({ disable: mode === 'capacitor' })`) and loads `.env.capacitor` (Google **Web** OAuth client ID).
+- **Toolchain:** Gradle needs **JDK 21**. Android Studio bundles JDK 25, which fails with `Unsupported class file major version 69`. Keep **AGP 8.13 / Gradle 8.14.3** from Capacitor's template and **decline Android Studio's AGP 9 upgrade**, which rejects the template's `proguard-android.txt`.
+- **Native Google sign-in** needs the installing key's SHA-1 on the Android OAuth client (each dev's debug key, the release key, and Play App Signing). See `docs/android-google-signin.md`.
+- **Spike findings to address:**
+  - Phase 1:
+    - The Android **back button exits the app** with a sheet open: map `@capacitor/app` `backButton` to `history.back()` so `useOverlayBack` works.
+    - Content draws under the status and gesture bars.
+  - Phase 2:
+    - An offline cold start with an expired token shows about a minute of "Loading…", then the logged-out UI: needs an offline-authenticated state in `AuthContext`.
+    - `profile` is network-only.
+  - Phase 3: `@capacitor/network` re-fires an unchanged status every ~3 s, so reconnect triggers must be transition-only.
+
 ## KNOWN QUIRKS & FUTURE WORK
+
+- **Failed loads render as empty data.** `Home.tsx` reads only `isLoading` from `useTrackers()`, never `isError`, so a failed fetch (offline or a network blip) shows the first-run "Welcome… / No trackers yet / Create My First Tracker" UI for accounts that have trackers. `Profile.tsx` has the same pattern. Fix: render an error-plus-retry state when the query errors.
 
 - **Edge function token cost / free-tier rate limits.** Each chunk re-sends the full ~4 KB system prompt. Chunking is now intentionally tuned for the **Gemini free tier**: large 25k-char chunks + `CONCURRENCY = 1` keep a normal statement to one Gemini call so requests-per-minute stays low. Raising concurrency would improve wall-clock on very long statements but reintroduces the burst that trips the free-tier RPM cap (the original 502/504 symptom). If the project moves to a billed Gemini key, concurrency can be raised again. The binding free-tier limit is **requests-per-minute**, not volume — a single click previously fanned out into ~5–16 Gemini calls (metadata + chunked parse × server-retry × client-retry), which is what caused 100%-error 429s at low daily request counts.
 - **Notifications row** in Settings → Preferences is a placeholder; tapping toasts "Notifications are not yet wired up".

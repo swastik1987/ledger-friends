@@ -1,6 +1,6 @@
 # ExpenseSync Android App — Plan
 
-**Status:** Phase 0 (spike) in progress on branch `spike/android-offline` — the test harness and runbook (`docs/android-spike-runbook.md`) live on that branch.
+**Status:** Phase 0 (spike) **complete** (2026-10-02). The core offline design held up: SQLite, session persistence, an offline outbox with automatic push, and idempotent retries all passed on an Android 17 emulator. Results and the findings that reshaped this plan are in `docs/android-spike-runbook.md` §8 on branch `spike/android-offline`.
 **Last updated:** 2026-10-02
 
 ---
@@ -96,9 +96,11 @@ Deletes are currently hard (`.delete()` in `useExpenses.ts`). With a pure "pull 
 
 ## 7. Auth and session in the native shell
 
-- Auth is email/password (`supabase.auth.signInWithPassword`), so **no native OAuth redirect handling** is needed.
+- **Google sign-in needs a native flow** (corrected after the spike; this section originally said email/password only). The web's `lovable.auth.signInWithOAuth` sends the page to Lovable's relative `/~oauth` broker, which the Capacitor shell serves from its local bundle as a 404, and Google blocks OAuth inside embedded WebViews anyway. The Android app instead uses **native Google sign-in**: Credential Manager via `@capgo/capacitor-social-login`, then `supabase.auth.signInWithIdToken`, with a hashed nonce. This requires Lovable Cloud's Google auth on *your own credentials*, plus Web and Android OAuth clients in one Google Cloud project; setup is in `docs/android-google-signin.md`. **Verified on the emulator:** sign-in matched the existing Google user, so no duplicate account was created. Email/password works unchanged. Apple sign-in was removed from the product on 2026-10-02.
 - `src/integrations/supabase/client.ts` and `previewAuthStorage.ts` are **Lovable-generated (do not edit)**. Outside a Lovable preview iframe, which includes the Capacitor WebView (its host is `localhost`), session storage falls back to plain **`localStorage`**. On Android, WebView `localStorage` lives in the app's data directory and normally survives restarts, so the plan is to keep it and avoid touching the generated client. **Spike Q2 verifies this.** If it proves unreliable, the fallback is a Capacitor-Preferences-backed storage adapter. That would have to be coordinated with Lovable, because `client.ts` gets regenerated.
-- **Risk — offline cold start with an expired access token (spike Q3).** Access tokens expire after an hour by default. If the app cold-starts offline after that, supabase-js can't refresh the token. The hypothesis is that it keeps the stored refresh token but reports *no session*. `AuthContext` would then set `user = null` and `ProtectedRoute` would bounce to `/auth`, hiding all the local data. If confirmed, `AuthContext` needs an **offline-authenticated** state derived from the stored session, the route guards must allow local-data screens, and the real session is restored when a refresh succeeds after reconnect.
+- **Session storage: confirmed fine (spike Q2).** WebView `localStorage` survived force-stop, app update and device reboot, so the generated client stays untouched. One caveat: the WebView writes `localStorage` to disk **lazily**. A write followed by a kill within about a second was lost in the spike, so a refresh-token rotation followed by an immediate kill could leave a stale refresh token on disk. Watch for unexpected sign-outs, and consider re-checking the session on resume.
+- **Offline cold start with an expired access token: confirmed problem (spike Q3).** The app showed **"Loading…" for about a minute** while supabase-js retried the refresh, then reported *no session*, so `ProtectedRoute` would show the logged-out UI, although the refresh token was still stored. On reconnect supabase-js recovered the session by itself, and queued requests waited for the refresh, so there was no ordering failure. **Phase 2 must add an offline-authenticated state:** when offline, read the user from the stored session (with a short timeout instead of waiting for `INITIAL_SESSION`), let route guards show local-data screens, and switch to the real session once a refresh succeeds.
+- **The profile is network-only.** `AuthContext` fetches `profiles` on every auth event, so an offline start shows "Good evening, there", and `AddExpenseSheet` refuses to save without `profile`. Phase 2 caches the profile locally.
 
 ---
 
@@ -136,10 +138,10 @@ The `vite-plugin-pwa` service worker is redundant inside Capacitor, because asse
 
 | Phase | Goal | Key output | Status |
 |---|---|---|---|
-| **0 — Spike** | De-risk the hard parts | SQLite in the WebView, session persistence, offline cold start, one offline write → sync round-trip with an idempotent retry, all on a real device/emulator | **In progress** |
-| **1 — Wrapper** | App runs, online-only | Capacitor 8 + Android project committed, builds and runs, login works, SW disabled in native build, app icon/splash | — |
-| **2 — Local reads** | View data offline | SQLite schema (explicit columns), pull engine, React Query `queryFn`s read local data, realtime writes local data, offline-authenticated state if Q3 confirms | — |
-| **3 — Offline writes** | Add/edit/delete while offline | Client UUIDs, outbox, push engine, reconnect/resume triggers, pending-sync badges, offline banner, online-only features disabled offline | — |
+| **0 — Spike** | De-risk the hard parts | SQLite in the WebView, session persistence, offline cold start, one offline write → sync round-trip with an idempotent retry, all on an emulator | **Done** (Q1, Q2, Q4, Q5 pass; Q3 confirmed problem; Q6 partial) |
+| **1 — Wrapper** | App runs, online-only | Capacitor 8 + Android project committed, builds and runs, SW disabled in native build, app icon/splash, **plus from the spike:** native Google sign-in (already built on the spike branch), **Android back button → `history.back()`** via `@capacitor/app` (today BACK exits the app with a sheet open), **status-bar / safe-area handling** (content draws under the system bars), **toolchain pinned to JDK 21 + AGP 8.13** | — |
+| **2 — Local reads** | View data offline | SQLite schema (explicit columns), pull engine, React Query `queryFn`s read local data, realtime writes local data, **offline-authenticated state** (Q3 confirmed), **local profile cache**, **error states instead of empty states** for failed loads | — |
+| **3 — Offline writes** | Add/edit/delete while offline | Client UUIDs, outbox, push engine, reconnect/resume triggers (**offline → online transitions only**: `@capacitor/network` re-fires the same status every few seconds), pending-sync badges, offline banner, online-only features disabled offline | — |
 | **4 — Sync hardening** | Correctness | Soft-delete migration + query/RPC updates, poison-message handling, retry/backoff, LWW, offline duplicate check against local data | — |
 | **5 — Release** | Ship | Final `applicationId`, signing keystore, versioning, Play Store listing | — |
 
@@ -149,8 +151,10 @@ The `vite-plugin-pwa` service worker is redundant inside Capacitor, because asse
 
 1. **Delete propagation** (§5b). Decide soft delete vs periodic resync early; it shapes Phase 4 and touches the RPCs.
 2. **Read-layer refactor** (§3). Repointing every `queryFn` at SQLite is the bulk of the effort. The existing client-side aggregation reduces it.
-3. **Offline cold start with an expired token** (§7). It can hide local data behind the login screen. Verify in the spike.
-4. **Session storage lives in a generated file** (§7). Any change to auth storage has to be coordinated with Lovable's generator.
+3. **Offline cold start with an expired token** (§7). **Confirmed by the spike:** about a minute of "Loading…", then the logged-out UI. Fixed by Phase 2's offline-authenticated state.
+4. **Session storage lives in a generated file** (§7). The spike showed no change is needed. Any future change still has to be coordinated with Lovable's generator.
+7. **Lazy `localStorage` writes** (§7). A refresh-token rotation followed by an immediate kill could sign a user out. It's rare; monitor for it.
+8. **Toolchain drift.** Android Studio bundles JDK 25 and pushes AGP 9, neither of which Capacitor 8's template supports yet. Pin JDK 21 + AGP 8.13, and revisit when Capacitor moves to AGP 9.
 5. **Realtime vs local optimistic writes.** A realtime echo of a row the device just pushed must not double-apply. Dedupe by client UUID.
 6. **Poison messages** (§4, rule 5). One permanently failing entry must not block everything queued behind it.
 
@@ -161,5 +165,6 @@ The `vite-plugin-pwa` service worker is redundant inside Capacitor, because asse
 1. **Soft delete vs periodic resync** — recommend soft delete.
 2. **Android `applicationId`** — it becomes the Play Store package name and **can't change after the first release**. The spike uses the placeholder `com.expensesync.app`.
 3. **Package manager / lockfile.** The repo has three lockfiles (`bun.lock`, `bun.lockb`, `package-lock.json`), and Lovable updates `bun.lock`. The spike branch adds the Capacitor dependencies with Bun, so `package-lock.json` is stale there. Pick one package manager before Phase 1 merges to `main`.
+6. **Release signing for Google sign-in.** Every signing key that installs the app needs its SHA-1 on the Android OAuth client: each developer's debug key, the release keystore, and Play App Signing. Decide who holds the release keystore before Phase 5.
 4. **Offline foreign-currency entries** — block, or convert at push time (§8).
 5. **Offline creation of trackers / categories** — online-only in v1 (§8).
