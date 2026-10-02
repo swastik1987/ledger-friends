@@ -4,6 +4,17 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
 
+// `vite build --mode capacitor` builds the bundle for the Android app.
+// Capacitor's SystemBars plugin reads the viewport meta tag. With
+// `viewport-fit=cover` it draws the WebView edge-to-edge and leaves the page to
+// pad itself with env(safe-area-inset-*); without it, it fits the WebView
+// between the status bar and the gesture bar. The web layout doesn't pad its
+// sticky top bars, so the native build drops `viewport-fit=cover`.
+const nativeViewport = {
+  name: "native-viewport",
+  transformIndexHtml: (html: string) => html.replace(/,\s*viewport-fit=cover/, ""),
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
@@ -24,7 +35,11 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === "development" && componentTagger(),
+    mode === "capacitor" && nativeViewport,
     VitePWA({
+      // The Android app loads its assets from the app bundle, so a service
+      // worker is redundant there and could serve stale chunks after an update.
+      disable: mode === "capacitor",
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "logo-512.png"],
       manifest: {
@@ -71,7 +86,7 @@ export default defineConfig(({ mode }) => ({
           },
         ],
         // Paths the SPA must never swallow: /~oauth/* is Lovable's OAuth
-        // broker (Google/Apple sign-in) served by the host, not React Router.
+        // broker (Google sign-in) served by the host, not React Router.
         // Without this, the installed PWA's SW serves index.html for the
         // broker navigation and the user lands on the app's 404 page.
         navigateFallbackDenylist: [/^\/api/, /^\/~oauth/],

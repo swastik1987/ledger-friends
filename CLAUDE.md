@@ -29,7 +29,7 @@ The tracker page received a full visual + interaction revamp in May 2026 — "Sa
 | Dates | date-fns 3.6.0 |
 | Fonts | **Bricolage Grotesque** (display/headers), **Manrope** (UI body), **JetBrains Mono** (amounts) |
 
-Dev server runs on `localhost:8080` via `npm run dev`.
+Dev server runs on `localhost:8080` via `bun run dev`.
 
 **TypeScript strictness:** `strict: true` + `noImplicitAny: true` in both `tsconfig.json` and `tsconfig.app.json` (flipped May 2026). `tsc --noEmit` is clean — undeclared identifiers no longer slip through silently. Keep new code strict.
 
@@ -118,6 +118,8 @@ ledger-friends/
 │   │   ├── stringSimilarity.ts               # Shared Levenshtein similarity() (category matching + bank matching)
 │   │   ├── paymentMethodMeta.ts              # Payment method → Phosphor icon + tinted color
 │   │   ├── phosphorIcons.ts                  # Icon name → Phosphor component map + heuristic picker
+│   │   ├── nativeShell.ts                    # Android only: back button → history.back() (lazy-loaded from main.tsx)
+│   │   ├── nativeGoogleAuth.ts               # Android only: Credential Manager → signInWithIdToken (lazy-loaded from Auth.tsx)
 │   │   └── utils.ts
 │   │
 │   ├── types/
@@ -147,8 +149,11 @@ ledger-friends/
 │   ├── android-app-plan.md                   # Android app plan (Capacitor + offline-first sync) — Phase 0 results folded in
 │   └── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
 │
+├── android/                                  # Capacitor Android project (committed; build/ and copied web assets are ignored)
 ├── public/                                   # Static assets
-├── vite.config.ts                            # SWC + lovable-tagger, port 8080
+├── capacitor.config.ts                       # appId com.expensesync.app, webDir dist, SystemBars style
+├── .env.capacitor                            # Google Web OAuth client ID for the native build (public)
+├── vite.config.ts                            # SWC + lovable-tagger, port 8080; `--mode capacitor` = native build
 ├── tailwind.config.ts                        # Sand & Ember tokens + display/sans/mono fonts
 ├── tsconfig.json / tsconfig.app.json         # strict: true + noImplicitAny: true (use `tsc --noEmit -p tsconfig.app.json`)
 └── package.json
@@ -307,7 +312,7 @@ interface DraftExpense {
 - **Email/password:** two-tab UI (`supabase.auth.signInWithPassword()` / `supabase.auth.signUp()`), profile auto-created via trigger, state via `AuthContext`.
 - **Google (web):** "Continue with Google" calls `lovable.auth.signInWithOAuth('google', { redirect_uri: window.location.origin })` from the **Lovable-generated** `src/integrations/lovable/index.ts` (`@lovable.dev/cloud-auth-js`, do not edit). It navigates to Lovable's **relative** `/~oauth/initiate` broker, which is why `vite.config.ts` keeps `/~oauth` out of the service worker. The broker returns tokens that are passed to `supabase.auth.setSession()`.
 - **Google OAuth credentials:** since 2026-10-02 Lovable Cloud uses **your own credentials** (Cloud → Users → Auth settings → Google), not Lovable's managed client. A Web client and an Android client live in one Google Cloud project, and the consent screen is published to Production. Existing users kept their accounts, because Google's `sub` is stable across OAuth clients. Setup and troubleshooting: `docs/android-google-signin.md`.
-- **Google (Android):** the web broker can't work inside the Capacitor shell (the relative path resolves to the local bundle, and Google blocks OAuth in embedded WebViews), so the Android app uses **native** sign-in instead: Credential Manager via `@capgo/capacitor-social-login`, then `supabase.auth.signInWithIdToken` with a hashed nonce. This lives on branch `spike/android-offline` (`src/lib/nativeGoogleAuth.ts`); see **Android app** below.
+- **Google (Android):** the web broker can't work inside the Capacitor shell (the relative path resolves to the local bundle, and Google blocks OAuth in embedded WebViews), so the Android app uses **native** sign-in instead: Credential Manager via `@capgo/capacitor-social-login`, then `supabase.auth.signInWithIdToken` with a hashed nonce. `Auth.tsx` picks it when `Capacitor.isNativePlatform()` (`src/lib/nativeGoogleAuth.ts`); see **Android app** below.
 - **Apple sign-in** was removed on 2026-10-02.
 - `src/integrations/supabase/client.ts` and `previewAuthStorage.ts` are also Lovable-generated. Session storage is `localStorage`, except inside a Lovable preview iframe, where it's brokered to the editor.
 
@@ -585,12 +590,14 @@ All toasts use `sonner` positioned `bottom-center`:
 ## COMMANDS
 
 ```bash
-npm run dev          # Start dev server (port 8080)
-npm run build        # Production build
-npm run preview      # Preview production build
-npm run lint         # ESLint
-npm run test         # Vitest (run once)
-npm run test:watch   # Vitest (watch mode)
+# Bun is the package manager: bun.lock is the only lockfile (package-lock.json and bun.lockb were removed Oct 2026)
+bun run dev            # Start dev server (port 8080)
+bun run build          # Production build
+bun run preview        # Preview production build
+bun run lint           # ESLint
+bun run test           # Vitest (run once)
+bun run test:watch     # Vitest (watch mode)
+bun run build:android  # Native bundle + cap sync android (see ANDROID APP)
 
 # Supabase
 supabase db push                                                       # Apply migrations
@@ -633,16 +640,17 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike) is complete**; the work lives on branch **`spike/android-offline`**, which is throwaway and **not for merging as-is** (it still carries the Apple button that `main` removed, Bun-only lockfile changes, and the `/spike` test harness). Results: `docs/android-spike-runbook.md` §8 on that branch.
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike) is complete**; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is on branch **`android/phase-1`**, cut from `main`: the app builds, installs and runs online-only.
 
 What anyone touching the Android work needs to know:
-- **Build:** `vite build --mode capacitor`, then `cap sync android` (`npm run build:android` on the branch). The `capacitor` mode disables the PWA service worker (`VitePWA({ disable: mode === 'capacitor' })`) and loads `.env.capacitor` (Google **Web** OAuth client ID).
-- **Toolchain:** Gradle needs **JDK 21**. Android Studio bundles JDK 25, which fails with `Unsupported class file major version 69`. Keep **AGP 8.13 / Gradle 8.14.3** from Capacitor's template and **decline Android Studio's AGP 9 upgrade**, which rejects the template's `proguard-android.txt`.
+- **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS is `src/lib/nativeShell.ts` (back button) and `src/lib/nativeGoogleAuth.ts`. Both are dynamically imported behind `Capacitor.isNativePlatform()`, so the web bundle only carries `@capacitor/core`.
+- **Build:** `bun run build:android` runs `vite build --mode capacitor` then `cap sync android`; then `cd android && ./gradlew assembleDebug`. The `capacitor` mode disables the PWA service worker, drops `viewport-fit=cover` from `index.html` (see Safe areas), and loads `.env.capacitor`, which holds the Google **Web** OAuth client ID. That ID is public and committed.
+- **Toolchain:** Gradle needs **JDK 21**; Android Studio's bundled JDK 25 fails with `Unsupported class file major version 69`. `android/gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`) makes Gradle pick an installed JDK 21 (it finds `~/.jdks`) whatever `JAVA_HOME` says. Keep **AGP 8.13 / Gradle 8.14.3** from Capacitor's template and **decline Android Studio's AGP 9 upgrade**, which rejects the template's `proguard-android.txt`.
+- **Safe areas:** Capacitor 8's built-in SystemBars plugin goes edge-to-edge only when the page declares `viewport-fit=cover`. The native build drops that, so SystemBars pads the WebView between the status bar and the gesture bar, and the cream `windowBackground` (`android/app/src/main/res/values/styles.xml`) shows behind them. The `env(safe-area-inset-*)` uses in web code resolve to 0 there. `SystemBars.style: 'LIGHT'` keeps the bar icons dark. Capacitor logs `Error injecting safe area CSS` at startup: a harmless race in its `--safe-area-inset-*` injection, which we don't use.
+- **Back button:** `nativeShell.ts` maps `@capacitor/app`'s `backButton` to `history.back()` so `useOverlayBack` closes the top overlay. On `/`, or with no history, it minimises the app instead.
+- **Icon/splash:** an adaptive icon split from `public/logo-512.png` into a gradient background layer and a glyph foreground layer (`mipmap-*/ic_launcher_{background,foreground}.png`), plus legacy PNGs. The splash is a cream `windowSplashScreenBackground` with the launcher icon; before Android 12 it's `drawable/splash.xml`.
 - **Native Google sign-in** needs the installing key's SHA-1 on the Android OAuth client (each dev's debug key, the release key, and Play App Signing). See `docs/android-google-signin.md`.
-- **Spike findings to address:**
-  - Phase 1:
-    - The Android **back button exits the app** with a sheet open: map `@capacitor/app` `backButton` to `history.back()` so `useOverlayBack` works.
-    - Content draws under the status and gesture bars.
+- **Spike findings still open:**
   - Phase 2:
     - An offline cold start with an expired token shows about a minute of "Loading…", then the logged-out UI: needs an offline-authenticated state in `AuthContext`.
     - `profile` is network-only.

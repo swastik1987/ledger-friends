@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sand & Ember page background (the background token in src/index.css). -->
+    <color name="app_background">#F6F1E7</color>
+</resources>
