@@ -1,7 +1,7 @@
 # ExpenseSync Android App — Plan
 
-**Status:** Phase 0 (spike) **complete** (2026-10-02). The core offline design held up: SQLite, session persistence, an offline outbox with automatic push, and idempotent retries all passed on an Android 17 emulator. Results and the findings that reshaped this plan are in `docs/android-spike-runbook.md` §8 on branch `spike/android-offline`.
-**Last updated:** 2026-10-02
+**Status:** Phase 0 (spike) **complete** (2026-10-02); Phase 1 (wrapper) merged to `main`; Phase 2 (local reads) **done** on `android/phase-2` (2026-10-03). Spike results are in `docs/android-spike-runbook.md` §8 on branch `spike/android-offline`.
+**Last updated:** 2026-10-03
 
 ---
 
@@ -140,7 +140,7 @@ The `vite-plugin-pwa` service worker is redundant inside Capacitor, because asse
 |---|---|---|---|
 | **0 — Spike** | De-risk the hard parts | SQLite in the WebView, session persistence, offline cold start, one offline write → sync round-trip with an idempotent retry, all on an emulator | **Done** (Q1, Q2, Q4, Q5 pass; Q3 confirmed problem; Q6 partial) |
 | **1 — Wrapper** | App runs, online-only | Capacitor 8 + Android project committed, builds and runs, SW disabled in native build, app icon/splash, **plus from the spike:** native Google sign-in (already built on the spike branch), **Android back button → `history.back()`** via `@capacitor/app` (today BACK exits the app with a sheet open), **status-bar / safe-area handling** (content draws under the system bars), **toolchain pinned to JDK 21 + AGP 8.13** | **Done** on `android/phase-1` (verified on the API 37 emulator: insets, BACK closes overlays and minimises at `/`, native Google sign-in, adaptive icon + splash; JDK 21 pinned via `gradle-daemon-jvm.properties`) |
-| **2 — Local reads** | View data offline | SQLite schema (explicit columns), pull engine, React Query `queryFn`s read local data, realtime writes local data, **offline-authenticated state** (Q3 confirmed), **local profile cache**, **error states instead of empty states** for failed loads | — |
+| **2 — Local reads** | View data offline | SQLite schema (explicit columns), pull engine, React Query `queryFn`s read local data, realtime writes local data, **offline-authenticated state** (Q3 confirmed), **local profile cache**, **error states instead of empty states** for failed loads | **Done** on `android/phase-2` (2026-10-03, emulator-verified): stale-while-revalidate reads from SQLite, incremental pull by `updated_at`, deletes caught by a per-tracker count check (no soft delete needed yet), offline auth (expired token offline → signed in, recovers on reconnect), cached profile, `LoadError` when never synced. Details: CLAUDE.md "ANDROID APP" |
 | **3 — Offline writes** | Add/edit/delete while offline | Client UUIDs, outbox, push engine, reconnect/resume triggers (**offline → online transitions only**: `@capacitor/network` re-fires the same status every few seconds), pending-sync badges, offline banner, online-only features disabled offline | — |
 | **4 — Sync hardening** | Correctness | Soft-delete migration + query/RPC updates, poison-message handling, retry/backoff, LWW, offline duplicate check against local data | — |
 | **5 — Release** | Ship | Signing keystore, versioning, Play Store listing | — |
@@ -162,7 +162,7 @@ The `vite-plugin-pwa` service worker is redundant inside Capacitor, because asse
 
 ## 13. Open decisions
 
-1. **Soft delete vs periodic resync** — recommend soft delete.
+1. **Soft delete vs periodic resync** — recommend soft delete. *Phase 2 note:* reads don't need it. A per-tracker row-count check finds hard deletes and prunes them locally (a HEAD request per tracker, with an id fetch only on mismatch). Revisit in Phase 3–4, where offline edits make delete-vs-edit conflicts real.
 2. ~~**Android `applicationId`**~~ — **Decided 2026-10-02: `com.expensesync.app`** (already on the Android OAuth client). It becomes the Play Store package name and can't change after the first release.
 3. ~~**Package manager / lockfile**~~ — **Decided 2026-10-02: Bun.** `bun.lock` is the only lockfile (Lovable already updates it); `package-lock.json` and `bun.lockb` were removed on `android/phase-1`.
 6. **Release signing for Google sign-in.** Every signing key that installs the app needs its SHA-1 on the Android OAuth client: each developer's debug key, the release keystore, and Play App Signing. Decide who holds the release keystore before Phase 5.

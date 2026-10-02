@@ -1,5 +1,6 @@
 import { App } from '@capacitor/app';
 import { hasOpenOverlay } from '@/hooks/useOverlayBack';
+import { refreshQueries } from '@/lib/local/state';
 
 // Android-only wiring for the Capacitor shell. Loaded through a dynamic import
 // from main.tsx when running natively, so the web bundle never pulls it in.
@@ -29,4 +30,6 @@ function handleBackButton({ canGoBack }: { canGoBack: boolean }) {
 
 export function initNativeShell() {
   void App.addListener('backButton', handleBackButton);
+  // Back from the background: re-read every screen, which pulls changes made elsewhere.
+  void App.addListener('resume', refreshQueries);
 }

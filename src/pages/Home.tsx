@@ -16,6 +16,8 @@ import BottomNav from '@/components/BottomNav';
 import FloatingAdd from '@/components/FloatingAdd';
 import LoadError from '@/components/LoadError';
 import { CURRENCIES, formatAmountShort } from '@/lib/currencies';
+import { isNativeApp } from '@/lib/platform';
+import { markStale } from '@/lib/local/state';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -148,6 +150,8 @@ export default function HomePage() {
           toast.error(`Failed to invite ${email}`);
         }
       }
+      // Android app: the invites above bypass React Query mutations; make the next read pull them.
+      if (isNativeApp && inviteEmails.length) markStale();
       setShowCreate(false);
       setNewName('');
       setNewCurrency('INR');

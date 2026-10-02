@@ -38,4 +38,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Without it the WebView can't see connectivity: navigator.onLine stays
+         true and online/offline events never fire, so the app can't tell it's
+         offline or pull on reconnect. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

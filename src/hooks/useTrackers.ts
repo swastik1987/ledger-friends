@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
 import { monthlyNetExpense, netExpenseSummedByMonth, DatedFlowExpense } from '@/lib/netOutgo';
 import { fetchAllPages } from '@/lib/fetchAllPages';
+import { isNativeApp } from '@/lib/platform';
 import { toast } from 'sonner';
 
 /** Per-tracker derived figures for the Home page cards + summary hero. */
@@ -78,6 +79,7 @@ export function useTrackerHomeStats() {
   return useQuery({
     queryKey: ['tracker-home-stats', user?.id],
     queryFn: async (): Promise<Record<string, TrackerHomeStat>> => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readTrackerHomeStats();
       if (!user) return {};
 
       // Member rows give us both the tracker id set and the name preview.
@@ -136,6 +138,7 @@ export function useTrackers() {
   return useQuery({
     queryKey: ['trackers', user?.id],
     queryFn: async (): Promise<TrackerWithStats[]> => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readTrackers();
       if (!user) return [];
 
       const { data, error } = await (supabase.rpc as any)('get_tracker_stats', {
@@ -194,6 +197,7 @@ export function useTracker(trackerId: string) {
   return useQuery({
     queryKey: ['tracker', trackerId],
     queryFn: async () => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readTracker(trackerId);
       const { data, error } = await supabase
         .from('trackers')
         .select('*')
@@ -211,6 +215,7 @@ export function useTrackerMembers(trackerId: string) {
   return useQuery({
     queryKey: ['tracker-members', trackerId],
     queryFn: async () => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readTrackerMembers(trackerId);
       const { data, error } = await supabase
         .from('tracker_members')
         .select('*, profile:profiles(*)')
@@ -230,6 +235,7 @@ export function useCategories(trackerId?: string) {
   return useQuery({
     queryKey: ['categories', trackerId],
     queryFn: async () => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readCategories(trackerId);
       let query = supabase.from('categories').select('*');
       if (trackerId) {
         query = query.or(`is_system.eq.true,tracker_id.eq.${trackerId}`);

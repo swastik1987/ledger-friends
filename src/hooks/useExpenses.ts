@@ -6,6 +6,8 @@ import { useCallback, useEffect } from 'react';
 import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
 import { fetchAllPages } from '@/lib/fetchAllPages';
+import { isNativeApp } from '@/lib/platform';
+import { markStale } from '@/lib/local/state';
 
 /**
  * Fetches the distinct months that have transactions for a tracker.
@@ -15,21 +17,26 @@ export function useExpenseMonths(trackerId: string) {
   return useQuery({
     queryKey: ['expense-months', trackerId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('date')
-        .eq('tracker_id', trackerId);
+      let sorted: string[];
+      if (isNativeApp) {
+        sorted = await (await import('@/lib/local/reads')).readExpenseMonthKeys(trackerId);
+      } else {
+        const { data, error } = await supabase
+          .from('expenses')
+          .select('date')
+          .eq('tracker_id', trackerId);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      // Extract unique yyyy-MM values
-      const monthSet = new Set<string>();
-      (data || []).forEach(e => {
-        if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
-      });
+        // Extract unique yyyy-MM values
+        const monthSet = new Set<string>();
+        (data || []).forEach(e => {
+          if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
+        });
 
-      // Sort descending (newest first)
-      const sorted = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+        // Sort descending (newest first)
+        sorted = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+      }
 
       const months: { value: string; label: string }[] = [
         { value: 'all', label: 'All Months' },
@@ -56,6 +63,7 @@ export function useExpenses(trackerId: string, month: string) {
   return useQuery({
     queryKey: ['expenses', trackerId, month],
     queryFn: async () => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readExpenses(trackerId, month);
       // 'all' (and even a single busy month) can exceed PostgREST's 1000-row
       // cap, so page through with a stable order — the id tiebreaker keeps
       // pages from overlapping or skipping rows at the boundaries.
@@ -184,6 +192,8 @@ export function useUndoableDeleteExpense(trackerId: string) {
         toast.error(error.message);
         return;
       }
+      // Not a useMutation, so the MutationCache hook that marks the Android app's local store stale doesn't see it.
+      if (isNativeApp) markStale();
       queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['expense-months', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
@@ -436,24 +446,29 @@ export function useSuspectedTransfers(trackerId: string) {
       // legs may straddle a month boundary) — but only the slim column set the
       // pair heuristic + review sheet actually use, paginated past the
       // PostgREST 1000-row cap (id tiebreaker keeps page boundaries stable).
-      const data = await fetchAllPages((from, to) =>
-        supabase
-          .from('expenses')
-          .select('id, tracker_id, amount, date, is_debit, is_transfer, suspected_transfer, rejected_as_transfer, merchant_name, description, bank_name, currency, category_id, category:categories(icon, color)')
-          .eq('tracker_id', trackerId)
-          .eq('is_transfer', false)
-          .order('date', { ascending: false })
-          .order('id', { ascending: false })
-          .range(from, to),
-      );
+      let rows: Expense[];
+      if (isNativeApp) {
+        rows = await (await import('@/lib/local/reads')).readNonTransferExpenses(trackerId);
+      } else {
+        const data = await fetchAllPages((from, to) =>
+          supabase
+            .from('expenses')
+            .select('id, tracker_id, amount, date, is_debit, is_transfer, suspected_transfer, rejected_as_transfer, merchant_name, description, bank_name, currency, category_id, category:categories(icon, color)')
+            .eq('tracker_id', trackerId)
+            .eq('is_transfer', false)
+            .order('date', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to),
+        );
 
-      // Slim rows carry every field the review flow touches; the cast keeps
-      // the public Expense-based API unchanged for the sheet.
-      const rows = (data || []).map(e => ({
-        ...e,
-        amount: Number(e.amount),
-        category: e.category as unknown as Category,
-      })) as unknown as Expense[];
+        // Slim rows carry every field the review flow touches; the cast keeps
+        // the public Expense-based API unchanged for the sheet.
+        rows = (data || []).map(e => ({
+          ...e,
+          amount: Number(e.amount),
+          category: e.category as unknown as Category,
+        })) as unknown as Expense[];
+      }
 
       const pairedIds = findTransferPairs(rows);
       // Keyword-flagged rows still count — but if the user has already rejected
@@ -533,6 +548,8 @@ export function useExpenseRealtime(trackerId: string) {
           filter: `tracker_id=eq.${trackerId}`,
         },
         () => {
+          // Android app: the next read must pull this change instead of reusing a recent pull.
+          if (isNativeApp) markStale();
           queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
           queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
         }
