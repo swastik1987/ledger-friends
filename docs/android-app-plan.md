@@ -1,0 +1,165 @@
+# ExpenseSync Android App — Plan
+
+**Status:** Phase 0 (spike) in progress on branch `spike/android-offline` — the test harness and runbook (`docs/android-spike-runbook.md`) live on that branch.
+**Last updated:** 2026-10-02
+
+---
+
+## 1. Goals
+
+1. An Android app with full feature parity with the current PWA.
+2. Past transaction data is kept on the device, viewable offline, and refreshed when connectivity returns.
+3. Transactions added while offline are queued on the device and synced to the central database (Supabase) once the device is back online.
+
+**Non-goals for v1:** iOS (the approach keeps it open, but it isn't built), offline statement upload / AI parsing (inherently needs the network), push notifications.
+
+---
+
+## 2. Approach: wrap the existing app with Capacitor
+
+| Option | Verdict |
+|---|---|
+| **Capacitor** (native Android shell around the existing Vite build) | ✅ **Chosen.** Reuses ~100% of the React/TS/Tailwind/shadcn code, the Sand & Ember design system, the gesture model and the upload pipeline. One codebase. Native access to SQLite, network status and file picking. iOS stays a cheap option later. |
+| React Native | ❌ Rewrites every screen and throws away the UI layer. |
+| Native Kotlin | ❌ Rewrites everything. |
+
+Target version: **Capacitor 8** (8.5.x at time of writing). Its CLI requires **Node 22+**.
+
+The app ships as an Android package whose WebView loads the bundled React app. The Supabase client, React Query and routing keep working as-is; the wrapper itself is a small piece of work. The substance of this project is making the app **offline-first**.
+
+---
+
+## 3. Target architecture
+
+Today every read and write goes straight to Supabase (`src/hooks/useExpenses.ts`), so the app is unusable offline.
+
+```
+UI (unchanged React components)
+      │
+React Query ──reads──► Local SQLite ◄── source of truth on the device
+      │                     ▲
+  mutations                 │ sync engine (pull + push)
+      │                     ▼
+Outbox queue ──push──► Supabase Postgres (central DB, RLS still enforced)
+```
+
+- **Local store:** `@capacitor-community/sqlite`. Durable, survives app kills, and handles the data volumes (reads already paginate via `src/lib/fetchAllPages.ts`). Mirrors `expenses`, `categories`, `trackers` and `banks`, plus sync metadata.
+- **Read path:** React Query `queryFn`s read from local SQLite instead of Supabase. Instant, and works offline. This is the largest refactor.
+- **Write path (outbox pattern):** every create/update/delete writes to local SQLite *and* appends to an `outbox` table **in the same transaction**, so a crash can't leave a local change that never syncs. The UI updates immediately from local data.
+- **Sync engine:** triggered on app start, network reconnect (`@capacitor/network`), app resume, and periodically while active.
+  - **Push:** drain the outbox in order against Supabase using the user's JWT (RLS unchanged).
+  - **Pull:** fetch rows changed since the last pull for the user's trackers and upsert them locally.
+  - **Realtime:** remote changes arriving over the existing `postgres_changes` subscription are written to SQLite too.
+
+No new backend is needed for the happy path.
+
+---
+
+## 4. Sync correctness rules
+
+These are the rules that make offline sync safe. The Phase 0 spike prototypes 1–4.
+
+1. **Client-generated IDs make pushes idempotent.** Every row created on the device gets `crypto.randomUUID()` at creation, so it has the same identity locally and remotely. A push is a plain insert. If it fails with a Postgres duplicate-key error (`23505`), an earlier attempt already landed and its response was lost in a dropped connection, so the push is treated as success. Retries never double-insert, and the realtime echo of our own insert dedupes by id.
+2. **The server owns `updated_at`.** `expenses.updated_at` defaults to `now()` and a `BEFORE UPDATE` trigger bumps it. Pushes **never send it**, so pull cursors compare server timestamps only. Otherwise a device with a wrong clock, or a row created offline hours earlier, would slip behind another device's cursor and never be pulled.
+3. **Pull with an overlap window.** `now()` is the *transaction start* time. A slow transaction can commit a row stamped earlier than a cursor another device has already advanced past. Each pull re-reads from `cursor − 5 min` and upserts by id, which is idempotent.
+4. **Local pending changes win until pushed.** A pulled row never overwrites a local row that still has an unpushed change.
+5. **Ordered outbox; transient and permanent failures handled differently.** A network failure stops the drain, preserves order, and retries later. Permanent failures must not block the queue forever: an RLS denial (the user was removed from the tracker) or an FK violation (the category was deleted) moves the entry to a "needs attention" state shown in the UI.
+6. **"Connected" ≠ "reachable".** Android can report connected on a captive portal. A failed push is the real signal, not the OS flag.
+
+---
+
+## 5. Schema changes
+
+### a. Client-generated UUIDs (app-side only)
+`expenses.id` defaults to `gen_random_uuid()`, but the column already accepts an id on insert (`id?: string` in the generated types). The offline write path must supply one (rule 1). No migration needed.
+
+### b. Soft delete (`deleted_at`) — the main decision
+Deletes are currently hard (`.delete()` in `useExpenses.ts`). With a pure "pull rows changed since X" sync, a device can never *see* a deletion made elsewhere. The row is simply absent from the server, which looks the same as "not synced yet."
+
+- **Recommended:** add `deleted_at timestamptz`. Deletes become updates, every device pulls the tombstone, and the local store hides `deleted_at IS NOT NULL`. The migration itself is trivial, but the read surface is wide:
+  - every client query needs `.is('deleted_at', null)`;
+  - the `get_tracker_stats` and `get_tracker_home_stats` RPCs must exclude soft-deleted rows, or totals will include deleted transactions;
+  - Excel export and the duplicate check need the same filter;
+  - a periodic purge job can hard-delete old tombstones.
+- **Alternative (MVP):** keep hard deletes and run a periodic full resync per tracker to drop rows that no longer exist on the server. Simpler, but deletions propagate slowly and the resync gets expensive for large trackers.
+
+---
+
+## 6. What's already in our favor
+
+- **Client-side aggregation exists.** `useTrackerHomeStats` already falls back to client-side math that mirrors `netOutgo.ts`, so Dashboard and Compare can run offline from local data without reimplementing the Postgres RPCs in SQLite.
+- **Pagination exists** (`fetchAllPages`), so large trackers are handled in both the pull and the read layer.
+- **The banks registry** (`useBanks` / `bankResolver`) works offline against a cached `banks` list. An entry whose bank isn't in the cache keeps its `bank_name` text locally and resolves `bank_id` at push time, which avoids a cross-table outbox dependency.
+- **Realtime is already scoped per tracker**, which matches the per-tracker pull cursor.
+
+---
+
+## 7. Auth and session in the native shell
+
+- Auth is email/password (`supabase.auth.signInWithPassword`), so **no native OAuth redirect handling** is needed.
+- `src/integrations/supabase/client.ts` and `previewAuthStorage.ts` are **Lovable-generated (do not edit)**. Outside a Lovable preview iframe, which includes the Capacitor WebView (its host is `localhost`), session storage falls back to plain **`localStorage`**. On Android, WebView `localStorage` lives in the app's data directory and normally survives restarts, so the plan is to keep it and avoid touching the generated client. **Spike Q2 verifies this.** If it proves unreliable, the fallback is a Capacitor-Preferences-backed storage adapter. That would have to be coordinated with Lovable, because `client.ts` gets regenerated.
+- **Risk — offline cold start with an expired access token (spike Q3).** Access tokens expire after an hour by default. If the app cold-starts offline after that, supabase-js can't refresh the token. The hypothesis is that it keeps the stored refresh token but reports *no session*. `AuthContext` would then set `user = null` and `ProtectedRoute` would bounce to `/auth`, hiding all the local data. If confirmed, `AuthContext` needs an **offline-authenticated** state derived from the stored session, the route guards must allow local-data screens, and the real session is restored when a refresh succeeds after reconnect.
+
+---
+
+## 8. What stays online-only in v1
+
+| Feature | Why it needs the network | Offline behavior |
+|---|---|---|
+| Statement upload + AI parsing | Gemini via the `parse-statement` edge function | Entry point disabled with a clear message |
+| Manual entry in a foreign currency | `convert-currency` edge function fetches rates | **Decision:** block, or save in the original currency and convert at push time |
+| Invite / manage members | Server-side user lookup and admin RLS | Disabled |
+| Create tracker / custom category | Could be outboxed, but adds ordering dependencies (expense → new category → new tracker) | Online-only in v1 |
+| Delete account | Server-side cascade | Online-only |
+| Category icon suggestions | Gemini | Existing client-side keyword fallback already works offline |
+| Category learning writes | `category_learning` upsert | Skip offline (best effort today anyway), or outbox later |
+
+Manual add/edit/delete of transactions and all viewing (lists, filters, search, Dashboard, Compare) work offline.
+
+---
+
+## 9. Conflict policy
+
+- **Creates** never conflict (independent rows with client ids).
+- **Edits to the same row** use **last-write-wins on the server's `updated_at`**. Because the server stamps the time, this effectively means *last to sync wins*: an offline edit made at 09:00 and synced at 18:00 overwrites an online edit made at 12:00. That's acceptable for v1. "Last edit wins" would need trusted client clocks, and surfacing conflicts in the UI can come later.
+- **Delete vs edit** (with soft delete): newest `updated_at` wins.
+
+---
+
+## 10. Service worker in the native build
+
+The `vite-plugin-pwa` service worker is redundant inside Capacitor, because assets are served from the app bundle. It can also cause the same stale-chunk class of bug fixed in `src/main.tsx` (`vite:preloadError`). The native build runs `vite build --mode capacitor`, which disables the plugin. The web/PWA build is unchanged.
+
+---
+
+## 11. Phased delivery
+
+| Phase | Goal | Key output | Status |
+|---|---|---|---|
+| **0 — Spike** | De-risk the hard parts | SQLite in the WebView, session persistence, offline cold start, one offline write → sync round-trip with an idempotent retry, all on a real device/emulator | **In progress** |
+| **1 — Wrapper** | App runs, online-only | Capacitor 8 + Android project committed, builds and runs, login works, SW disabled in native build, app icon/splash | — |
+| **2 — Local reads** | View data offline | SQLite schema (explicit columns), pull engine, React Query `queryFn`s read local data, realtime writes local data, offline-authenticated state if Q3 confirms | — |
+| **3 — Offline writes** | Add/edit/delete while offline | Client UUIDs, outbox, push engine, reconnect/resume triggers, pending-sync badges, offline banner, online-only features disabled offline | — |
+| **4 — Sync hardening** | Correctness | Soft-delete migration + query/RPC updates, poison-message handling, retry/backoff, LWW, offline duplicate check against local data | — |
+| **5 — Release** | Ship | Final `applicationId`, signing keystore, versioning, Play Store listing | — |
+
+---
+
+## 12. Risks
+
+1. **Delete propagation** (§5b). Decide soft delete vs periodic resync early; it shapes Phase 4 and touches the RPCs.
+2. **Read-layer refactor** (§3). Repointing every `queryFn` at SQLite is the bulk of the effort. The existing client-side aggregation reduces it.
+3. **Offline cold start with an expired token** (§7). It can hide local data behind the login screen. Verify in the spike.
+4. **Session storage lives in a generated file** (§7). Any change to auth storage has to be coordinated with Lovable's generator.
+5. **Realtime vs local optimistic writes.** A realtime echo of a row the device just pushed must not double-apply. Dedupe by client UUID.
+6. **Poison messages** (§4, rule 5). One permanently failing entry must not block everything queued behind it.
+
+---
+
+## 13. Open decisions
+
+1. **Soft delete vs periodic resync** — recommend soft delete.
+2. **Android `applicationId`** — it becomes the Play Store package name and **can't change after the first release**. The spike uses the placeholder `com.expensesync.app`.
+3. **Package manager / lockfile.** The repo has three lockfiles (`bun.lock`, `bun.lockb`, `package-lock.json`), and Lovable updates `bun.lock`. The spike branch adds the Capacitor dependencies with Bun, so `package-lock.json` is stale there. Pick one package manager before Phase 1 merges to `main`.
+4. **Offline foreign-currency entries** — block, or convert at push time (§8).
+5. **Offline creation of trackers / categories** — online-only in v1 (§8).
