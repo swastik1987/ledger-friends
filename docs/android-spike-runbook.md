@@ -34,6 +34,8 @@ Also record the incidental observations in §6: layout under the status bar, bac
 | `src/spike/sessionProbe.ts` | Reads the stored Supabase session; can backdate its expiry for Q3. |
 | `src/spike/SpikePage.tsx` | The test harness at `/spike`. Deliberately **unprotected**, so it stays reachable when `useAuth()` loses the user. |
 | `src/spike/SpikeLauncher.tsx` | A small **"Spike"** pill (bottom-left, native builds only). The app has no address bar, so this is how you reach `/spike`. |
+| `src/lib/nativeGoogleAuth.ts`, `src/pages/Auth.tsx` | **Native Google sign-in** for the Android app (Credential Manager → `signInWithIdToken`). The web flow is unchanged. Setup: `docs/android-google-signin.md`. |
+| `.env.capacitor` | Google **Web** OAuth client ID for native sign-in. Loaded only by `--mode capacitor`. |
 
 **Already verified on the dev machine (no device available there):** strict `tsc` is clean across the app; ESLint is clean on the spike files; the web build still emits `sw.js` and registers it; the Capacitor build emits no service worker; `cap add android` detected both native plugins.
 **Not yet verified:** everything on a device. That is what this runbook is for.
@@ -42,7 +44,10 @@ Also record the incidental observations in §6: layout under the status bar, bac
 
 ## 3. Prerequisites
 
-- **Android Studio** (latest stable). It bundles the JDK. Install **SDK Platform 36** from the SDK Manager if prompted.
+- **Android Studio** (latest stable). Install **SDK Platform 36** from the SDK Manager if prompted.
+- **JDK 21 for Gradle — not the JDK 25 Android Studio bundles.** Capacitor 8's Gradle 8.14.3 fails on JDK 25 (`Unsupported class file major version 69`). In Android Studio: Settings → Build Tools → Gradle → **Gradle JDK → Download JDK → 21**. On the command line, set `JAVA_HOME` to that JDK.
+- **Decline Android Studio's AGP 9 upgrade prompt.** Capacitor 8's template targets AGP 8.13, and AGP 9 rejects its `proguard-android.txt` line.
+- **Emulator graphics:** if web content renders black, set the AVD to **Graphics: Software** (Device Manager → Edit → Advanced) and cold-boot it.
 - **Node 22+** (required by the Capacitor 8 CLI), or **Bun**. The branch was set up with Bun, and `package-lock.json` is stale there (plan, open decision 3).
 - An **emulator** (API 24+) or a **device with USB debugging** enabled.
 - A **dedicated test tracker**, created in the web app first. Spike rows are real inserts into the production database: ₹1 debits in *Miscellaneous*, described `[spike] offline test HH:mm:ss`.
@@ -89,8 +94,8 @@ Each scenario lists steps, the expected result, and what to record. The harness 
 **Expected:** both times the app opens on **Home** signed in, and Spike shows `useAuth(): signed in`.
 
 ### C — Offline cold start with an expired token (Q3)
-1. Online and signed in, on Spike: tap **Expire stored token**, then **immediately** force-stop the app. If you wait, auto-refresh rewrites the token.
-2. Turn on airplane mode and relaunch.
+1. Signed in, on Spike: turn on **airplane mode first**, then tap **Expire stored token**. Being offline stops supabase-js's auto-refresh from rewriting the expired value.
+2. **Wait about 6 s, then force-stop the app.** Android's WebView saves `localStorage` to disk a few seconds after a write; killing it straight away loses the backdated expiry. The status line should show `(EXPIRED)` before you kill it. Then relaunch, still offline.
 3. Record which screen it lands on (**Home**, or **Landing/Auth**). Then open Spike and record the `useAuth()` and `stored session` lines.
 4. Still offline, tap **Add test expense**. It should queue anyway, using the stored-session fallback.
 5. Turn airplane mode off. Watch for 30–60 s: supabase-js retries the refresh on a timer.
@@ -144,15 +149,30 @@ Each scenario lists steps, the expected result, and what to record. The harness 
 
 ## 8. Results
 
-| # | Result (pass / fail / observed) | Notes | Plan impact |
+**Run:** 2026-10-02, Android 17 (API 37) emulator, WebView 145, debug build, signed in with native Google sign-in, target tracker "Spike test".
+
+| # | Result | Notes | Plan impact |
 |---|---|---|---|
-| Q1 — SQLite durability | | | |
-| Q2 — Session persistence | | | |
-| Q3 — Offline cold start, expired token | | | |
-| Q4 — Offline write → auto-sync | | | |
-| Q5 — Idempotent retry | | | |
-| Q6 — Pull vs pending rows | | | |
-| Status bar / back button / upload | | | |
+| Q1 — SQLite durability | **Pass** | Local rows, outbox and saved target survived force-stop and a full device reboot. No `SQLite open failed`. | None. `@capacitor-community/sqlite` stays the local store. |
+| Q2 — Session persistence | **Pass** | Signed in after force-stop, app update (`install -r`) and device reboot. Auto-refresh fired about an hour after sign-in (`TOKEN_REFRESHED`). | **Keep WebView `localStorage`.** Lovable's generated `client.ts` needs no change. |
+| Q3 — Offline cold start, expired token | **Confirmed, worse than hypothesised** | The real app showed **"Loading…" for about a minute** while supabase-js retried the refresh, then `useAuth(): NO USER`, which renders the logged-out UI, although the stored session still had a refresh token. Offline queuing via the stored-session fallback worked. On reconnect supabase-js refreshed the token by itself, `useAuth()` recovered, and the queued push **succeeded 14 s later**: requests wait for the refresh, so no ordering failure. | **Phase 2:** offline-authenticated state in `AuthContext` (read the user from the stored session with a short timeout when offline), and route guards that allow local-data screens. |
+| Q4 — Offline write → auto-sync | **Pass** | Two offline rows, written as row plus outbox entry in one transaction, survived an offline kill and relaunch, then pushed automatically about 4 s after reconnect with their device-generated ids, passing RLS. | None. The outbox design holds. |
+| Q5 — Idempotent retry | **Pass** | A re-queued, already-synced row was reported as `1 drained (1 already on server → 23505)`. No duplicate. | None. Keep insert plus `23505`-as-success. |
+| Q6 — Pull vs pending rows | **Pass (partial)** | Device row queued offline while the web edited another row. On reconnect: push, then the edit pulled (`web test 1 edited`), one row per id. Rule 4 (pending wins) wasn't stressed: the harness can't edit locally. | Re-test rule 4 once Phase 3 adds local edits and deletes. |
+| Status bar / back button / upload | **Issues found** | See findings 1–2 below. Statement upload not tested. | Phase 1. |
+
+### Findings beyond the six questions
+
+1. **Back button exits the app instead of closing sheets.** With a sheet open (keyboard hidden), BACK sends the app to the background. The web overlay handling (`useOverlayBack`, history/popstate) never sees the Android back button. → **Phase 1:** add `@capacitor/app` and map its `backButton` event to `history.back()` (exit or minimise only at the root).
+2. **Content draws under the status bar and gesture bar** (edge-to-edge). The clock overlaps the logo, and the status icons overlap **Login**. Capacitor's safe-area injection logs `Error injecting safe area CSS: Cannot read properties of null (reading 'style')` at startup. → **Phase 1:** safe-area handling.
+3. **`@capacitor/network` re-fires `networkStatusChange` every ~3 s with an unchanged status** on this emulator. A naive "sync when online" handler synced every 3 s. → **Phase 3:** act only on offline → online transitions (already done in the harness).
+4. **WebView `localStorage` is written to disk lazily.** A write followed by a kill within about a second was lost. Risk: a refresh-token rotation followed by an immediate kill could leave the old, already-used refresh token on disk and sign the user out. → **Phase 2:** watch for it; consider re-checking the session on resume.
+5. **Failed loads render as empty data.** Offline, Home showed **"No trackers yet / Create My First Tracker"** for an account with nine trackers. The web app can do the same on a network blip. → Phase 2 (local reads) fixes it on Android. The web needs an error/retry state now.
+6. **Profile is network-only.** An offline start showed "Good evening, **there**". `AddExpenseSheet` refuses to save without `profile`. → **Phase 2:** cache the profile locally.
+7. **Google sign-in doesn't work through Lovable's web broker in the native shell** (relative `/~oauth` path → local 404, and Google blocks OAuth in embedded WebViews). → Solved on this branch with **native Google sign-in** (Credential Manager → `signInWithIdToken`); see `docs/android-google-signin.md`. It matched the existing Google user, so no duplicate account was created. Apple sign-in is being removed from the product.
+8. **Toolchain.** Android Studio bundles JDK 25 and offers an AGP 9 upgrade. Capacitor 8's template (AGP 8.13 / Gradle 8.14.3) needs **JDK 21** and breaks under AGP 9 (`proguard-android.txt` rejected). → **Phase 1:** pin JDK 21 and AGP 8.13 until Capacitor supports AGP 9.
+9. **Emulator graphics (dev machine only).** Host-GPU rendering turned web content black (both the app and Google's account pages). Fixed with software rendering (`hw.gpu.mode=swiftshader_indirect`). Not an app issue.
+10. **Startup times (software-rendered emulator):** 3–4 s after a force-stop; 11–14 s on the first launch after boot. Debug APK 19.9 MB, mostly SQLCipher and Google sign-in libraries. Re-measure on a real device.
 
 ---
 

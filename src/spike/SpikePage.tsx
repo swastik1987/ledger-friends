@@ -51,6 +51,7 @@ export default function SpikePage() {
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const syncing = useRef(false);
+  const lastConnected = useRef<boolean | null>(null);
   const targetRef = useRef<SpikeTarget | null>(null);
   targetRef.current = target;
 
@@ -100,15 +101,26 @@ export default function SpikePage() {
   useEffect(() => { void refreshView(); }, [target, refreshView]);
 
   // Network status + auto-sync on reconnect (the behaviour runbook Q4 tests).
+  // @capacitor/network re-fires networkStatusChange with an unchanged status on
+  // every connectivity update (~every 3s on the Android 17 emulator), so only an
+  // offline → online *transition* counts as a reconnect — otherwise sync would
+  // run every few seconds (Phase 3 must do the same).
   useEffect(() => {
     if (!native) return;
     let handle: PluginListenerHandle | null = null;
     let cancelled = false;
-    void Network.getStatus().then(s => { if (!cancelled) setOnline(s.connected); });
+    void Network.getStatus().then(s => {
+      if (cancelled) return;
+      lastConnected.current = s.connected;
+      setOnline(s.connected);
+    });
     void Network.addListener('networkStatusChange', s => {
+      const prev = lastConnected.current;
+      lastConnected.current = s.connected;
+      if (prev === s.connected) return;
       setOnline(s.connected);
       addLog(`network → ${s.connected ? 'online' : 'offline'} (${s.connectionType})`);
-      if (s.connected) void runSync('reconnect');
+      if (s.connected && prev === false) void runSync('reconnect');
     }).then(h => { if (cancelled) void h.remove(); else handle = h; });
     return () => { cancelled = true; void handle?.remove(); };
   }, [native, addLog, runSync]);

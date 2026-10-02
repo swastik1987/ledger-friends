@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { lovable } from '@/integrations/lovable/index';
+import { Capacitor } from '@capacitor/core';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,9 +50,13 @@ function GoogleSignInButton() {
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
-    const { error } = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
-    });
+    // The Android app can't use Lovable's redirect-based broker — it signs in
+    // with Android's native Google account picker instead (src/lib/nativeGoogleAuth.ts).
+    const { error } = Capacitor.isNativePlatform()
+      ? await (await import('@/lib/nativeGoogleAuth')).signInWithGoogleNative()
+      : await lovable.auth.signInWithOAuth("google", {
+          redirect_uri: window.location.origin,
+        });
     setLoading(false);
     if (error) {
       toast.error(error.message || 'Failed to sign in with Google');
