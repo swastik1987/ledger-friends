@@ -40,6 +40,11 @@ let nextId = 1;
 let suppressPop = false;
 let listenerBound = false;
 
+/** True while at least one controlled overlay holds a back-closable history entry. */
+export function hasOpenOverlay(): boolean {
+  return stack.length > 0;
+}
+
 function onPopState() {
   if (suppressPop) { suppressPop = false; return; }
   const top = stack.pop();

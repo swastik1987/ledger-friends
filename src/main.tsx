@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { Capacitor } from "@capacitor/core";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -18,5 +19,9 @@ window.addEventListener("vite:preloadError", () => {
   sessionStorage.setItem(CHUNK_RELOAD_FLAG, "1");
   window.location.reload();
 });
+
+if (Capacitor.isNativePlatform()) {
+  void import("./lib/nativeShell").then((m) => m.initNativeShell());
+}
 
 createRoot(document.getElementById("root")!).render(<App />);

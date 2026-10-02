@@ -76,7 +76,7 @@ VITE_GOOGLE_WEB_CLIENT_ID=1234567890-abc123.apps.googleusercontent.com
 Then rebuild:
 
 ```bash
-npm run build:android
+bun run build:android
 ```
 
 With the ID missing, the app's Google button shows "Google sign-in is not configured" instead of failing silently.
