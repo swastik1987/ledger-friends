@@ -2,7 +2,7 @@
 
 ## PROJECT OVERVIEW
 
-**ExpenseSync** is a production-grade, mobile-first collaborative expense tracking Progressive Web App. It features AI-powered bank statement parsing (Gemini 2.5 Flash), real-time multi-user collaboration, category learning, multi-currency support, and Excel export. The app is fully functional and deployed.
+**ExpenseSync** is a production-grade, mobile-first collaborative expense tracking Progressive Web App. It features AI-powered bank statement parsing (Gemini, model configurable via the `GEMINI_MODEL` secret), real-time multi-user collaboration, category learning, multi-currency support, and Excel export. The app is fully functional and deployed.
 
 The tracker page received a full visual + interaction revamp in May 2026 — "Sand & Ember" — moving from an indigo/violet palette + emoji icons to a warm cream/ink design with monoline Phosphor icons, gesture-driven cards, and an iOS-style grouped settings layout. The statement-upload pipeline was hardened with server-side chunking and a dedicated client-side merchant-extraction library. Later in May 2026 the codebase was tightened to TypeScript `strict: true`, lucide-react was retired from app code (still used inside vendored shadcn primitives), the device back gesture became overlay-aware, bank chips gained real logos with brand-color fallbacks, the Dashboard was simplified to a single net-outgo view, and a month-vs-month Compare sheet with drill-down was added.
 
@@ -21,7 +21,7 @@ The tracker page received a full visual + interaction revamp in May 2026 — "Sa
 | Real-time | Supabase Realtime (postgres_changes) |
 | Auth | Supabase Auth (email/password) |
 | File Parsing | pdfjs-dist 4.0.379, PapaParse 5.5.3, XLSX 0.18.5 |
-| AI | Gemini 2.5 Flash (via Supabase Edge Function) |
+| AI | Gemini via Supabase Edge Functions — default `gemini-2.5-flash`, switchable with the `GEMINI_MODEL` secret |
 | Charts | hand-rolled SVG sparkline (recharts dependency fully removed Jun 2026, incl. the unused `ui/chart.tsx`) |
 | PWA | `vite-plugin-pwa` (autoUpdate) — manifest + Workbox service worker; precaches app shell, runtime-caches Google Fonts + bank favicons |
 | Toasts | Sonner 1.7.4 |
@@ -40,11 +40,13 @@ Dev server runs on `localhost:8080` via `npm run dev`.
 **`.env.local`** (never committed):
 ```
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-key>
+VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 ```
 
 **Supabase secrets** (set via `supabase secrets set`):
 - `GEMINI_API_KEY` — used by `parse-statement` and `suggest-emojis` edge functions
+- `GEMINI_MODEL` *(optional)* — Gemini model code for both functions, e.g. `gemini-3.1-flash-lite`. Unset = `gemini-2.5-flash`. Change it (or roll back) without a code deploy; the functions log `model=… thinking=…` on cold start so you can confirm what's live.
+- `GEMINI_THINKING_LEVEL` *(optional)* — `MINIMAL` | `LOW` | `MEDIUM` | `HIGH`, applied only to models that can't turn thinking off (see parse-statement below). Unset = `LOW`.
 
 ---
 
@@ -226,7 +228,8 @@ Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 
 ### parse-statement
 - **Purpose:** Extract and categorize transactions from bank/credit-card statement text.
-- **AI Model:** Gemini 2.5 Flash (structured output via `responseSchema`). **All Gemini calls must set `thinkingConfig: { thinkingBudget: 0 }`** — Flash's default "thinking" tokens silently consume the output budget and cause structured-output workflows to return empty/truncated JSON on moderately-sized inputs. The transactions call also sets `maxOutputTokens: 32_768` (headroom for ~100+ structured rows).
+- **AI Model:** `GEMINI_MODEL` secret, default `gemini-2.5-flash` (structured output via `responseSchema`). Google now lists 2.5 Flash as limited-access for existing users, so a new GCP project/key may need a 3.x model.
+- **Thinking must be off or minimised on every Gemini call** — thinking tokens are billed as output and count against `maxOutputTokens`, and left unchecked they cause structured-output workflows to return empty/truncated JSON on moderately-sized inputs. Every call passes the shared `THINKING_CONFIG`: Gemini 2.x Flash/Flash-Lite get `thinkingBudget: 0` (fully off); every other model (3.x, 2.5 Pro) can't disable thinking, so gets `thinkingLevel: LOW` — the lowest level every 3.x Flash accepts (3.7/3.8 Flash reject `MINIMAL`) — overridable via `GEMINI_THINKING_LEVEL`. For those models `outputTokenCap()` adds 4,096 tokens of headroom to each call's limit. The transactions call's base limit is `maxOutputTokens: 32_768` (headroom for ~100+ structured rows). The model/thinking block is duplicated in `suggest-emojis/index.ts` (no `_shared/` folder, to keep Lovable's per-function deploys simple) — keep the two in sync.
 - **Per-chunk retry:** if a chunk fails (Gemini 5xx, malformed JSON, early `finishReason` like MAX_TOKENS/SAFETY), the server retries it once before giving up. The client also retries the whole edge-function call once on `error` before throwing `ParseServiceError`.
 - **Modes (selected via `body.mode`):**
   - `'metadata'` — cheap first pass: returns `{ statement_type, bank_name, base_currency, debit_credit_rule, column_semantics }`. Called once per upload from the client to prime the parsing pass.

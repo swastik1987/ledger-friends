@@ -2,7 +2,19 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
+// ── Model selection ── (keep in sync with parse-statement/index.ts)
+// GEMINI_MODEL (Supabase secret) switches the model without a code change;
+// unset = gemini-2.5-flash. Gemini 2.x Flash turns thinking off with
+// thinkingBudget: 0; other models take a thinkingLevel (LOW unless
+// GEMINI_THINKING_LEVEL overrides it).
+const GEMINI_MODEL = (Deno.env.get('GEMINI_MODEL')?.trim() || 'gemini-2.5-flash').replace(/^models\//, '');
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const THINKING_CONFIG = /^gemini-2(\.\d+)?-flash/.test(GEMINI_MODEL)
+  ? { thinkingBudget: 0 }
+  : { thinkingLevel: Deno.env.get('GEMINI_THINKING_LEVEL')?.trim().toUpperCase() || 'LOW' };
+
+console.log(`suggest-emojis: model=${GEMINI_MODEL} thinking=${JSON.stringify(THINKING_CONFIG)}`);
 
 // Curated Phosphor icon names the model must choose from
 const VALID_ICONS = [
@@ -96,6 +108,7 @@ Deno.serve(async (req) => {
       generationConfig: {
         temperature: 0.2,
         responseMimeType: 'application/json',
+        thinkingConfig: THINKING_CONFIG,
       },
     };
 

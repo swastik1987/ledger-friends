@@ -2,7 +2,30 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
+// ── Model selection ──
+// GEMINI_MODEL (Supabase secret) switches the model — or rolls it back —
+// without a code change. Unset = the model this pipeline was tuned on.
+const GEMINI_MODEL = (Deno.env.get('GEMINI_MODEL')?.trim() || 'gemini-2.5-flash').replace(/^models\//, '');
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Thinking tokens are billed as output and count against maxOutputTokens —
+// left unchecked they ate the budget and truncated structured JSON. Gemini 2.x
+// Flash/Flash-Lite turn thinking fully off with thinkingBudget: 0. Other models
+// (Gemini 3.x, 2.5 Pro) can't; they take a thinkingLevel instead. LOW is the
+// lowest level every 3.x Flash accepts (3.7/3.8 Flash reject MINIMAL);
+// GEMINI_THINKING_LEVEL (MINIMAL | LOW | MEDIUM | HIGH) overrides it.
+// Keep in sync with suggest-emojis/index.ts.
+const CAN_DISABLE_THINKING = /^gemini-2(\.\d+)?-flash/.test(GEMINI_MODEL);
+const THINKING_CONFIG = CAN_DISABLE_THINKING
+  ? { thinkingBudget: 0 }
+  : { thinkingLevel: Deno.env.get('GEMINI_THINKING_LEVEL')?.trim().toUpperCase() || 'LOW' };
+// When thinking can't be off, give every call headroom so reasoning tokens
+// don't crowd out the JSON. Billing counts tokens generated, not the cap.
+const THINKING_HEADROOM_TOKENS = CAN_DISABLE_THINKING ? 0 : 4_096;
+const outputTokenCap = (base: number) => base + THINKING_HEADROOM_TOKENS;
+
+console.log(`parse-statement: model=${GEMINI_MODEL} thinking=${JSON.stringify(THINKING_CONFIG)}`);
 const quickJson = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -258,8 +281,8 @@ Deno.serve(async (req) => {
         generationConfig: {
           temperature: 0.3,
           responseMimeType: 'application/json',
-          maxOutputTokens: 2048,
-          thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: outputTokenCap(2048),
+          thinkingConfig: THINKING_CONFIG,
         },
       };
 
@@ -292,11 +315,9 @@ Deno.serve(async (req) => {
           temperature: 0.0,
           responseMimeType: 'application/json',
           responseSchema: METADATA_SCHEMA,
-          maxOutputTokens: 1024,
-          // Disable Gemini 2.5 Flash "thinking" tokens — they silently eat the
-          // output budget and often leave structured-output workflows with
-          // zero tokens to emit the actual JSON.
-          thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: outputTokenCap(1024),
+          // Thinking off (or as low as the model allows) — see THINKING_CONFIG.
+          thinkingConfig: THINKING_CONFIG,
         },
       };
 
@@ -429,12 +450,11 @@ Deno.serve(async (req) => {
           responseSchema: transactionSchema,
           // 32k output tokens easily covers 100+ structured transactions
           // (~120 tokens each) with headroom for the verbose schema.
-          maxOutputTokens: 32_768,
-          // Disable Gemini 2.5 Flash "thinking" tokens. With thinking on, the
-          // model spends most of its output budget on invisible reasoning and
-          // often returns empty or truncated JSON for moderately sized inputs.
-          // Disabling makes structured output reliable AND faster.
-          thinkingConfig: { thinkingBudget: 0 },
+          maxOutputTokens: outputTokenCap(32_768),
+          // Thinking off (or as low as the model allows) — see THINKING_CONFIG.
+          // With thinking unchecked, the model spends its output budget on
+          // invisible reasoning and returns empty or truncated JSON.
+          thinkingConfig: THINKING_CONFIG,
         },
       };
 
