@@ -650,7 +650,7 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phases 1–5 are merged to `main`** (Oct 2026; the `android/phase-*` branches are history):
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phases 1–5 are merged to `main`** (Oct 2026; the `android/phase-*` branches were deleted after merging):
 - **Phase 1:** online-only wrapper.
 - **Phase 2:** local reads and offline auth.
 - **Phase 3:** offline writes through an outbox.
