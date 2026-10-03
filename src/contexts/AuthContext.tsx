@@ -11,7 +11,8 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
-  signOut: () => Promise<void>;
+  /** Resolves false if the user cancelled (Android app: unsynced changes). */
+  signOut: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -19,7 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   session: null,
   loading: true,
-  signOut: async () => {},
+  signOut: async () => true,
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -98,6 +99,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    // Android app: signing out wipes the local store, including changes not
+    // yet pushed. Try to push them first, and ask before discarding the rest.
+    if (isNativeApp) {
+      const outbox = await import('@/lib/local/outbox');
+      if (navigator.onLine) {
+        await Promise.race([
+          outbox.pushOutbox().catch(() => undefined),
+          new Promise(resolve => setTimeout(resolve, 10_000)),
+        ]);
+      }
+      const { pending, failed } = await outbox.readSyncCounts();
+      const unsynced = pending + failed;
+      if (unsynced > 0 && !window.confirm(
+        `${unsynced} change${unsynced === 1 ? " hasn't" : "s haven't"} synced yet. Signing out will discard ${unsynced === 1 ? 'it' : 'them'}. Sign out anyway?`,
+      )) {
+        return false;
+      }
+    }
+
     // Offline with an expired token, supabase-js can spend about a minute
     // retrying the refresh before it even tries to sign out.
     const { error } = isNativeApp
@@ -117,12 +137,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // supabase-js's in-memory copy.
         clearStoredSession();
         window.location.replace('/');
-        return;
+        return true;
       }
     }
     setUser(null);
     setProfile(null);
     setSession(null);
+    return true;
   };
 
   return (

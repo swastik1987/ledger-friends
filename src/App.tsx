@@ -16,10 +16,15 @@ const TrackerDetail = lazy(() => import("./pages/TrackerDetail"));
 const UploadStatement = lazy(() => import("./pages/UploadStatement"));
 const ProfilePage = lazy(() => import("./pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+// Android app only: offline / waiting-to-sync indicator.
+const SyncStatusPill = isNativeApp ? lazy(() => import("./components/SyncStatusPill")) : null;
 
 // The Android app reads from its local store (src/lib/local), which works
-// offline, so its queries must run without a network instead of pausing. A
-// successful write means the local copy is behind the server until the next pull.
+// offline, so its queries must run without a network instead of pausing.
+// Mutations too: transaction writes go to the local store and outbox, and
+// online-only ones fail fast via assertOnline() instead of hanging paused.
+// A successful server write means the local copy is behind until the next
+// pull; local writes (meta.localWrite) already changed it.
 const queryClient = isNativeApp
   ? new QueryClient({
       defaultOptions: {
@@ -27,8 +32,13 @@ const queryClient = isNativeApp
           networkMode: 'always',
           retry: (failureCount, error) => !(error instanceof LocalNotSyncedError) && failureCount < 3,
         },
+        mutations: { networkMode: 'always' },
       },
-      mutationCache: new MutationCache({ onSuccess: () => markStale() }),
+      mutationCache: new MutationCache({
+        onSuccess: (_data, _vars, _ctx, mutation) => {
+          if (!mutation.meta?.localWrite) markStale();
+        },
+      }),
     })
   : new QueryClient();
 if (isNativeApp) {
@@ -76,6 +86,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <AppProvider>
+            {SyncStatusPill && <Suspense fallback={null}><SyncStatusPill /></Suspense>}
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />

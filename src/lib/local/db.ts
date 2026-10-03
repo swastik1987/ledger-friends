@@ -9,16 +9,17 @@ import { CapacitorSQLite, SQLiteConnection, type SQLiteDBConnection, type capSQL
 // the JSON, so a column added on the server reaches the app without a local
 // schema change.
 //
-// In Phase 2 the store is a cache of the server: anything in it can be pulled
-// again. A schema change therefore just bumps SCHEMA_VERSION, which drops and
-// recreates the tables, followed by a full pull. Once Phase 3 queues offline
-// writes here, schema changes must migrate instead.
+// Since Phase 3 the store can hold changes that haven't reached the server
+// yet (the outbox), so schema changes are migrations that keep the data: add
+// a step to MIGRATIONS and bump SCHEMA_VERSION. Never drop tables to change
+// the schema.
 
 const DB_NAME = 'expensesync';
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = 2;
 
-const TABLES = ['expenses', 'trackers', 'tracker_members', 'profiles', 'categories', 'banks', 'meta'];
+const TABLES = ['expenses', 'outbox', 'trackers', 'tracker_members', 'profiles', 'categories', 'banks', 'meta'];
 
+// The full schema at SCHEMA_VERSION, for a fresh install.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS expenses (
   id TEXT PRIMARY KEY NOT NULL,
@@ -29,9 +30,22 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount REAL NOT NULL,
   is_debit INTEGER NOT NULL,
   is_transfer INTEGER NOT NULL,
-  row_json TEXT NOT NULL
+  row_json TEXT NOT NULL,
+  sync_state TEXT NOT NULL DEFAULT 'synced',
+  local_deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_tracker_date ON expenses (tracker_id, date);
+CREATE TABLE IF NOT EXISTS outbox (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  op TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_entity ON outbox (entity_id);
 CREATE TABLE IF NOT EXISTS trackers (
   id TEXT PRIMARY KEY NOT NULL,
   row_json TEXT NOT NULL
@@ -63,6 +77,26 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+// MIGRATIONS[n] upgrades a store at version n to n + 1, keeping its data.
+const MIGRATIONS: Record<number, string> = {
+  // Phase 3: per-row sync state and the outbox of unpushed changes.
+  1: `
+ALTER TABLE expenses ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'synced';
+ALTER TABLE expenses ADD COLUMN local_deleted INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS outbox (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  op TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_entity ON outbox (entity_id);
+`,
+};
+
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let dbPromise: Promise<SQLiteDBConnection> | null = null;
 
@@ -77,14 +111,32 @@ async function openDb(): Promise<SQLiteDBConnection> {
   if (!(await db.isDBOpen()).result) await db.open();
 
   await db.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY NOT NULL, value TEXT);');
-  const version = (await db.query("SELECT value FROM meta WHERE key = 'schema_version'")).values?.[0]?.value;
-  if (version !== SCHEMA_VERSION) {
+  const stored = (await db.query("SELECT value FROM meta WHERE key = 'schema_version'")).values?.[0]?.value;
+  let version = stored ? Number(stored) : 0;
+
+  if (version === 0) {
+    await db.execute(SCHEMA);
+  } else if (version > SCHEMA_VERSION) {
+    // Written by a newer build (only after a downgrade install): its layout is
+    // unknown, so start over. Unpushed changes in it are lost.
     await db.execute(TABLES.map(t => `DROP TABLE IF EXISTS ${t};`).join('\n'));
     await db.execute(SCHEMA);
-    await db.run("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", [SCHEMA_VERSION]);
+  } else {
+    for (; version < SCHEMA_VERSION; version++) {
+      const step = MIGRATIONS[version];
+      if (!step) throw new Error(`No local-store migration from version ${version}`);
+      await db.execute(step, true);
+    }
+  }
+  if (Number(stored) !== SCHEMA_VERSION) {
+    await db.run(
+      "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      [String(SCHEMA_VERSION)],
+    );
   }
   return db;
 }
+
 
 export function getDb(): Promise<SQLiteDBConnection> {
   if (!dbPromise) {

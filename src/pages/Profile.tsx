@@ -282,7 +282,7 @@ export default function ProfilePage() {
               {exporting ? <CircleNotch className="h-4 w-4 animate-spin mr-2" /> : <DownloadSimple className="h-4 w-4 mr-2" />}
               Export My Data
             </Button>
-            <Button variant="outline" className="h-10" onClick={() => { signOut(); navigate('/auth'); }}>
+            <Button variant="outline" className="h-10" onClick={async () => { if (await signOut()) navigate('/auth'); }}>
               <SignOut className="h-4 w-4 mr-2" /> Sign Out
             </Button>
           </div>

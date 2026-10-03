@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Tracker, TrackerWithStats, TrackerMember, Category, Profile } from '@/types';
 import { monthlyNetExpense, netExpenseSummedByMonth, DatedFlowExpense } from '@/lib/netOutgo';
 import { fetchAllPages } from '@/lib/fetchAllPages';
-import { isNativeApp } from '@/lib/platform';
+import { assertOnline, isNativeApp } from '@/lib/platform';
 import { toast } from 'sonner';
 
 /** Per-tracker derived figures for the Home page cards + summary hero. */
@@ -173,6 +173,7 @@ export function useCreateTracker() {
 
   return useMutation({
     mutationFn: async ({ name, currency = 'INR' }: { name: string; currency?: string }) => {
+      assertOnline();
       if (!user) throw new Error('Not authenticated');
 
       const { data: tracker, error } = await supabase
@@ -254,6 +255,7 @@ export function useUpdateTracker() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, name, currency }: { id: string; name?: string; currency?: string }) => {
+      assertOnline();
       const updates: Record<string, string> = {};
       if (name !== undefined) updates.name = name;
       if (currency !== undefined) updates.currency = currency;
@@ -273,6 +275,7 @@ export function useConvertTrackerCurrency() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ trackerId, newCurrency, convertExisting }: { trackerId: string; newCurrency: string; convertExisting: boolean }) => {
+      assertOnline();
       // Update tracker currency
       const { error: tErr } = await supabase.from('trackers').update({ currency: newCurrency }).eq('id', trackerId);
       if (tErr) throw tErr;
@@ -353,6 +356,7 @@ export function useDeleteTracker() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      assertOnline();
       const { error } = await supabase.from('trackers').delete().eq('id', id);
       if (error) throw error;
     },
@@ -368,6 +372,7 @@ export function useInviteMember(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (email: string) => {
+      assertOnline();
       const { data: profile, error: profileErr } = await supabase
         .from('profiles')
         .select('id, full_name')
@@ -410,6 +415,7 @@ export function useAddMember(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ userId, name }: { userId: string; name: string }) => {
+      assertOnline();
       const { error } = await supabase
         .from('tracker_members')
         .insert({ tracker_id: trackerId, user_id: userId, role: 'member' });
@@ -428,6 +434,7 @@ export function useRemoveMember(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (memberId: string) => {
+      assertOnline();
       const { error } = await supabase
         .from('tracker_members')
         .delete()
@@ -446,6 +453,7 @@ export function useUpdateMemberRole(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ memberId, role }: { memberId: string; role: string }) => {
+      assertOnline();
       const { error } = await supabase
         .from('tracker_members')
         .update({ role })
@@ -465,6 +473,7 @@ export function useCreateCategory(trackerId: string) {
   const { user } = useAuth();
   return useMutation({
     mutationFn: async ({ name, icon, color }: { name: string; icon: string; color: string }) => {
+      assertOnline();
       const { error } = await supabase
         .from('categories')
         .insert({ name, icon, color, tracker_id: trackerId, created_by: user?.id, is_system: false });
@@ -482,6 +491,7 @@ export function useUpdateCategory(trackerId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, name, icon, color }: { id: string; name: string; icon: string; color: string }) => {
+      assertOnline();
       const { error } = await supabase
         .from('categories')
         .update({ name, icon, color })
@@ -509,6 +519,7 @@ export function useDeleteCategory(trackerId: string) {
       deleteTransactions?: boolean;
       reassignCategoryId?: string;
     }) => {
+      assertOnline();
       if (deleteTransactions) {
         // Delete all transactions using this category in this tracker
         await supabase

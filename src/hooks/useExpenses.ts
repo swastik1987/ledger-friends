@@ -6,8 +6,15 @@ import { useCallback, useEffect } from 'react';
 import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
 import { fetchAllPages } from '@/lib/fetchAllPages';
-import { isNativeApp } from '@/lib/platform';
+import { assertOnline, isNativeApp } from '@/lib/platform';
 import { markStale } from '@/lib/local/state';
+
+// Android app: transaction writes go to the local store + outbox and sync in
+// the background (src/lib/local/outbox.ts), so they work offline. The meta
+// tells App.tsx's MutationCache not to treat them as server changes the
+// local store hasn't seen.
+const localOutbox = () => import('@/lib/local/outbox');
+const LOCAL_WRITE = { localWrite: true };
 
 /**
  * Fetches the distinct months that have transactions for a tracker.
@@ -109,11 +116,17 @@ export function useExpenses(trackerId: string, month: string) {
 export function useCreateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (expense: Omit<Expense, 'id' | 'created_at' | 'updated_at' | 'category'>) => {
-      const { error } = await supabase.from('expenses').insert(expense as any);
-      if (error) throw error;
+      if (isNativeApp) {
+        await (await localOutbox()).createExpenses([expense as unknown as Record<string, unknown>]);
+      } else {
+        const { error } = await supabase.from('expenses').insert(expense as any);
+        if (error) throw error;
+      }
       // Record category learning from manual entries (best-effort, non-blocking)
-      if (expense.source === 'manual' && expense.description && expense.category_id) {
+      // Skipped offline in the Android app: learning is best-effort and needs the server.
+      if (expense.source === 'manual' && expense.description && expense.category_id && navigator.onLine) {
         recordCategoryLearning(expense.description, expense.category_id, (expense as any).merchant_name);
       }
     },
@@ -130,12 +143,17 @@ export function useCreateExpense() {
 export function useUpdateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({ id, ...updates }: Partial<Expense> & { id: string }) => {
       const { category, created_by_profile, ...rest } = updates;
-      const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
-      if (error) throw error;
+      if (isNativeApp) {
+        await (await localOutbox()).updateExpenses([id], rest as Record<string, unknown>);
+      } else {
+        const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
+        if (error) throw error;
+      }
       // Record category learning when category is changed on an existing transaction
-      if (rest.category_id && rest.description) {
+      if (rest.category_id && rest.description && navigator.onLine) {
         recordCategoryLearning(rest.description, rest.category_id, (rest as any).merchant_name);
       }
     },
@@ -152,7 +170,9 @@ export function useUpdateExpense() {
 export function useDeleteExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (id: string) => {
+      if (isNativeApp) return (await localOutbox()).deleteExpenses([id]);
       const { error } = await supabase.from('expenses').delete().eq('id', id);
       if (error) throw error;
     },
@@ -192,14 +212,23 @@ export function useUndoableDeleteExpense(trackerId: string) {
     const commit = async () => {
       if (undone || committed) return;
       committed = true;
-      const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
-      if (error) {
-        restore();
-        toast.error(error.message);
-        return;
+      if (isNativeApp) {
+        // Local delete + outbox; it reaches the server whenever there's a network.
+        try {
+          await (await localOutbox()).deleteExpenses([expenseId]);
+        } catch (err) {
+          restore();
+          toast.error(err instanceof Error ? err.message : 'Delete failed');
+          return;
+        }
+      } else {
+        const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+        if (error) {
+          restore();
+          toast.error(error.message);
+          return;
+        }
       }
-      // Not a useMutation, so the MutationCache hook that marks the Android app's local store stale doesn't see it.
-      if (isNativeApp) markStale();
       queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['expense-months', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
@@ -221,6 +250,7 @@ export function useBulkCreateExpenses() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (expenses: any[]) => {
+      assertOnline(); // statement upload is online-only
       const { error } = await supabase.from('expenses').insert(expenses);
       if (error) throw error;
       return expenses.length;
@@ -238,7 +268,12 @@ export function useBulkCreateExpenses() {
 export function useBulkUpdateCategory() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string; category?: Category }) => {
+      if (isNativeApp) {
+        await (await localOutbox()).updateExpenses(ids, { category_id: categoryId });
+        return ids.length;
+      }
       const { error } = await supabase
         .from('expenses')
         .update({ category_id: categoryId } as any)
@@ -274,7 +309,12 @@ export function useBulkUpdateCategory() {
 export function useBulkDeleteExpenses() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (ids: string[]) => {
+      if (isNativeApp) {
+        await (await localOutbox()).deleteExpenses(ids);
+        return ids.length;
+      }
       const { error } = await supabase
         .from('expenses')
         .delete()
@@ -321,6 +361,8 @@ export function useBulkMoveExpenses() {
       sourceCategories: Category[];
       targetCategories: Category[];
     }) => {
+      // Online-only: it may create categories in the target tracker first.
+      assertOnline();
       const selected = expenses.filter(e => ids.includes(e.id));
 
       // Build map of category IDs that need to be created in target tracker
@@ -504,11 +546,22 @@ export function useSuspectedTransfers(trackerId: string) {
 export function useBulkResolveTransfers() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({
       trackerId,
       confirmedIds,
       rejectedIds,
     }: { trackerId: string; confirmedIds: string[]; rejectedIds: string[] }) => {
+      if (isNativeApp) {
+        const outbox = await localOutbox();
+        if (confirmedIds.length > 0) {
+          await outbox.updateExpenses(confirmedIds, { is_transfer: true, suspected_transfer: false, rejected_as_transfer: false });
+        }
+        if (rejectedIds.length > 0) {
+          await outbox.updateExpenses(rejectedIds, { suspected_transfer: false, rejected_as_transfer: true });
+        }
+        return { confirmed: confirmedIds.length, rejected: rejectedIds.length, trackerId };
+      }
       if (confirmedIds.length > 0) {
         const { error } = await supabase
           .from('expenses')
@@ -570,13 +623,16 @@ export function useExpenseRealtime(trackerId: string) {
 
 export function useDuplicateCheck(trackerId: string) {
   return async (date: string, amount: number, description: string): Promise<Expense | null> => {
-    const { data } = await supabase
-      .from('expenses')
-      .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
-      .eq('tracker_id', trackerId)
-      .eq('date', date)
-      .eq('amount', amount)
-      .limit(5);
+    // Android app: check the local store, which also covers offline entries not pushed yet.
+    const { data } = isNativeApp
+      ? { data: await (await import('@/lib/local/reads')).readDuplicateCandidates(trackerId, date, amount) }
+      : await supabase
+          .from('expenses')
+          .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
+          .eq('tracker_id', trackerId)
+          .eq('date', date)
+          .eq('amount', amount)
+          .limit(5);
 
     if (!data?.length) return null;
 

@@ -643,7 +643,7 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`**: the app shows everything offline, from a local copy that it keeps up to date. Writes still go straight to Supabase and need the network (Phase 3).
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`**, cut from it: transactions can be added, edited and deleted offline and sync when the network returns.
 
 What anyone touching the Android work needs to know:
 - **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS sits behind `isNativeApp` (`src/lib/platform.ts`) and is dynamically imported, so the web bundle carries only `@capacitor/core` and the small `src/lib/local/state.ts`:
@@ -664,19 +664,20 @@ What anyone touching the Android work needs to know:
   - `sync.ts`: the pull engine.
   - `reads.ts`: the local versions of the hook reads.
   - `state.ts`: SQLite-free shared state (`markStale`, the query-client binding, `LocalNotSyncedError`, the profile cache).
+  - `outbox.ts`: offline writes (local row + outbox entry in one transaction) and the push engine (Phase 3).
 - **Hooks:** each read hook (`useTrackers`, `useTrackerHomeStats`, `useTracker`, `useTrackerMembers`, `useCategories`, `useBanks`, `useExpenses`, `useExpenseMonths`, `useSuspectedTransfers`) starts its `queryFn` with `if (isNativeApp) return (await import('@/lib/local/reads')).readX(...)`. The web path below it is unchanged. A new read hook needs the same branch, or it won't work offline.
 - **Tables:**
   - Each table stores the server row as `row_json`, plus explicit columns for whatever SQL filters, sorts or sums on.
   - Server columns added later flow through without a local schema change.
-  - Store layout changes bump `SCHEMA_VERSION` in `db.ts`, which drops the tables and re-pulls. That's only safe while the store is a pure cache, so Phase 3 (unpushed writes) needs real migrations.
+  - Store layout changes are **migrations that keep data**: add a step to `MIGRATIONS` in `db.ts` and bump `SCHEMA_VERSION`. Never drop tables, since the outbox may hold unpushed changes. v1→v2 added `expenses.sync_state` / `local_deleted` and the `outbox` table.
 - **Pulls:**
   - **Meta** (profiles, trackers, members, categories, banks): replaced wholesale. A fingerprint skips the write and the re-render when nothing changed.
   - **Expenses:** incremental by the server's `updated_at`, with one cursor across all trackers, a 5-minute overlap, and keyset pagination on `(updated_at, id)`. The next page downloads while the current one is written.
   - **Deletes:** a pull by `updated_at` can't see hard deletes. Each refresh compares every relevant tracker's server row count (a HEAD request) with the local count, and on a mismatch fetches the ids and drops local extras. So **Phase 2 needs no soft-delete migration**.
 - **Reads are stale-while-revalidate:**
   - A read returns local data at once and starts a pull. If the pull changed anything, every active query re-reads.
-  - A read waits for its pull only when the device has never synced (up to 60 s; offline it throws `LocalNotSyncedError`, so screens show `LoadError`), or after a known change: `markStale()` from the `MutationCache` `onSuccess` hook, the realtime handler, `useUndoableDeleteExpense` and Home's invite loop (up to 4 s).
-  - Any write that bypasses `useMutation` must call `markStale()`, or a just-deleted row can flash back.
+  - A read waits for its pull only when the device has never synced (up to 60 s; offline it throws `LocalNotSyncedError`, so screens show `LoadError`), or after a known change: `markStale()` from the `MutationCache` `onSuccess` hook (server writes only), the realtime handler, Home's invite loop, and after the outbox pushes (up to 4 s).
+  - Any *server* write that bypasses `useMutation` must call `markStale()`, or a just-deleted row can flash back. Local writes (outbox) don't need it.
 - **Triggers:**
   - Reads.
   - Reconnect: `onlineManager.subscribe` (transition-only), seeded from `navigator.onLine` at startup.
@@ -686,10 +687,38 @@ What anyone touching the Android work needs to know:
 - **Auth offline (spike Q3, fixed):** `AuthContext` starts from the session persisted in localStorage (`src/lib/storedSession.ts`) instead of waiting for supabase-js.
   - A null-session event while the stored session still exists means "refresh couldn't reach the server", so the user stays signed in. supabase-js deletes the stored session on a real sign-out or a rejected refresh token.
   - The profile is cached in localStorage (`expensesync-profile-cache`).
-  - **Sign-out** on native wipes SQLite and the query cache. Offline, supabase-js keeps the session when its sign-out call fails, so the app removes the stored session itself and reloads. The server-side refresh token is then not revoked.
+  - **Sign-out** on native first tries to push the outbox (up to 10 s). If changes are still unsynced, it asks before discarding them (`window.confirm`). `signOut()` resolves `false` if the user cancels. It then wipes SQLite and the query cache. Offline, supabase-js keeps the session when its sign-out call fails, so the app removes the stored session itself and reloads. The server-side refresh token is then not revoked.
+
+**Offline writes (Phase 3), `src/lib/local/outbox.ts`:**
+- **Which writes:** creating, editing and deleting transactions, including bulk category change, bulk delete, undoable swipe-delete and transfer review. In the app their hooks call `createExpenses` / `updateExpenses` / `deleteExpenses` instead of Supabase. Each writes the local row and an `outbox` entry in one SQLite transaction, then pushes right away if online.
+- **Ids:** new rows get `crypto.randomUUID()` on the device.
+- **Row states:** `expenses.sync_state` is `synced`, `pending_insert`, `pending_update`, `pending_delete` or `failed`.
+  - A pending delete keeps the row as a hidden tombstone (`local_deleted = 1`) until the delete reaches the server.
+  - Reads filter out `local_deleted` and expose `Expense.sync_status` (`'pending' | 'failed'`). `TxnRow` shows a cloud icon (pending) or a warning icon (failed).
+- **Push engine:**
+  - It replays the outbox in `seq` order.
+  - An insert that hits `23505` counts as done (an earlier attempt landed).
+  - Pushes never send `created_at` / `updated_at`.
+  - An update that matches no row (deleted elsewhere, or RLS now hides it) drops the local row and its entries.
+  - A network error stops the drain and keeps the order.
+  - **Permanent errors** (SQLSTATE 22/23/42, PostgREST 1xx/2xx) mark the entry, every later entry for that row, and the row as `failed`, then move on. Nothing blocks the queue.
+- **Triggers:** each `ensureExpenses` pull pushes first. The pull still runs if the push fails, and the push error then schedules the retry. Local writes push immediately, and the reconnect and resume triggers re-run reads, which pull.
+- **Pulls (rule 4):** a pulled row never overwrites a row that isn't `synced` (`ON CONFLICT … WHERE sync_state = 'synced'`). Reconcile ignores `pending_insert` rows and only drops `synced` ones.
+- **Mutation meta:** `meta: { localWrite: true }` on these mutations tells the `MutationCache` not to `markStale()`. The local store already has the change.
+- **Banks offline:** a name that matches the cached registry gets its id. Otherwise the row keeps the typed `bank_name`, and the push resolves or registers `bank_id` (`withBankId`).
+- **Online-only in the app:**
+  - Statement upload: gated at both entry points.
+  - Trackers, members, categories, moving transactions between trackers: `assertOnline()` throws a friendly `OFFLINE_MESSAGE`. Native mutations use `networkMode: 'always'`, so they'd otherwise fail with "Failed to fetch".
+  - **Foreign-currency entries** are blocked offline with a toast, because conversion needs the `convert-currency` edge function. That's the plan §8 decision for v1.
+  - Category learning is skipped offline.
+- **`SyncStatusPill`** (native only, above the bottom nav) shows "Offline · N waiting to sync", "Syncing N changes…" or "N changes couldn't sync". Tapping the failed state shows the server's error.
+- **Phase 4 still to do:**
+  - A way to retry or discard failed entries; today they stay marked.
+  - Delete-vs-edit conflict handling, plus soft delete if needed.
+  - Duplicate checks against offline rows: `useDuplicateCheck` already reads local data.
 - **Wipe safety:** `wipe()` bumps an epoch, and pulls pass the epoch they started under to `runInTransaction`, which refuses stale writes. That stops a pull still in flight at sign-out from refilling the store.
 - **Debugging:** the debug build's WebView is inspectable. `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`, then use Chrome DevTools or CDP, e.g. `Capacitor.Plugins.CapacitorSQLite.query({database:'expensesync', statement:'…', values:[], readonly:false})`. In SQL, string literals need **single** quotes: double quotes mean identifiers.
-- **Spike findings still open:** Phase 2/3 must watch lazy localStorage writes (a refresh-token rotation followed by an immediate kill). Phase 3 adds offline writes.
+- **Spike findings still open:** watch lazy localStorage writes (a refresh-token rotation followed by an immediate kill).
 
 ## KNOWN QUIRKS & FUTURE WORK
 

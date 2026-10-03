@@ -5,6 +5,7 @@ import { readStoredUser } from '@/lib/storedSession';
 import { fetchAllPages } from '@/lib/fetchAllPages';
 import type { Profile } from '@/types';
 import { currentEpoch, getMeta, query, runInTransaction, setMetaStatement, wipe } from './db';
+import { pushOutbox } from './outbox';
 import { currentStaleGen, LocalNotSyncedError, refreshQueries, writeCachedProfile } from './state';
 
 // Pull engine for the Android app's local store (docs/android-app-plan.md §3–4).
@@ -245,11 +246,18 @@ async function pullMeta(): Promise<boolean> {
 
 // ─── Expenses pull ─────────────────────────────────────────────────────────
 
+// Rule 4: a pulled row never overwrites a local row with an unpushed change
+// (sync_state other than 'synced'; see outbox.ts).
 function upsertExpense(e: Row): capSQLiteSet {
   return {
-    statement: `INSERT OR REPLACE INTO expenses
+    statement: `INSERT INTO expenses
       (id, tracker_id, date, updated_at, category_id, amount, is_debit, is_transfer, row_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tracker_id = excluded.tracker_id, date = excluded.date, updated_at = excluded.updated_at,
+        category_id = excluded.category_id, amount = excluded.amount, is_debit = excluded.is_debit,
+        is_transfer = excluded.is_transfer, row_json = excluded.row_json
+      WHERE expenses.sync_state = 'synced'`,
     values: [
       e.id, e.tracker_id, e.date, e.updated_at, e.category_id ?? null,
       Number(e.amount), e.is_debit ? 1 : 0, e.is_transfer ? 1 : 0, JSON.stringify(e),
@@ -326,7 +334,9 @@ async function reconcileTracker(trackerId: string): Promise<boolean> {
     .eq('tracker_id', trackerId)
     .abortSignal(sig());
   if (error) throw error;
-  const [{ n }] = await query<{ n: number }>('SELECT COUNT(*) AS n FROM expenses WHERE tracker_id = ?', [trackerId]);
+  // Rows created on this device and not pushed yet aren't on the server, so they don't count.
+  const [{ n }] = await query<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM expenses WHERE tracker_id = ? AND sync_state != 'pending_insert'", [trackerId]);
   if (count === null || count === Number(n)) return false;
 
   const serverIds = new Set(
@@ -334,9 +344,13 @@ async function reconcileTracker(trackerId: string): Promise<boolean> {
       supabase.from('expenses').select('id').eq('tracker_id', trackerId).order('id').range(from, to).abortSignal(sig()),
     )).map(r => r.id),
   );
-  const localIds = (await query<{ id: string }>('SELECT id FROM expenses WHERE tracker_id = ?', [trackerId])).map(r => r.id);
+  const local = await query<{ id: string; sync_state: string }>(
+    "SELECT id, sync_state FROM expenses WHERE tracker_id = ? AND sync_state != 'pending_insert'", [trackerId]);
+  const localIds = local.map(r => r.id);
   const localSet = new Set(localIds);
-  const gone = localIds.filter(id => !serverIds.has(id));
+  // Only synced rows are dropped: a pending edit or delete of a row deleted
+  // elsewhere settles when its push finds no row (outbox.ts).
+  const gone = local.filter(r => r.sync_state === 'synced' && !serverIds.has(r.id)).map(r => r.id);
   await runInTransaction(gone.map(id => ({ statement: 'DELETE FROM expenses WHERE id = ?', values: [id] })), epoch);
 
   const missing = [...serverIds].filter(id => !localSet.has(id));
@@ -355,6 +369,10 @@ const changes = new GenFlight(pullExpenseChanges);
 function expensesScope(trackerId: string | 'all'): Scope {
   return scope(`expenses:${trackerId}`, async () => {
     const epoch = currentEpoch();
+    // Push first: the pull then brings back the server's version of what we
+    // sent. A push that fails transiently doesn't stop the pull; it's reported
+    // after it, so the retry backoff kicks in.
+    const pushError = await pushOutbox().then(() => null, (err: unknown) => err);
     const metaChanged = !(await getMeta('meta_synced_at')) ? await metaScope().flight.run() : false;
     const rowsChanged = await changes.run();
     const ids = trackerId === 'all'
@@ -362,6 +380,7 @@ function expensesScope(trackerId: string | 'all'): Scope {
       : [trackerId];
     const reconciled = await Promise.all(ids.map(reconcileTracker));
     await runInTransaction([setMetaStatement('expenses_synced_at', new Date().toISOString())], epoch);
+    if (pushError) throw pushError;
     return metaChanged || rowsChanged || reconciled.some(Boolean);
   });
 }

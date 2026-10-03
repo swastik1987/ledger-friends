@@ -46,7 +46,7 @@ export async function readTrackers(): Promise<TrackerWithStats[]> {
     `SELECT tracker_id,
             SUM(CASE WHEN is_debit = 1 AND is_transfer = 0 THEN amount ELSE 0 END) AS total_debit,
             MIN(date) AS min_date, MAX(date) AS max_date
-       FROM expenses GROUP BY tracker_id`,
+       FROM expenses WHERE local_deleted = 0 GROUP BY tracker_id`,
   );
   const memberCount = new Map(members.map(m => [m.tracker_id, Number(m.n)]));
   const statsById = new Map(stats.map(s => [s.tracker_id, s]));
@@ -71,7 +71,7 @@ export async function readTrackerHomeStats(): Promise<Record<string, TrackerHome
   const profiles = await profilesById();
   const members = await query<{ tracker_id: string; user_id: string }>('SELECT tracker_id, user_id FROM tracker_members');
   const rows = await query<{ tracker_id: string; category_id: string; amount: number; is_debit: number; is_transfer: number; date: string }>(
-    'SELECT tracker_id, category_id, amount, is_debit, is_transfer, date FROM expenses',
+    'SELECT tracker_id, category_id, amount, is_debit, is_transfer, date FROM expenses WHERE local_deleted = 0',
   );
 
   const flowsByTracker = new Map<string, DatedFlowExpense[]>();
@@ -143,7 +143,7 @@ export async function readBanks(): Promise<Bank[]> {
 export async function readExpenseMonthKeys(trackerId: string): Promise<string[]> {
   await ensureExpenses(trackerId);
   const rows = await query<{ m: string }>(
-    'SELECT DISTINCT substr(date, 1, 7) AS m FROM expenses WHERE tracker_id = ? ORDER BY m DESC',
+    'SELECT DISTINCT substr(date, 1, 7) AS m FROM expenses WHERE tracker_id = ? AND local_deleted = 0 ORDER BY m DESC',
     [trackerId],
   );
   return rows.map(r => r.m);
@@ -151,22 +151,42 @@ export async function readExpenseMonthKeys(trackerId: string): Promise<string[]>
 
 export async function readExpenses(trackerId: string, month: string): Promise<Expense[]> {
   await Promise.all([ensureMeta(), ensureExpenses(trackerId)]);
+  type Stored = JsonRow & { sync_state: string };
   const rows = month && month !== 'all'
-    ? await query<JsonRow>(
-        'SELECT row_json FROM expenses WHERE tracker_id = ? AND date >= ? AND date <= ?',
+    ? await query<Stored>(
+        'SELECT row_json, sync_state FROM expenses WHERE tracker_id = ? AND local_deleted = 0 AND date >= ? AND date <= ?',
         [trackerId, ...monthBounds(month)],
       )
-    : await query<JsonRow>('SELECT row_json FROM expenses WHERE tracker_id = ?', [trackerId]);
+    : await query<Stored>('SELECT row_json, sync_state FROM expenses WHERE tracker_id = ? AND local_deleted = 0', [trackerId]);
   const [categories, profiles] = await Promise.all([categoriesById(), profilesById()]);
 
-  return parseRows<Expense>(rows)
-    .map(e => ({
-      ...e,
-      amount: Number(e.amount),
-      category: categories.get(e.category_id),
-      created_by_profile: e.created_by_id ? profiles.get(e.created_by_id) : undefined,
-    }))
+  return rows
+    .map(r => {
+      const e = JSON.parse(r.row_json) as Expense;
+      return {
+        ...e,
+        amount: Number(e.amount),
+        category: categories.get(e.category_id),
+        created_by_profile: e.created_by_id ? profiles.get(e.created_by_id) : undefined,
+        sync_status: syncStatus(r.sync_state),
+      };
+    })
     .sort(byNewest);
+}
+
+function syncStatus(state: string): Expense['sync_status'] {
+  if (state === 'synced') return undefined;
+  return state === 'failed' ? 'failed' : 'pending';
+}
+
+/** Same-day, same-amount transactions, for the duplicate warning on manual entry. */
+export async function readDuplicateCandidates(trackerId: string, date: string, amount: number): Promise<Expense[]> {
+  const rows = await query<JsonRow>(
+    'SELECT row_json FROM expenses WHERE tracker_id = ? AND date = ? AND amount = ? AND local_deleted = 0 LIMIT 5',
+    [trackerId, date, amount],
+  );
+  const categories = await categoriesById();
+  return parseRows<Expense>(rows).map(e => ({ ...e, amount: Number(e.amount), category: categories.get(e.category_id) }));
 }
 
 /**
@@ -188,7 +208,7 @@ export async function readNonTransferExpenses(trackerId: string): Promise<Expens
             json_extract(row_json, '$.currency') AS currency,
             json_extract(row_json, '$.suspected_transfer') AS suspected_transfer,
             json_extract(row_json, '$.rejected_as_transfer') AS rejected_as_transfer
-       FROM expenses WHERE tracker_id = ? AND is_transfer = 0
+       FROM expenses WHERE tracker_id = ? AND is_transfer = 0 AND local_deleted = 0
       ORDER BY date DESC, id DESC`,
     [trackerId],
   );
