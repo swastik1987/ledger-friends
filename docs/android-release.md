@@ -75,7 +75,7 @@ One Android client can hold only one SHA-1. Create a second and third Android cl
    - Default language English
    - App, Free
 2. **App content** declarations (Policy → App content):
-   - **Privacy policy:** `https://<your site>/privacy`, the `/privacy` page on the web app (branch `feature/privacy-page` until it's merged to `main`).
+   - **Privacy policy:** `https://<your site>/privacy`, the `/privacy` page on the web app (live on `main`).
    - **App access:** reviewers need to sign in. Provide a test account (email/password) with some sample data.
    - **Ads:** none.
    - **Content rating:** fill in the questionnaire (no violence, user-generated content limited to the user's own and shared-tracker data).
@@ -123,6 +123,6 @@ Based on what the app does today. Re-check after any feature change.
 
 ## Open items
 
-- **Privacy policy and contact pages:** `/privacy` and `/contact` are built on branch `feature/privacy-page`. They go live once it's merged to `main` and migration `20261003120000_add_contact_messages.sql` has been run in Lovable.
+- ~~**Privacy policy and contact pages**~~ — **Done:** `/privacy` and `/contact` are live on `main`, and the `contact_messages` migration has been applied.
 - **Gemini tier:** see §5.
-- **Merge the Android branches to `main`:** `android/phase-2` … `android/phase-5` are stacked. Lovable deploys `main`; the web code paths are unchanged apart from small improvements noted in each phase's commit.
+- ~~**Merge the Android branches to `main`**~~ — **Done** (`bd6ed39`).

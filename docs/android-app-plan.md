@@ -1,6 +1,6 @@
 # ExpenseSync Android App — Plan
 
-**Status:** Phase 0 (spike) **complete** (2026-10-02); Phase 1 (wrapper) merged to `main`; Phase 2 (local reads) and Phase 3 (offline writes) **done** on `android/phase-2` and `android/phase-3` (2026-10-03). Spike results are in `docs/android-spike-runbook.md` §8 on branch `spike/android-offline`.
+**Status:** Phases 0–5 **done**; Phases 1–5 are merged to `main` (2026-10-03). What remains is publishing (`docs/android-release.md`). Spike results are in `docs/android-spike-runbook.md` §8 on branch `spike/android-offline`.
 **Last updated:** 2026-10-03
 
 ---

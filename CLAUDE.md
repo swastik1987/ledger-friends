@@ -650,7 +650,14 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`** (pushed), cut from it: transactions can be added, edited and deleted offline and sync when the network returns. **Phase 4 (sync hardening)** is on **`android/phase-4`** (pushed): rejected changes can be reviewed, fixed, retried or discarded, and delete-vs-edit conflicts are announced. **Phase 5 (release prep)** is on **`android/phase-5`**: release signing, versioning, backup hardening and the Play runbook (`docs/android-release.md`).
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phases 1–5 are merged to `main`** (Oct 2026; the `android/phase-*` branches are history):
+- **Phase 1:** online-only wrapper.
+- **Phase 2:** local reads and offline auth.
+- **Phase 3:** offline writes through an outbox.
+- **Phase 4:** review, fix, retry or discard rejected changes; delete-vs-edit notices.
+- **Phase 5:** release signing, versioning, backup hardening and the Play runbook (`docs/android-release.md`).
+
+What's left is publishing: owner steps in `docs/android-release.md`.
 
 What anyone touching the Android work needs to know:
 - **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS sits behind `isNativeApp` (`src/lib/platform.ts`) and is dynamically imported, so the web bundle carries only `@capacitor/core` and the small `src/lib/local/state.ts`:
