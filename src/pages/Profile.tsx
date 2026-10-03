@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useTrackers, useDeleteTracker, useRemoveMember, useTrackerMembers } from '@/hooks/useTrackers';
@@ -408,6 +408,12 @@ export default function ProfilePage() {
           </Button>
         </div>
       </div>
+
+      <p className="mt-6 mb-2 text-center text-xs text-muted-foreground">
+        <Link to="/privacy" className="underline underline-offset-2">Privacy policy</Link>
+        {" · "}
+        <Link to="/contact" className="underline underline-offset-2">Contact us</Link>
+      </p>
 
       {/* ─── Delete Trackers Confirmation Dialog ───────── */}
       <AlertDialog open={showDeleteTrackersDialog} onOpenChange={setShowDeleteTrackersDialog}>

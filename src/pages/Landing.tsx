@@ -267,9 +267,15 @@ export default function LandingPage() {
             <img src="/logo-512.png" alt="ExpenseSync" className="h-6 w-6 rounded-md" />
             <span className="text-sm font-semibold">ExpenseSync</span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Built with care for people who want clarity over their finances.
-          </p>
+          <div className="flex flex-col items-center sm:items-end gap-1.5">
+            <p className="text-xs text-muted-foreground">
+              Built with care for people who want clarity over their finances.
+            </p>
+            <div className="flex items-center gap-3 text-xs">
+              <button onClick={() => navigate('/privacy')} className="text-muted-foreground underline underline-offset-2 hover:text-foreground">Privacy</button>
+              <button onClick={() => navigate('/contact')} className="text-muted-foreground underline underline-offset-2 hover:text-foreground">Contact</button>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

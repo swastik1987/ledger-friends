@@ -55,13 +55,15 @@ VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 ```
 ledger-friends/
 ├── src/
-│   ├── pages/                                # 7 pages
+│   ├── pages/                                # 9 pages
 │   │   ├── Auth.tsx
 │   │   ├── Home.tsx                          # Greeting + tracker cards + FloatingAdd
 │   │   ├── Landing.tsx
 │   │   ├── TrackerDetail.tsx                 # Top bar + sticky TabBar + 3 tabs
 │   │   ├── UploadStatement.tsx               # 4-step upload + merchant-extraction pipeline
 │   │   ├── Profile.tsx
+│   │   ├── Privacy.tsx                       # Public privacy policy (/privacy)
+│   │   ├── Contact.tsx                       # Public contact form (/contact)
 │   │   └── NotFound.tsx
 │   │
 │   ├── contexts/
@@ -170,11 +172,13 @@ ledger-friends/
 | `/tracker/:trackerId` | `TrackerDetail` | Protected | Main tracker page (tabs: expenses, dashboard, settings) |
 | `/tracker/:trackerId/upload` | `UploadStatement` | Protected | 4-step statement upload wizard |
 | `/profile` | `Profile` | Protected | User profile + account management |
+| `/privacy` | `Privacy` | None | Public privacy policy (Google Play links here). Keep it true to the app; bump `EFFECTIVE_DATE` on changes |
+| `/contact` | `Contact` | None | Public contact form → `contact_messages`. `?topic=account_deletion` is Play's account-deletion web link |
 | `*` | `NotFound` | None | 404 page |
 
 Route guards (`ProtectedRoute`, `AuthRoute`, `HomeOrLanding`) live in `App.tsx`.
 
-**Code splitting (Jun 2026):** all 7 pages are `React.lazy` routes behind a `Suspense` fallback in `App.tsx`, and `xlsx` is dynamically imported at its three call sites (SettingsTab/Profile export, UploadStatement parse) — keep it out of static imports. `pdfjs-dist` was already dynamic. Entry bundle dropped from ~1.7 MB (499 KB gzip) to ~484 KB (146 KB gzip).
+**Code splitting (Jun 2026):** all pages are `React.lazy` routes behind a `Suspense` fallback in `App.tsx`, and `xlsx` is dynamically imported at its three call sites (SettingsTab/Profile export, UploadStatement parse) — keep it out of static imports. `pdfjs-dist` was already dynamic. Entry bundle dropped from ~1.7 MB (499 KB gzip) to ~484 KB (146 KB gzip).
 
 ---
 
@@ -633,6 +637,7 @@ Listed chronologically (newest last). Always create a new migration file; never 
 23. **`get_tracker_home_stats` RPC** (`20260611100000_add_get_tracker_home_stats.sql`) — server-side Home page aggregation; see RPC Functions. ⚠️ Not yet applied to the linked project (MCP is read-only, CLI not logged in) — apply with `supabase db push` or paste into the dashboard SQL editor; the client falls back gracefully until then.
 24. **`pinned_tracker_ids` on profiles** (`20260611130000_add_pinned_tracker_ids.sql`) — uuid[] for the Home bento pins, covered by the existing self-update policy. ⚠️ Also pending application; `usePinnedTrackers` keeps pins in localStorage until the column exists.
 25. **`banks` registry + `expenses.bank_id`** (`20260721120000_add_banks_registry.sql`) — canonical bank table (`canonical_name`, `aliases[]`, `domain`, `brand_color`), seeded from the banks previously hardcoded in `bankBrand.ts`. Adds `expenses.bank_id` FK and backfills it from existing `bank_name` text via `normalize_bank_name()` (alias/suffix-insensitive match), registering any unrecognised existing spelling as its own new bank so no data is lost. See the `banks` table entry above and `useBanks.ts`.
+26. **`contact_messages`** (`20261003120000_add_contact_messages.sql`): the contact form's inbox. RLS lets `anon` and `authenticated` INSERT only; `user_id` defaults to `auth.uid()` and can't be spoofed. There are no SELECT/UPDATE/DELETE policies, so messages are read in the Supabase / Lovable table editor. `types.ts` is hand-edited for it. ⚠️ Run it in Lovable's SQL editor before `/contact` can accept messages.
 
 After applying migrations, run `supabase gen types` to refresh `src/integrations/supabase/types.ts`. The current types.ts is hand-edited for `raw_description` — re-running gen will produce equivalent output.
 

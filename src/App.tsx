@@ -14,6 +14,8 @@ const TrackerDetail = lazy(() => import("./pages/TrackerDetail"));
 const UploadStatement = lazy(() => import("./pages/UploadStatement"));
 const ProfilePage = lazy(() => import("./pages/Profile"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const PrivacyPage = lazy(() => import("./pages/Privacy"));
+const ContactPage = lazy(() => import("./pages/Contact"));
 
 const queryClient = new QueryClient();
 
@@ -56,6 +58,9 @@ const App = () => (
                 <Route path="/tracker/:trackerId" element={<ProtectedRoute><TrackerDetail /></ProtectedRoute>} />
                 <Route path="/tracker/:trackerId/upload" element={<ProtectedRoute><UploadStatement /></ProtectedRoute>} />
                 <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+                {/* Public: no sign-in needed (Play links to both). */}
+                <Route path="/privacy" element={<PrivacyPage />} />
+                <Route path="/contact" element={<ContactPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

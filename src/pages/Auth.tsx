@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { lovable } from '@/integrations/lovable/index';
 import { Capacitor } from '@capacitor/core';
@@ -39,6 +39,11 @@ export default function AuthPage() {
             <TabsContent value="signup"><SignUpForm /></TabsContent>
           </Tabs>
         </div>
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          <Link to="/privacy" className="underline underline-offset-2">Privacy policy</Link>
+          {' · '}
+          <Link to="/contact" className="underline underline-offset-2">Contact us</Link>
+        </p>
       </div>
     </div>
   );
