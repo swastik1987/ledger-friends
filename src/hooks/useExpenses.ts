@@ -15,16 +15,22 @@ export function useExpenseMonths(trackerId: string) {
   return useQuery({
     queryKey: ['expense-months', trackerId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('expenses')
-        .select('date')
-        .eq('tracker_id', trackerId);
-
-      if (error) throw error;
+      // A tracker can have more than PostgREST's 1000-row cap, and an
+      // unpaginated select would return an arbitrary 1000 rows, silently
+      // dropping months. Page through with a stable order (id tiebreaker).
+      const data = await fetchAllPages((from, to) =>
+        supabase
+          .from('expenses')
+          .select('date')
+          .eq('tracker_id', trackerId)
+          .order('date', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to),
+      );
 
       // Extract unique yyyy-MM values
       const monthSet = new Set<string>();
-      (data || []).forEach(e => {
+      data.forEach(e => {
         if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
       });
 
