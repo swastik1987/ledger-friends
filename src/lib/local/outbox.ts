@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { findBankMatch } from '@/lib/bankResolver';
 import { bankHashColor, guessDomain } from '@/lib/bankBrand';
 import type { Bank } from '@/types';
+import { toast } from 'sonner';
 import { currentEpoch, query, runInTransaction } from './db';
 import { markStale, refreshQueries } from './state';
 
@@ -100,14 +101,60 @@ export async function createExpenses(rows: Row[]): Promise<Row[]> {
   return created;
 }
 
-/** Applies `patch` to each transaction locally and queues the update. */
+interface FailedEntity { insert: { seq: number; payload: Row } | null }
+
+/** Rows among `ids` with entries the server rejected, and their unsent insert if any. */
+async function readFailedEntities(ids: string[]): Promise<Map<string, FailedEntity>> {
+  const out = new Map<string, FailedEntity>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const rows = await query<{ seq: number; entity_id: string; op: Op; payload: string }>(
+      `SELECT seq, entity_id, op, payload FROM outbox
+        WHERE status = 'failed' AND entity_id IN (${chunk.map(() => '?').join(',')}) ORDER BY seq`,
+      chunk,
+    );
+    for (const r of rows) {
+      const entity = out.get(r.entity_id) ?? { insert: null };
+      if (r.op === 'insert') entity.insert = { seq: r.seq, payload: JSON.parse(r.payload) as Row };
+      out.set(r.entity_id, entity);
+    }
+  }
+  return out;
+}
+
+/**
+ * Applies `patch` to each transaction locally and queues the update.
+ *
+ * Editing a row the server rejected means "fix it and send it again": its
+ * failed entries go back in the queue, and if its insert never landed, the
+ * edit is folded into that insert. (Only failed inserts are rewritten: a
+ * pending one may be in flight right now.)
+ */
 export async function updateExpenses(ids: string[], patch: Row): Promise<void> {
   const fields = pushable(patch);
   delete fields.id;
   const current = await readRows(ids);
+  const failed = await readFailedEntities([...current.keys()]);
   const statements: capSQLiteSet[] = [];
   for (const [id, { row, syncState }] of current) {
     const merged = { ...row, ...fields };
+    const rejected = failed.get(id);
+    if (rejected) {
+      statements.push({
+        statement: "UPDATE outbox SET status = 'pending', last_error = NULL WHERE entity_id = ? AND status = 'failed'",
+        values: [id],
+      });
+    }
+    if (rejected?.insert) {
+      statements.push(
+        {
+          statement: 'UPDATE outbox SET payload = ? WHERE seq = ?',
+          values: [JSON.stringify({ ...rejected.insert.payload, ...fields }), rejected.insert.seq],
+        },
+        rowStatement(merged, 'pending_insert'),
+      );
+      continue;
+    }
     // Still waiting for its insert: the update rides along after it.
     const state = syncState === 'pending_insert' ? 'pending_insert' : 'pending_update';
     statements.push(rowStatement(merged, state), outboxStatement('update', id, fields));
@@ -116,10 +163,26 @@ export async function updateExpenses(ids: string[], patch: Row): Promise<void> {
   afterLocalWrite();
 }
 
-/** Hides the transactions locally and queues their delete. */
+/**
+ * Hides the transactions locally and queues their delete. A rejected row
+ * that never reached the server is simply dropped; a rejected change to a
+ * row that did is abandoned in favour of the delete.
+ */
 export async function deleteExpenses(ids: string[]): Promise<void> {
+  const failed = await readFailedEntities(ids);
   const statements: capSQLiteSet[] = [];
   for (const id of ids) {
+    const rejected = failed.get(id);
+    if (rejected?.insert) {
+      statements.push(
+        { statement: 'DELETE FROM outbox WHERE entity_id = ?', values: [id] },
+        { statement: 'DELETE FROM expenses WHERE id = ?', values: [id] },
+      );
+      continue;
+    }
+    if (rejected) {
+      statements.push({ statement: "DELETE FROM outbox WHERE entity_id = ? AND status = 'failed'", values: [id] });
+    }
     statements.push(
       { statement: "UPDATE expenses SET local_deleted = 1, sync_state = 'pending_delete' WHERE id = ?", values: [id] },
       outboxStatement('delete', id, {}),
@@ -224,6 +287,7 @@ function settleStatements(entry: Entry, outcome: 'ok' | 'gone'): capSQLiteSet[] 
 async function drain(): Promise<void> {
   const epoch = currentEpoch();
   let pushed = false;
+  let lostEdits = 0;
   try {
     for (;;) {
       if (!navigator.onLine) return;
@@ -234,6 +298,7 @@ async function drain(): Promise<void> {
       try {
         const found = await send(entry);
         await runInTransaction(settleStatements(entry, found ? 'ok' : 'gone'), epoch);
+        if (!found) lostEdits++;
       } catch (err) {
         if (!(err instanceof PermanentPushError)) throw err; // transient: stop, keep the order
         console.warn('[local] push failed permanently:', err.message);
@@ -249,6 +314,11 @@ async function drain(): Promise<void> {
       pushed = true;
     }
   } finally {
+    // Delete wins over edit (docs/android-app-plan.md §9): say so rather than
+    // letting an offline edit vanish silently.
+    if (lostEdits > 0) {
+      toast.info(`${lostEdits === 1 ? 'A transaction you edited was' : `${lostEdits} transactions you edited were`} deleted on another device, so ${lostEdits === 1 ? 'the edit was' : 'the edits were'} dropped.`);
+    }
     // The server now has newer versions of these rows; the next read pulls them.
     if (pushed) {
       markStale();
@@ -280,4 +350,88 @@ export async function readSyncCounts(): Promise<SyncCounts> {
     ? await query<{ last_error: string | null }>("SELECT last_error FROM outbox WHERE status = 'failed' ORDER BY seq DESC LIMIT 1")
     : [];
   return { pending: count('pending'), failed, lastError: last?.last_error ?? null };
+}
+
+// ─── Rejected changes ──────────────────────────────────────────────────────
+
+export interface FailedChange {
+  id: string;
+  description: string;
+  amount: number | null;
+  currency: string;
+  date: string | null;
+  /** True when the row never reached the server (its insert was rejected). */
+  isNew: boolean;
+  isDelete: boolean;
+  error: string | null;
+}
+
+/** One entry per transaction with rejected changes, oldest first. */
+export async function readFailedChanges(): Promise<FailedChange[]> {
+  const rows = await query<{ entity_id: string; ops: string; error: string | null; row_json: string | null }>(
+    `SELECT o.entity_id, GROUP_CONCAT(o.op) AS ops, MAX(o.last_error) AS error, e.row_json
+       FROM outbox o LEFT JOIN expenses e ON e.id = o.entity_id
+      WHERE o.status = 'failed'
+      GROUP BY o.entity_id
+      ORDER BY MIN(o.seq)`,
+  );
+  return rows.map(r => {
+    const row = r.row_json ? (JSON.parse(r.row_json) as Row) : {};
+    const ops = r.ops.split(',');
+    return {
+      id: r.entity_id,
+      description: String(row.merchant_name || row.description || 'Transaction'),
+      amount: row.amount === undefined ? null : Number(row.amount),
+      currency: typeof row.currency === 'string' ? row.currency : 'INR',
+      date: typeof row.date === 'string' ? row.date : null,
+      isNew: ops.includes('insert'),
+      isDelete: ops.includes('delete'),
+      error: r.error,
+    };
+  });
+}
+
+/** Puts every rejected change back in the queue and pushes (e.g. after a server-side fix). */
+export async function retryFailed(): Promise<void> {
+  await runInTransaction([
+    { statement: "UPDATE outbox SET status = 'pending', last_error = NULL WHERE status = 'failed'", values: [] },
+    {
+      statement: `UPDATE expenses SET sync_state = CASE
+          WHEN EXISTS (SELECT 1 FROM outbox WHERE entity_id = expenses.id AND op = 'insert') THEN 'pending_insert'
+          WHEN local_deleted = 1 THEN 'pending_delete'
+          ELSE 'pending_update' END
+        WHERE sync_state = 'failed'`,
+      values: [],
+    },
+  ]);
+  afterLocalWrite();
+}
+
+/**
+ * Drops every rejected change and goes back to the server's version: rows
+ * that never reached the server are removed; the rest are re-fetched (or
+ * removed if the server no longer has them). Needs the network.
+ */
+export async function discardFailed(): Promise<number> {
+  const failed = await readFailedChanges();
+  if (failed.length === 0) return 0;
+  const existing = failed.filter(f => !f.isNew).map(f => f.id);
+  const serverRows = new Map<string, Row>();
+  for (let i = 0; i < existing.length; i += 100) {
+    const { data, error } = await supabase
+      .from('expenses').select('*').in('id', existing.slice(i, i + 100)).abortSignal(sig());
+    if (error) throw error;
+    for (const r of (data ?? []) as unknown as Row[]) serverRows.set(r.id as string, r);
+  }
+  const statements: capSQLiteSet[] = [];
+  for (const f of failed) {
+    statements.push({ statement: 'DELETE FROM outbox WHERE entity_id = ?', values: [f.id] });
+    const server = serverRows.get(f.id);
+    statements.push(server
+      ? rowStatement(server, 'synced')
+      : { statement: 'DELETE FROM expenses WHERE id = ?', values: [f.id] });
+  }
+  await runInTransaction(statements);
+  refreshQueries();
+  return failed.length;
 }

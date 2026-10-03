@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { onlineManager, useQuery } from '@tanstack/react-query';
 import { CloudArrowUp, CloudSlash, WarningCircle } from '@phosphor-icons/react';
-import { toast } from 'sonner';
+import FailedChangesSheet from '@/components/FailedChangesSheet';
 import { useAuth } from '@/contexts/AuthContext';
 
 const subscribeOnline = (cb: () => void) => onlineManager.subscribe(cb);
@@ -10,11 +10,13 @@ const isOnline = () => onlineManager.isOnline();
 /**
  * Android app only: a small pill above the bottom nav that says when the app
  * is offline, how many local changes are waiting to sync, and how many the
- * server rejected. Hidden when everything is synced and online.
+ * server rejected. Hidden when everything is synced and online. Tapping the
+ * rejected state opens FailedChangesSheet.
  */
 export default function SyncStatusPill() {
   const { user } = useAuth();
   const online = useSyncExternalStore(subscribeOnline, isOnline);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const { data } = useQuery({
     queryKey: ['sync-status'],
     queryFn: async () => (await import('@/lib/local/outbox')).readSyncCounts(),
@@ -43,19 +45,18 @@ export default function SyncStatusPill() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        if (failed > 0) {
-          toast.error(`The server rejected ${changes(failed)}${data?.lastError ? `: ${data.lastError}` : ''}. Those transactions are marked on their cards.`);
-        }
-      }}
-      className={`fixed left-4 z-20 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-lg ${tone}`}
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 84px)' }}
-      aria-live="polite"
-    >
-      {icon}
-      {text}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => { if (failed > 0) setReviewOpen(true); }}
+        className={`fixed left-4 z-20 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold shadow-lg ${tone}`}
+        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 84px)' }}
+        aria-live="polite"
+      >
+        {icon}
+        {text}
+      </button>
+      <FailedChangesSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+    </>
   );
 }

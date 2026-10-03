@@ -643,7 +643,7 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`**, cut from it: transactions can be added, edited and deleted offline and sync when the network returns.
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`** (pushed), cut from it: transactions can be added, edited and deleted offline and sync when the network returns. **Phase 4 (sync hardening)** is on **`android/phase-4`**: rejected changes can be reviewed, fixed, retried or discarded, and delete-vs-edit conflicts are announced.
 
 What anyone touching the Android work needs to know:
 - **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS sits behind `isNativeApp` (`src/lib/platform.ts`) and is dynamically imported, so the web bundle carries only `@capacitor/core` and the small `src/lib/local/state.ts`:
@@ -712,10 +712,11 @@ What anyone touching the Android work needs to know:
   - **Foreign-currency entries** are blocked offline with a toast, because conversion needs the `convert-currency` edge function. That's the plan §8 decision for v1.
   - Category learning is skipped offline.
 - **`SyncStatusPill`** (native only, above the bottom nav) shows "Offline · N waiting to sync", "Syncing N changes…" or "N changes couldn't sync". Tapping the failed state shows the server's error.
-- **Phase 4 still to do:**
-  - A way to retry or discard failed entries; today they stay marked.
-  - Delete-vs-edit conflict handling, plus soft delete if needed.
-  - Duplicate checks against offline rows: `useDuplicateCheck` already reads local data.
+- **Rejected changes (Phase 4):**
+  - **Fix by editing:** editing a `failed` row puts its failed entries back in the queue. If its insert never landed, the edit is folded into that insert's payload. Only failed inserts are rewritten, because a pending one may be in flight.
+  - **Deleting** a rejected row that never reached the server just drops it locally. Otherwise its failed entries are abandoned in favour of the delete.
+  - **Review sheet:** tapping the red pill opens `FailedChangesSheet`, which lists each rejected change with the server's error, plus **Retry all** (`retryFailed`) and **Discard all** (`discardFailed`). Discard needs the network: it removes never-synced rows, and re-fetches the server's copy of the others, or removes them if the server no longer has them.
+- **Delete vs edit (Phase 4):** delete always wins, with no soft delete. An offline edit to a row deleted elsewhere is dropped when its push matches no row, and the user sees a toast: "A transaction you edited was deleted on another device…". An offline delete of a row edited elsewhere deletes it. Edits merge field by field, because pushes send only the changed fields, and the last field written wins.
 - **Wipe safety:** `wipe()` bumps an epoch, and pulls pass the epoch they started under to `runInTransaction`, which refuses stale writes. That stops a pull still in flight at sign-out from refilling the store.
 - **Debugging:** the debug build's WebView is inspectable. `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`, then use Chrome DevTools or CDP, e.g. `Capacitor.Plugins.CapacitorSQLite.query({database:'expensesync', statement:'…', values:[], readonly:false})`. In SQL, string literals need **single** quotes: double quotes mean identifiers.
 - **Spike findings still open:** watch lazy localStorage writes (a refresh-token rotation followed by an immediate kill).
