@@ -6,6 +6,15 @@ import { useCallback, useEffect } from 'react';
 import { format, parse, parseISO } from 'date-fns';
 import { recordCategoryLearning } from '@/lib/categoryLearning';
 import { fetchAllPages } from '@/lib/fetchAllPages';
+import { assertOnline, isNativeApp } from '@/lib/platform';
+import { markStale } from '@/lib/local/state';
+
+// Android app: transaction writes go to the local store + outbox and sync in
+// the background (src/lib/local/outbox.ts), so they work offline. The meta
+// tells App.tsx's MutationCache not to treat them as server changes the
+// local store hasn't seen.
+const localOutbox = () => import('@/lib/local/outbox');
+const LOCAL_WRITE = { localWrite: true };
 
 /**
  * Fetches the distinct months that have transactions for a tracker.
@@ -15,27 +24,32 @@ export function useExpenseMonths(trackerId: string) {
   return useQuery({
     queryKey: ['expense-months', trackerId],
     queryFn: async () => {
-      // A tracker can have more than PostgREST's 1000-row cap, and an
-      // unpaginated select would return an arbitrary 1000 rows, silently
-      // dropping months. Page through with a stable order (id tiebreaker).
-      const data = await fetchAllPages((from, to) =>
-        supabase
-          .from('expenses')
-          .select('date')
-          .eq('tracker_id', trackerId)
-          .order('date', { ascending: false })
-          .order('id', { ascending: false })
-          .range(from, to),
-      );
+      let sorted: string[];
+      if (isNativeApp) {
+        sorted = await (await import('@/lib/local/reads')).readExpenseMonthKeys(trackerId);
+      } else {
+        // A tracker can have more than PostgREST's 1000-row cap, and an
+        // unpaginated select would return an arbitrary 1000 rows, silently
+        // dropping months. Page through with a stable order (id tiebreaker).
+        const data = await fetchAllPages((from, to) =>
+          supabase
+            .from('expenses')
+            .select('date')
+            .eq('tracker_id', trackerId)
+            .order('date', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to),
+        );
 
-      // Extract unique yyyy-MM values
-      const monthSet = new Set<string>();
-      data.forEach(e => {
-        if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
-      });
+        // Extract unique yyyy-MM values
+        const monthSet = new Set<string>();
+        data.forEach(e => {
+          if (e.date) monthSet.add(e.date.slice(0, 7)); // 'yyyy-MM'
+        });
 
-      // Sort descending (newest first)
-      const sorted = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+        // Sort descending (newest first)
+        sorted = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+      }
 
       const months: { value: string; label: string }[] = [
         { value: 'all', label: 'All Months' },
@@ -62,6 +76,7 @@ export function useExpenses(trackerId: string, month: string) {
   return useQuery({
     queryKey: ['expenses', trackerId, month],
     queryFn: async () => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readExpenses(trackerId, month);
       // 'all' (and even a single busy month) can exceed PostgREST's 1000-row
       // cap, so page through with a stable order — the id tiebreaker keeps
       // pages from overlapping or skipping rows at the boundaries.
@@ -101,11 +116,17 @@ export function useExpenses(trackerId: string, month: string) {
 export function useCreateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (expense: Omit<Expense, 'id' | 'created_at' | 'updated_at' | 'category'>) => {
-      const { error } = await supabase.from('expenses').insert(expense as any);
-      if (error) throw error;
+      if (isNativeApp) {
+        await (await localOutbox()).createExpenses([expense as unknown as Record<string, unknown>]);
+      } else {
+        const { error } = await supabase.from('expenses').insert(expense as any);
+        if (error) throw error;
+      }
       // Record category learning from manual entries (best-effort, non-blocking)
-      if (expense.source === 'manual' && expense.description && expense.category_id) {
+      // Skipped offline in the Android app: learning is best-effort and needs the server.
+      if (expense.source === 'manual' && expense.description && expense.category_id && navigator.onLine) {
         recordCategoryLearning(expense.description, expense.category_id, (expense as any).merchant_name);
       }
     },
@@ -122,12 +143,17 @@ export function useCreateExpense() {
 export function useUpdateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({ id, ...updates }: Partial<Expense> & { id: string }) => {
       const { category, created_by_profile, ...rest } = updates;
-      const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
-      if (error) throw error;
+      if (isNativeApp) {
+        await (await localOutbox()).updateExpenses([id], rest as Record<string, unknown>);
+      } else {
+        const { error } = await supabase.from('expenses').update(rest as any).eq('id', id);
+        if (error) throw error;
+      }
       // Record category learning when category is changed on an existing transaction
-      if (rest.category_id && rest.description) {
+      if (rest.category_id && rest.description && navigator.onLine) {
         recordCategoryLearning(rest.description, rest.category_id, (rest as any).merchant_name);
       }
     },
@@ -144,7 +170,9 @@ export function useUpdateExpense() {
 export function useDeleteExpense() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (id: string) => {
+      if (isNativeApp) return (await localOutbox()).deleteExpenses([id]);
       const { error } = await supabase.from('expenses').delete().eq('id', id);
       if (error) throw error;
     },
@@ -184,11 +212,22 @@ export function useUndoableDeleteExpense(trackerId: string) {
     const commit = async () => {
       if (undone || committed) return;
       committed = true;
-      const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
-      if (error) {
-        restore();
-        toast.error(error.message);
-        return;
+      if (isNativeApp) {
+        // Local delete + outbox; it reaches the server whenever there's a network.
+        try {
+          await (await localOutbox()).deleteExpenses([expenseId]);
+        } catch (err) {
+          restore();
+          toast.error(err instanceof Error ? err.message : 'Delete failed');
+          return;
+        }
+      } else {
+        const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+        if (error) {
+          restore();
+          toast.error(error.message);
+          return;
+        }
       }
       queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
       queryClient.invalidateQueries({ queryKey: ['expense-months', trackerId] });
@@ -211,6 +250,7 @@ export function useBulkCreateExpenses() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (expenses: any[]) => {
+      assertOnline(); // statement upload is online-only
       const { error } = await supabase.from('expenses').insert(expenses);
       if (error) throw error;
       return expenses.length;
@@ -228,7 +268,12 @@ export function useBulkCreateExpenses() {
 export function useBulkUpdateCategory() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string; category?: Category }) => {
+      if (isNativeApp) {
+        await (await localOutbox()).updateExpenses(ids, { category_id: categoryId });
+        return ids.length;
+      }
       const { error } = await supabase
         .from('expenses')
         .update({ category_id: categoryId } as any)
@@ -264,7 +309,12 @@ export function useBulkUpdateCategory() {
 export function useBulkDeleteExpenses() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async (ids: string[]) => {
+      if (isNativeApp) {
+        await (await localOutbox()).deleteExpenses(ids);
+        return ids.length;
+      }
       const { error } = await supabase
         .from('expenses')
         .delete()
@@ -311,6 +361,8 @@ export function useBulkMoveExpenses() {
       sourceCategories: Category[];
       targetCategories: Category[];
     }) => {
+      // Online-only: it may create categories in the target tracker first.
+      assertOnline();
       const selected = expenses.filter(e => ids.includes(e.id));
 
       // Build map of category IDs that need to be created in target tracker
@@ -442,24 +494,29 @@ export function useSuspectedTransfers(trackerId: string) {
       // legs may straddle a month boundary) — but only the slim column set the
       // pair heuristic + review sheet actually use, paginated past the
       // PostgREST 1000-row cap (id tiebreaker keeps page boundaries stable).
-      const data = await fetchAllPages((from, to) =>
-        supabase
-          .from('expenses')
-          .select('id, tracker_id, amount, date, is_debit, is_transfer, suspected_transfer, rejected_as_transfer, merchant_name, description, bank_name, currency, category_id, category:categories(icon, color)')
-          .eq('tracker_id', trackerId)
-          .eq('is_transfer', false)
-          .order('date', { ascending: false })
-          .order('id', { ascending: false })
-          .range(from, to),
-      );
+      let rows: Expense[];
+      if (isNativeApp) {
+        rows = await (await import('@/lib/local/reads')).readNonTransferExpenses(trackerId);
+      } else {
+        const data = await fetchAllPages((from, to) =>
+          supabase
+            .from('expenses')
+            .select('id, tracker_id, amount, date, is_debit, is_transfer, suspected_transfer, rejected_as_transfer, merchant_name, description, bank_name, currency, category_id, category:categories(icon, color)')
+            .eq('tracker_id', trackerId)
+            .eq('is_transfer', false)
+            .order('date', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to),
+        );
 
-      // Slim rows carry every field the review flow touches; the cast keeps
-      // the public Expense-based API unchanged for the sheet.
-      const rows = (data || []).map(e => ({
-        ...e,
-        amount: Number(e.amount),
-        category: e.category as unknown as Category,
-      })) as unknown as Expense[];
+        // Slim rows carry every field the review flow touches; the cast keeps
+        // the public Expense-based API unchanged for the sheet.
+        rows = (data || []).map(e => ({
+          ...e,
+          amount: Number(e.amount),
+          category: e.category as unknown as Category,
+        })) as unknown as Expense[];
+      }
 
       const pairedIds = findTransferPairs(rows);
       // Keyword-flagged rows still count — but if the user has already rejected
@@ -489,11 +546,22 @@ export function useSuspectedTransfers(trackerId: string) {
 export function useBulkResolveTransfers() {
   const queryClient = useQueryClient();
   return useMutation({
+    meta: LOCAL_WRITE,
     mutationFn: async ({
       trackerId,
       confirmedIds,
       rejectedIds,
     }: { trackerId: string; confirmedIds: string[]; rejectedIds: string[] }) => {
+      if (isNativeApp) {
+        const outbox = await localOutbox();
+        if (confirmedIds.length > 0) {
+          await outbox.updateExpenses(confirmedIds, { is_transfer: true, suspected_transfer: false, rejected_as_transfer: false });
+        }
+        if (rejectedIds.length > 0) {
+          await outbox.updateExpenses(rejectedIds, { suspected_transfer: false, rejected_as_transfer: true });
+        }
+        return { confirmed: confirmedIds.length, rejected: rejectedIds.length, trackerId };
+      }
       if (confirmedIds.length > 0) {
         const { error } = await supabase
           .from('expenses')
@@ -539,6 +607,8 @@ export function useExpenseRealtime(trackerId: string) {
           filter: `tracker_id=eq.${trackerId}`,
         },
         () => {
+          // Android app: the next read must pull this change instead of reusing a recent pull.
+          if (isNativeApp) markStale();
           queryClient.invalidateQueries({ queryKey: ['expenses', trackerId] });
           queryClient.invalidateQueries({ queryKey: ['suspected-transfers', trackerId] });
         }
@@ -553,13 +623,16 @@ export function useExpenseRealtime(trackerId: string) {
 
 export function useDuplicateCheck(trackerId: string) {
   return async (date: string, amount: number, description: string): Promise<Expense | null> => {
-    const { data } = await supabase
-      .from('expenses')
-      .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
-      .eq('tracker_id', trackerId)
-      .eq('date', date)
-      .eq('amount', amount)
-      .limit(5);
+    // Android app: check the local store, which also covers offline entries not pushed yet.
+    const { data } = isNativeApp
+      ? { data: await (await import('@/lib/local/reads')).readDuplicateCandidates(trackerId, date, amount) }
+      : await supabase
+          .from('expenses')
+          .select('*, category:categories(*), created_by_profile:profiles!expenses_created_by_id_fkey(*)')
+          .eq('tracker_id', trackerId)
+          .eq('date', date)
+          .eq('amount', amount)
+          .limit(5);
 
     if (!data?.length) return null;
 

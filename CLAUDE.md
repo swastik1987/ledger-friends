@@ -122,6 +122,9 @@ ledger-friends/
 │   │   ├── phosphorIcons.ts                  # Icon name → Phosphor component map + heuristic picker
 │   │   ├── nativeShell.ts                    # Android only: back button → history.back() (lazy-loaded from main.tsx)
 │   │   ├── nativeGoogleAuth.ts               # Android only: Credential Manager → signInWithIdToken (lazy-loaded from Auth.tsx)
+│   │   ├── platform.ts                       # isNativeApp (Capacitor.isNativePlatform())
+│   │   ├── storedSession.ts                  # Reads/clears the persisted Supabase session (Android offline auth)
+│   │   ├── local/                            # Android only: SQLite store — db.ts, sync.ts (pull engine), reads.ts, state.ts (see ANDROID APP)
 │   │   └── utils.ts
 │   │
 │   ├── types/
@@ -149,7 +152,9 @@ ledger-friends/
 │
 ├── docs/
 │   ├── android-app-plan.md                   # Android app plan (Capacitor + offline-first sync) — Phase 0 results folded in
-│   └── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
+│   ├── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
+│   ├── android-release.md                    # Signing, versioning, Play Console, data safety (Phase 5)
+│   └── play-store/                           # Store icon (512) + feature graphic (1024×500)
 │
 ├── android/                                  # Capacitor Android project (committed; build/ and copied web assets are ignored)
 ├── public/                                   # Static assets
@@ -645,25 +650,93 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike) is complete**; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is on branch **`android/phase-1`**, cut from `main`: the app builds, installs and runs online-only.
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`** (pushed), cut from it: transactions can be added, edited and deleted offline and sync when the network returns. **Phase 4 (sync hardening)** is on **`android/phase-4`** (pushed): rejected changes can be reviewed, fixed, retried or discarded, and delete-vs-edit conflicts are announced. **Phase 5 (release prep)** is on **`android/phase-5`**: release signing, versioning, backup hardening and the Play runbook (`docs/android-release.md`).
 
 What anyone touching the Android work needs to know:
-- **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS is `src/lib/nativeShell.ts` (back button) and `src/lib/nativeGoogleAuth.ts`. Both are dynamically imported behind `Capacitor.isNativePlatform()`, so the web bundle only carries `@capacitor/core`.
+- **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS sits behind `isNativeApp` (`src/lib/platform.ts`) and is dynamically imported, so the web bundle carries only `@capacitor/core` and the small `src/lib/local/state.ts`:
+  - `src/lib/nativeShell.ts`: back button, plus re-reads on app resume.
+  - `src/lib/nativeGoogleAuth.ts`: native Google sign-in.
+  - `src/lib/local/`: the local store.
 - **Build:** `bun run build:android` runs `vite build --mode capacitor` then `cap sync android`; then `cd android && ./gradlew assembleDebug`. The `capacitor` mode disables the PWA service worker, drops `viewport-fit=cover` from `index.html` (see Safe areas), and loads `.env.capacitor`, which holds the Google **Web** OAuth client ID. That ID is public and committed.
-- **Toolchain:** Gradle needs **JDK 21**; Android Studio's bundled JDK 25 fails with `Unsupported class file major version 69`. `android/gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`) makes Gradle pick an installed JDK 21 (it finds `~/.jdks`) whatever `JAVA_HOME` says. Keep **AGP 8.13 / Gradle 8.14.3** from Capacitor's template and **decline Android Studio's AGP 9 upgrade**, which rejects the template's `proguard-android.txt`.
+- **Toolchain:** Gradle needs **JDK 21**; Android Studio's bundled JDK 25 fails with `Unsupported class file major version 69`. `android/gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`) makes the Gradle daemon pick an installed JDK 21 (it finds `~/.jdks`) whatever `JAVA_HOME` says. The `gradlew` launcher itself still needs *some* `java` on `JAVA_HOME`/`PATH`. Keep **AGP 8.13 / Gradle 8.14.3** from Capacitor's template and **decline Android Studio's AGP 9 upgrade**, which rejects the template's `proguard-android.txt`.
+- **Permissions:** `INTERNET` and `ACCESS_NETWORK_STATE`. Without the second, the WebView can't see connectivity: `navigator.onLine` stays `true` and `online`/`offline` events never fire.
 - **Safe areas:** Capacitor 8's built-in SystemBars plugin goes edge-to-edge only when the page declares `viewport-fit=cover`. The native build drops that, so SystemBars pads the WebView between the status bar and the gesture bar, and the cream `windowBackground` (`android/app/src/main/res/values/styles.xml`) shows behind them. The `env(safe-area-inset-*)` uses in web code resolve to 0 there. `SystemBars.style: 'LIGHT'` keeps the bar icons dark. Capacitor logs `Error injecting safe area CSS` at startup: a harmless race in its `--safe-area-inset-*` injection, which we don't use.
 - **Back button:** `nativeShell.ts` maps `@capacitor/app`'s `backButton` to `history.back()` so `useOverlayBack` closes the top overlay. On `/`, or with no history, it minimises the app instead.
 - **Icon/splash:** an adaptive icon split from `public/logo-512.png` into a gradient background layer and a glyph foreground layer (`mipmap-*/ic_launcher_{background,foreground}.png`), plus legacy PNGs. The splash is a cream `windowSplashScreenBackground` with the launcher icon; before Android 12 it's `drawable/splash.xml`.
 - **Native Google sign-in** needs the installing key's SHA-1 on the Android OAuth client (each dev's debug key, the release key, and Play App Signing). See `docs/android-google-signin.md`.
-- **Spike findings still open:**
-  - Phase 2:
-    - An offline cold start with an expired token shows about a minute of "Loading…", then the logged-out UI: needs an offline-authenticated state in `AuthContext`.
-    - `profile` is network-only.
-  - Phase 3: `@capacitor/network` re-fires an unchanged status every ~3 s, so reconnect triggers must be transition-only.
+- **Release (Phase 5):** see `docs/android-release.md`.
+  - **Version:** `versionName` / `versionCode` come from `package.json`'s `version` (code = MAJOR·10000 + MINOR·100 + PATCH); bump it for every Play upload.
+  - **Signing:** release builds are signed with the upload key named in the git-ignored `android/keystore.properties`; Google holds the app signing key (Play App Signing).
+  - **No backups:** `allowBackup="false"` and `xml/data_extraction_rules.xml` keep the local financial data and the session out of backups and device transfers.
+  - **Sign-in plugin:** `capacitor.config.ts` disables its Facebook, Apple and Twitter providers. Without that, the Facebook SDK adds advertising-ID and ad-services permissions.
+  - **Store assets** are in `docs/play-store/`; the privacy policy is the web app's `/privacy` page.
+
+**Local store (Phase 2), `src/lib/local/`:**
+- **Files:**
+  - `db.ts`: the `@capacitor-community/sqlite` connection.
+  - `sync.ts`: the pull engine.
+  - `reads.ts`: the local versions of the hook reads.
+  - `state.ts`: SQLite-free shared state (`markStale`, the query-client binding, `LocalNotSyncedError`, the profile cache).
+  - `outbox.ts`: offline writes (local row + outbox entry in one transaction) and the push engine (Phase 3).
+- **Hooks:** each read hook (`useTrackers`, `useTrackerHomeStats`, `useTracker`, `useTrackerMembers`, `useCategories`, `useBanks`, `useExpenses`, `useExpenseMonths`, `useSuspectedTransfers`) starts its `queryFn` with `if (isNativeApp) return (await import('@/lib/local/reads')).readX(...)`. The web path below it is unchanged. A new read hook needs the same branch, or it won't work offline.
+- **Tables:**
+  - Each table stores the server row as `row_json`, plus explicit columns for whatever SQL filters, sorts or sums on.
+  - Server columns added later flow through without a local schema change.
+  - Store layout changes are **migrations that keep data**: add a step to `MIGRATIONS` in `db.ts` and bump `SCHEMA_VERSION`. Never drop tables, since the outbox may hold unpushed changes. v1→v2 added `expenses.sync_state` / `local_deleted` and the `outbox` table.
+- **Pulls:**
+  - **Meta** (profiles, trackers, members, categories, banks): replaced wholesale. A fingerprint skips the write and the re-render when nothing changed.
+  - **Expenses:** incremental by the server's `updated_at`, with one cursor across all trackers, a 5-minute overlap, and keyset pagination on `(updated_at, id)`. The next page downloads while the current one is written.
+  - **Deletes:** a pull by `updated_at` can't see hard deletes. Each refresh compares every relevant tracker's server row count (a HEAD request) with the local count, and on a mismatch fetches the ids and drops local extras. So **Phase 2 needs no soft-delete migration**.
+- **Reads are stale-while-revalidate:**
+  - A read returns local data at once and starts a pull. If the pull changed anything, every active query re-reads.
+  - A read waits for its pull only when the device has never synced (up to 60 s; offline it throws `LocalNotSyncedError`, so screens show `LoadError`), or after a known change: `markStale()` from the `MutationCache` `onSuccess` hook (server writes only), the realtime handler, Home's invite loop, and after the outbox pushes (up to 4 s).
+  - Any *server* write that bypasses `useMutation` must call `markStale()`, or a just-deleted row can flash back. Local writes (outbox) don't need it.
+- **Triggers:**
+  - Reads.
+  - Reconnect: `onlineManager.subscribe` (transition-only), seeded from `navigator.onLine` at startup.
+  - App resume: `@capacitor/app` `resume`.
+  - Failed pulls retry with backoff (3 s → 60 s) while online.
+  - The native `QueryClient` uses `networkMode: 'always'` so queries run offline, and it doesn't retry `LocalNotSyncedError`.
+- **Auth offline (spike Q3, fixed):** `AuthContext` starts from the session persisted in localStorage (`src/lib/storedSession.ts`) instead of waiting for supabase-js.
+  - A null-session event while the stored session still exists means "refresh couldn't reach the server", so the user stays signed in. supabase-js deletes the stored session on a real sign-out or a rejected refresh token.
+  - The profile is cached in localStorage (`expensesync-profile-cache`).
+  - **Sign-out** on native first tries to push the outbox (up to 10 s). If changes are still unsynced, it asks before discarding them (`window.confirm`). `signOut()` resolves `false` if the user cancels. It then wipes SQLite and the query cache. Offline, supabase-js keeps the session when its sign-out call fails, so the app removes the stored session itself and reloads. The server-side refresh token is then not revoked.
+
+**Offline writes (Phase 3), `src/lib/local/outbox.ts`:**
+- **Which writes:** creating, editing and deleting transactions, including bulk category change, bulk delete, undoable swipe-delete and transfer review. In the app their hooks call `createExpenses` / `updateExpenses` / `deleteExpenses` instead of Supabase. Each writes the local row and an `outbox` entry in one SQLite transaction, then pushes right away if online.
+- **Ids:** new rows get `crypto.randomUUID()` on the device.
+- **Row states:** `expenses.sync_state` is `synced`, `pending_insert`, `pending_update`, `pending_delete` or `failed`.
+  - A pending delete keeps the row as a hidden tombstone (`local_deleted = 1`) until the delete reaches the server.
+  - Reads filter out `local_deleted` and expose `Expense.sync_status` (`'pending' | 'failed'`). `TxnRow` shows a cloud icon (pending) or a warning icon (failed).
+- **Push engine:**
+  - It replays the outbox in `seq` order.
+  - An insert that hits `23505` counts as done (an earlier attempt landed).
+  - Pushes never send `created_at` / `updated_at`.
+  - An update that matches no row (deleted elsewhere, or RLS now hides it) drops the local row and its entries.
+  - A network error stops the drain and keeps the order.
+  - **Permanent errors** (SQLSTATE 22/23/42, PostgREST 1xx/2xx) mark the entry, every later entry for that row, and the row as `failed`, then move on. Nothing blocks the queue.
+- **Triggers:** each `ensureExpenses` pull pushes first. The pull still runs if the push fails, and the push error then schedules the retry. Local writes push immediately, and the reconnect and resume triggers re-run reads, which pull.
+- **Pulls (rule 4):** a pulled row never overwrites a row that isn't `synced` (`ON CONFLICT … WHERE sync_state = 'synced'`). Reconcile ignores `pending_insert` rows and only drops `synced` ones.
+- **Mutation meta:** `meta: { localWrite: true }` on these mutations tells the `MutationCache` not to `markStale()`. The local store already has the change.
+- **Banks offline:** a name that matches the cached registry gets its id. Otherwise the row keeps the typed `bank_name`, and the push resolves or registers `bank_id` (`withBankId`).
+- **Online-only in the app:**
+  - Statement upload: gated at both entry points.
+  - Trackers, members, categories, moving transactions between trackers: `assertOnline()` throws a friendly `OFFLINE_MESSAGE`. Native mutations use `networkMode: 'always'`, so they'd otherwise fail with "Failed to fetch".
+  - **Foreign-currency entries** are blocked offline with a toast, because conversion needs the `convert-currency` edge function. That's the plan §8 decision for v1.
+  - Category learning is skipped offline.
+- **`SyncStatusPill`** (native only, above the bottom nav) shows "Offline · N waiting to sync", "Syncing N changes…" or "N changes couldn't sync". Tapping the failed state shows the server's error.
+- **Rejected changes (Phase 4):**
+  - **Fix by editing:** editing a `failed` row puts its failed entries back in the queue. If its insert never landed, the edit is folded into that insert's payload. Only failed inserts are rewritten, because a pending one may be in flight.
+  - **Deleting** a rejected row that never reached the server just drops it locally. Otherwise its failed entries are abandoned in favour of the delete.
+  - **Review sheet:** tapping the red pill opens `FailedChangesSheet`, which lists each rejected change with the server's error, plus **Retry all** (`retryFailed`) and **Discard all** (`discardFailed`). Discard needs the network: it removes never-synced rows, and re-fetches the server's copy of the others, or removes them if the server no longer has them.
+- **Delete vs edit (Phase 4):** delete always wins, with no soft delete (decided 2026-10-03: deletes stay hard). An offline edit to a row deleted elsewhere is dropped when its push matches no row, and the user sees a toast: "A transaction you edited was deleted on another device…". An offline delete of a row edited elsewhere deletes it. Edits merge field by field, because pushes send only the changed fields, and the last field written wins.
+- **Wipe safety:** `wipe()` bumps an epoch, and pulls pass the epoch they started under to `runInTransaction`, which refuses stale writes. That stops a pull still in flight at sign-out from refilling the store.
+- **Debugging:** the debug build's WebView is inspectable. `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`, then use Chrome DevTools or CDP, e.g. `Capacitor.Plugins.CapacitorSQLite.query({database:'expensesync', statement:'…', values:[], readonly:false})`. In SQL, string literals need **single** quotes: double quotes mean identifiers.
+- **Spike findings still open:** watch lazy localStorage writes (a refresh-token rotation followed by an immediate kill).
 
 ## KNOWN QUIRKS & FUTURE WORK
 
-- **Never let a failed or paused query render an empty state.** With nothing cached, a failed query must show `LoadError` ("Couldn't load … / Try again"), not "No trackers yet" or "No transactions in {month}". Home, Profile, TrackerDetail and the Transactions/Dashboard tabs do this. React Query (default `networkMode: 'online'`) assumes online at startup, so a cold start offline **errors**. Once it has seen an offline event, new queries instead **pause** (`isPaused`), and `isLoading` (`isPending && isFetching`) is `false` while paused. So check `isError || isPaused` with no data, and use `LoadError`'s `offline` mode for the paused case (no retry button; queries resume on reconnect). TrackerDetail redirects with "Tracker not found" only for a genuinely missing tracker (`PGRST116` / `22P02`), not on network failures.
+- **Never let a failed or paused query render an empty state.** With nothing cached, a failed query must show `LoadError` ("Couldn't load … / Try again"), not "No trackers yet" or "No transactions in {month}". Home, Profile, TrackerDetail and the Transactions/Dashboard tabs do this. React Query (default `networkMode: 'online'`) assumes online at startup, so a cold start offline **errors**. Once it has seen an offline event, new queries instead **pause** (`isPaused`), and `isLoading` (`isPending && isFetching`) is `false` while paused. So check `isError || isPaused` with no data, and use `LoadError`'s `offline` mode for the paused case (no retry button; queries resume on reconnect). TrackerDetail redirects with "Tracker not found" only for a genuinely missing tracker (`PGRST116` / `22P02`), not on network failures. In the Android app, queries run with `networkMode: 'always'` against the local store and never pause; the only offline failure is `LocalNotSyncedError` (never synced), which surfaces through the same `isError` path. The local `readTracker` throws `PGRST116` for a tracker that isn't in the synced store.
 
 - **Edge function token cost / free-tier rate limits.** Each chunk re-sends the full ~4 KB system prompt. Chunking is now intentionally tuned for the **Gemini free tier**: large 25k-char chunks + `CONCURRENCY = 1` keep a normal statement to one Gemini call so requests-per-minute stays low. Raising concurrency would improve wall-clock on very long statements but reintroduces the burst that trips the free-tier RPM cap (the original 502/504 symptom). If the project moves to a billed Gemini key, concurrency can be raised again. The binding free-tier limit is **requests-per-minute**, not volume — a single click previously fanned out into ~5–16 Gemini calls (metadata + chunked parse × server-retry × client-retry), which is what caused 100%-error 429s at low daily request counts.
 - **Notifications row** in Settings → Preferences is a placeholder; tapping toasts "Notifications are not yet wired up".

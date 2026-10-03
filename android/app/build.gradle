@@ -1,5 +1,25 @@
 apply plugin: 'com.android.application'
 
+import groovy.json.JsonSlurper
+
+// Release version comes from package.json ("version": "MAJOR.MINOR.PATCH"):
+// versionName is that string, versionCode is MAJOR*10000 + MINOR*100 + PATCH.
+// Play rejects an upload whose versionCode isn't higher than the last one, so
+// bump package.json's version for every release (docs/android-release.md).
+def appVersion = new JsonSlurper().parse(rootProject.file('../package.json')).version
+def (vMajor, vMinor, vPatch) = appVersion.tokenize('.').collect { it.toInteger() }
+
+// Release signing (the Play upload key) is read from android/keystore.properties,
+// which is git-ignored and exists only on the machine that builds releases:
+//   storeFile=C:/path/to/expensesync-upload.jks
+//   storePassword=…
+//   keyAlias=upload
+//   keyPassword=…
+// Without it, release builds come out unsigned and debug builds are unaffected.
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
+
 android {
     namespace = "com.expensesync.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +27,8 @@ android {
         applicationId "com.expensesync.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +36,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropsFile.exists()) signingConfig signingConfigs.release
         }
     }
 }

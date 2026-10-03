@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, UploadSimple } from '@phosphor-icons/react';
+import { toast } from 'sonner';
+import { isNativeApp, OFFLINE_MESSAGE } from '@/lib/platform';
 
 interface Props {
   trackerId: string;
@@ -59,7 +61,11 @@ export default function TrackerTopBar({ trackerId, trackerName, memberCount }: P
 
         <button
           aria-label="Upload statement"
-          onClick={() => navigate(`/tracker/${trackerId}/upload`)}
+          onClick={() => {
+            // Parsing runs on the server (Gemini), so upload is online-only.
+            if (isNativeApp && !navigator.onLine) { toast.error(OFFLINE_MESSAGE); return; }
+            navigate(`/tracker/${trackerId}/upload`);
+          }}
           className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-card border border-line-soft text-ink"
         >
           <UploadSimple size={17} />

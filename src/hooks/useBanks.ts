@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Bank } from '@/types';
 import { findBankMatch } from '@/lib/bankResolver';
 import { guessDomain, bankHashColor } from '@/lib/bankBrand';
+import { isNativeApp } from '@/lib/platform';
 
 /**
  * All registered banks, ordered by canonical name. Small, rarely-changing
@@ -14,6 +15,7 @@ export function useBanks() {
   return useQuery({
     queryKey: ['banks'],
     queryFn: async (): Promise<Bank[]> => {
+      if (isNativeApp) return (await import('@/lib/local/reads')).readBanks();
       const { data, error } = await supabase.from('banks').select('*').order('canonical_name');
       if (error) {
         // Table not migrated yet on this project — degrade to "no registry"

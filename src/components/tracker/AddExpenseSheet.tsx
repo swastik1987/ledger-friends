@@ -15,6 +15,10 @@ import { CURRENCIES, getCurrency, formatAmountShort } from '@/lib/currencies';
 import { detectTransferByKeyword } from '@/lib/transferDetector';
 import { supabase } from '@/integrations/supabase/client';
 import { useBanks, useResolveBankName } from '@/hooks/useBanks';
+import { findBankMatch } from '@/lib/bankResolver';
+import { isNativeApp, OFFLINE_MESSAGE } from '@/lib/platform';
+import { toast } from 'sonner';
+import type { Bank } from '@/types';
 import Nudge from '@/components/Nudge';
 import { useNudge } from '@/hooks/useNudge';
 import CategoryIcon from '@/components/CategoryIcon';
@@ -24,7 +28,15 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-const CREDIT_CATEGORY_NAMES = ['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
+/** Offline bank resolution: a cached registry match, else the typed name without an id. */
+function resolveBankOffline(raw: string, banks: Bank[]): { id?: string; canonical_name: string } | null {
+  const name = raw.trim();
+  if (!name) return null;
+  const match = findBankMatch(name, banks);
+  return match ? { id: match.id, canonical_name: match.canonical_name } : { canonical_name: name };
+}
+
+const CREDIT_CATEGORY_NAMES =['Salary / Income', 'Refund', 'Reimbursement', 'Cashback / Reward', 'Interest Earned', 'Other Income'];
 
 function NudgeDebitCredit() {
   const { show, dismiss } = useNudge('add-debit-credit');
@@ -143,6 +155,12 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
 
     // If expense currency differs from tracker currency, convert
     if (expenseCurrency !== trackerCurrency) {
+      // The rate comes from the convert-currency edge function, so foreign-currency
+      // entries can't be saved offline in the Android app (plan §8: blocked for v1).
+      if (isNativeApp && !navigator.onLine) {
+        toast.error(`Converting ${expenseCurrency} to ${trackerCurrency} needs an internet connection. Save it in ${trackerCurrency}, or try again when you're online.`);
+        return;
+      }
       setIsConverting(true);
       try {
         const { data, error } = await supabase.functions.invoke('convert-currency', {
@@ -159,6 +177,7 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
         };
       } catch (err: any) {
         setIsConverting(false);
+        toast.error(`Couldn't convert ${expenseCurrency} to ${trackerCurrency}. Please try again.`);
         return;
       }
       setIsConverting(false);
@@ -173,7 +192,12 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
     // Resolve the typed bank name to a canonical `banks` row (creating one
     // only if nothing close enough already exists) so manual entries collapse
     // spelling variants the same way statement uploads do.
-    const resolvedBank = await resolveBankName(bankName);
+    // Offline in the Android app a new bank can't be registered yet: match the
+    // cached registry, or keep the typed name and let the outbox resolve
+    // bank_id when it pushes (src/lib/local/outbox.ts).
+    const resolvedBank: { id?: string; canonical_name: string } | null = isNativeApp && !navigator.onLine
+      ? resolveBankOffline(bankName, banks ?? [])
+      : await resolveBankName(bankName);
 
     const expenseData = {
       tracker_id: trackerId,
@@ -226,7 +250,12 @@ export default function AddExpenseSheet({ open, onOpenChange, trackerId, tracker
             {!isEdit && !showManualForm && (
               <div className="space-y-3">
                 <button
-                  onClick={() => { onOpenChange(false); navigate(`/tracker/${trackerId}/upload`); }}
+                  onClick={() => {
+                    // Parsing runs on the server (Gemini), so upload is online-only.
+                    if (isNativeApp && !navigator.onLine) { toast.error(OFFLINE_MESSAGE); return; }
+                    onOpenChange(false);
+                    navigate(`/tracker/${trackerId}/upload`);
+                  }}
                   className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-card hover:bg-muted transition-colors"
                 >
                   <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: nothing is backed up to the cloud or copied to a new device.
+     The app's data directory holds the local SQLite copy of the user's
+     transactions and the Supabase session (refresh token) in WebView storage.
+     Restoring those on another device would carry a live login and financial
+     data along; the app re-downloads everything after sign-in instead.
+     android:allowBackup="false" covers older Android versions. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

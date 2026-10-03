@@ -92,6 +92,8 @@ export interface Expense {
   updated_at: string;
   category?: Category;
   created_by_profile?: Profile;  // joined from profiles table
+  /** Android app only: a local change not yet on the server ('pending'), or one the server rejected ('failed'). */
+  sync_status?: 'pending' | 'failed';
 }
 
 export interface DraftExpense {

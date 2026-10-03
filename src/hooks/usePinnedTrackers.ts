@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { isNativeApp } from '@/lib/platform';
+import { readCachedProfile, writeCachedProfile } from '@/lib/local/state';
 
 // Home page bento pins. Source of truth is profiles.pinned_tracker_ids
 // (synced across devices); localStorage mirrors it so the selection works
@@ -64,6 +66,11 @@ export function usePinnedTrackers() {
       }
       if (userId) {
         writeLocal(userId, next);
+        // The Android app's offline start reads the profile from cache; keep its pins current.
+        if (isNativeApp) {
+          const cached = readCachedProfile(userId);
+          if (cached) writeCachedProfile({ ...cached, pinned_tracker_ids: next });
+        }
         // PGRST204 = column missing (migration not applied) — local copy
         // carries the feature until then, so stay quiet about it.
         void supabase
