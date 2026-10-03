@@ -152,7 +152,6 @@ ledger-friends/
 │   ├── android-app-plan.md                   # Android app plan (Capacitor + offline-first sync) — Phase 0 results folded in
 │   ├── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
 │   ├── android-release.md                    # Signing, versioning, Play Console, data safety (Phase 5)
-│   ├── privacy-policy.md                     # Privacy policy DRAFT (needs review + public hosting)
 │   └── play-store/                           # Store icon (512) + feature graphic (1024×500)
 │
 ├── android/                                  # Capacitor Android project (committed; build/ and copied web assets are ignored)
@@ -665,7 +664,7 @@ What anyone touching the Android work needs to know:
   - **Signing:** release builds are signed with the upload key named in the git-ignored `android/keystore.properties`; Google holds the app signing key (Play App Signing).
   - **No backups:** `allowBackup="false"` and `xml/data_extraction_rules.xml` keep the local financial data and the session out of backups and device transfers.
   - **Sign-in plugin:** `capacitor.config.ts` disables its Facebook, Apple and Twitter providers. Without that, the Facebook SDK adds advertising-ID and ad-services permissions.
-  - **Store assets** are in `docs/play-store/`, and the privacy-policy draft is `docs/privacy-policy.md`.
+  - **Store assets** are in `docs/play-store/`; the privacy policy is the web app's `/privacy` page.
 
 **Local store (Phase 2), `src/lib/local/`:**
 - **Files:**

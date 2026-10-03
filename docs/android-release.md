@@ -75,21 +75,22 @@ One Android client can hold only one SHA-1. Create a second and third Android cl
    - Default language English
    - App, Free
 2. **App content** declarations (Policy → App content):
-   - **Privacy policy:** a public URL is required. Draft text: `docs/privacy-policy.md`. It has to be hosted somewhere public first; see "Open items".
+   - **Privacy policy:** `https://<your site>/privacy`, the `/privacy` page on the web app (branch `feature/privacy-page` until it's merged to `main`).
    - **App access:** reviewers need to sign in. Provide a test account (email/password) with some sample data.
    - **Ads:** none.
    - **Content rating:** fill in the questionnaire (no violence, user-generated content limited to the user's own and shared-tracker data).
    - **Target audience:** 18+.
    - **Data safety:** answers in §5.
    - **Financial features:** budgeting/expense tracking only. No loans, payments, crypto or banking services.
-   - **Account deletion:** apps with sign-up must offer in-app deletion (**You → Delete My Account**) **and** a web link. The web app's profile page offers the same, so use the site URL with sign-in instructions.
+   - **Account deletion:** apps with sign-up must offer in-app deletion (**You → Delete My Account**) **and** a web link: use `https://<your site>/contact?topic=account_deletion`, the contact form with the deletion topic preselected.
 3. **Store listing:**
    - App icon: `docs/play-store/icon-512.png`
    - Feature graphic: `docs/play-store/feature-graphic-1024x500.png`
    - Phone screenshots: at least 2, 1080×2400 is fine. **Use a test account with made-up data, never real transactions.**
    - Short description (max 80 characters), e.g. *"Track shared expenses with family and friends — even offline."*
    - Full description: what the app does (shared trackers, statement upload with AI categorisation, dashboards, offline use).
-   - Category **Finance**, contact email.
+   - Category **Finance**.
+   - **Contact details:** Play requires a contact email on the listing, and it's shown publicly. Since you don't want your own address public, create a dedicated support address for it. You can also add the `/contact` page as the website.
 
 ## 5. Data safety answers
 
@@ -122,6 +123,6 @@ Based on what the app does today. Re-check after any feature change.
 
 ## Open items
 
-- **Privacy policy hosting:** needs a public URL, either a page on the web app (for example a `/privacy` route, which deploys with `main` through Lovable) or a public doc. Draft: `docs/privacy-policy.md`.
+- **Privacy policy and contact pages:** `/privacy` and `/contact` are built on branch `feature/privacy-page`. They go live once it's merged to `main` and migration `20261003120000_add_contact_messages.sql` has been run in Lovable.
 - **Gemini tier:** see §5.
 - **Merge the Android branches to `main`:** `android/phase-2` … `android/phase-5` are stacked. Lovable deploys `main`; the web code paths are unchanged apart from small improvements noted in each phase's commit.
