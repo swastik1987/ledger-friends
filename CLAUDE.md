@@ -150,7 +150,10 @@ ledger-friends/
 │
 ├── docs/
 │   ├── android-app-plan.md                   # Android app plan (Capacitor + offline-first sync) — Phase 0 results folded in
-│   └── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
+│   ├── android-google-signin.md              # Own Google OAuth credentials (web + Android) — setup & troubleshooting
+│   ├── android-release.md                    # Signing, versioning, Play Console, data safety (Phase 5)
+│   ├── privacy-policy.md                     # Privacy policy DRAFT (needs review + public hosting)
+│   └── play-store/                           # Store icon (512) + feature graphic (1024×500)
 │
 ├── android/                                  # Capacitor Android project (committed; build/ and copied web assets are ignored)
 ├── public/                                   # Static assets
@@ -643,7 +646,7 @@ After applying migrations, run `supabase gen types` to refresh `src/integrations
 
 ## ANDROID APP (in progress)
 
-Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`** (pushed), cut from it: transactions can be added, edited and deleted offline and sync when the network returns. **Phase 4 (sync hardening)** is on **`android/phase-4`**: rejected changes can be reviewed, fixed, retried or discarded, and delete-vs-edit conflicts are announced.
+Plan: `docs/android-app-plan.md`. A **Capacitor 8** shell around this same Vite build, made offline-first: a local SQLite store, an outbox for offline writes, and a pull/push sync engine against Supabase. **Phase 0 (spike)** is complete; it lives on branch **`spike/android-offline`**, which is throwaway and **not for merging**. Results: `docs/android-spike-runbook.md` §8 on that branch. **Phase 1 (online-only wrapper)** is merged to `main`. **Phase 2 (local reads)** is on branch **`android/phase-2`** (pushed, not merged). **Phase 3 (offline writes)** is on branch **`android/phase-3`** (pushed), cut from it: transactions can be added, edited and deleted offline and sync when the network returns. **Phase 4 (sync hardening)** is on **`android/phase-4`** (pushed): rejected changes can be reviewed, fixed, retried or discarded, and delete-vs-edit conflicts are announced. **Phase 5 (release prep)** is on **`android/phase-5`**: release signing, versioning, backup hardening and the Play runbook (`docs/android-release.md`).
 
 What anyone touching the Android work needs to know:
 - **Layout:** `capacitor.config.ts` (appId **`com.expensesync.app`**, final) and the committed native project in `android/`. Native-only JS sits behind `isNativeApp` (`src/lib/platform.ts`) and is dynamically imported, so the web bundle carries only `@capacitor/core` and the small `src/lib/local/state.ts`:
@@ -657,6 +660,12 @@ What anyone touching the Android work needs to know:
 - **Back button:** `nativeShell.ts` maps `@capacitor/app`'s `backButton` to `history.back()` so `useOverlayBack` closes the top overlay. On `/`, or with no history, it minimises the app instead.
 - **Icon/splash:** an adaptive icon split from `public/logo-512.png` into a gradient background layer and a glyph foreground layer (`mipmap-*/ic_launcher_{background,foreground}.png`), plus legacy PNGs. The splash is a cream `windowSplashScreenBackground` with the launcher icon; before Android 12 it's `drawable/splash.xml`.
 - **Native Google sign-in** needs the installing key's SHA-1 on the Android OAuth client (each dev's debug key, the release key, and Play App Signing). See `docs/android-google-signin.md`.
+- **Release (Phase 5):** see `docs/android-release.md`.
+  - **Version:** `versionName` / `versionCode` come from `package.json`'s `version` (code = MAJOR·10000 + MINOR·100 + PATCH); bump it for every Play upload.
+  - **Signing:** release builds are signed with the upload key named in the git-ignored `android/keystore.properties`; Google holds the app signing key (Play App Signing).
+  - **No backups:** `allowBackup="false"` and `xml/data_extraction_rules.xml` keep the local financial data and the session out of backups and device transfers.
+  - **Sign-in plugin:** `capacitor.config.ts` disables its Facebook, Apple and Twitter providers. Without that, the Facebook SDK adds advertising-ID and ad-services permissions.
+  - **Store assets** are in `docs/play-store/`, and the privacy-policy draft is `docs/privacy-policy.md`.
 
 **Local store (Phase 2), `src/lib/local/`:**
 - **Files:**
@@ -716,7 +725,7 @@ What anyone touching the Android work needs to know:
   - **Fix by editing:** editing a `failed` row puts its failed entries back in the queue. If its insert never landed, the edit is folded into that insert's payload. Only failed inserts are rewritten, because a pending one may be in flight.
   - **Deleting** a rejected row that never reached the server just drops it locally. Otherwise its failed entries are abandoned in favour of the delete.
   - **Review sheet:** tapping the red pill opens `FailedChangesSheet`, which lists each rejected change with the server's error, plus **Retry all** (`retryFailed`) and **Discard all** (`discardFailed`). Discard needs the network: it removes never-synced rows, and re-fetches the server's copy of the others, or removes them if the server no longer has them.
-- **Delete vs edit (Phase 4):** delete always wins, with no soft delete. An offline edit to a row deleted elsewhere is dropped when its push matches no row, and the user sees a toast: "A transaction you edited was deleted on another device…". An offline delete of a row edited elsewhere deletes it. Edits merge field by field, because pushes send only the changed fields, and the last field written wins.
+- **Delete vs edit (Phase 4):** delete always wins, with no soft delete (decided 2026-10-03: deletes stay hard). An offline edit to a row deleted elsewhere is dropped when its push matches no row, and the user sees a toast: "A transaction you edited was deleted on another device…". An offline delete of a row edited elsewhere deletes it. Edits merge field by field, because pushes send only the changed fields, and the last field written wins.
 - **Wipe safety:** `wipe()` bumps an epoch, and pulls pass the epoch they started under to `runInTransaction`, which refuses stale writes. That stops a pull still in flight at sign-out from refilling the store.
 - **Debugging:** the debug build's WebView is inspectable. `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>`, then use Chrome DevTools or CDP, e.g. `Capacitor.Plugins.CapacitorSQLite.query({database:'expensesync', statement:'…', values:[], readonly:false})`. In SQL, string literals need **single** quotes: double quotes mean identifiers.
 - **Spike findings still open:** watch lazy localStorage writes (a refresh-token rotation followed by an immediate kill).
